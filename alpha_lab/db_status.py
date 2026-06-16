@@ -42,6 +42,7 @@ def collect_status(db_path_arg: str | None = None) -> dict[str, Any]:
         "db_exists": path.exists(),
         "ideas_count": None,
         "trades_count": None,
+        "catalyst_events_count": None,
         "scheduler_heartbeat_at": None,
         "scheduler_heartbeat_mode": None,
         "scheduler_heartbeat_db_path": None,
@@ -63,6 +64,7 @@ def collect_status(db_path_arg: str | None = None) -> dict[str, Any]:
     try:
         status["ideas_count"] = _scalar(conn, "SELECT COUNT(*) FROM alpha_ideas")
         status["trades_count"] = _scalar(conn, "SELECT COUNT(*) FROM trades")
+        status["catalyst_events_count"] = _scalar(conn, "SELECT COUNT(*) FROM catalyst_events")
         run = None
         try:
             run = conn.execute(
@@ -107,6 +109,7 @@ def _format_human(status: dict[str, Any]) -> str:
             f"  DB last modified      : {status['db_modified']}",
             f"  ideas (count)         : {status['ideas_count']}",
             f"  trades (count)        : {status['trades_count']}",
+            f"  catalyst_events (count): {status['catalyst_events_count']}",
             f"  scheduler heartbeat   : {status['scheduler_heartbeat_at'] or 'never (scheduler not running?)'}",
             f"  heartbeat mode        : {status['scheduler_heartbeat_mode'] or '-'}",
             f"  latest scanner run    : {status['last_scanner_run_at'] or '-'}"

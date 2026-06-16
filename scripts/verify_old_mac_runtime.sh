@@ -148,8 +148,15 @@ if "$PY" -m alpha_lab.db_status --json >/tmp/alphalab_db_status.json 2>/tmp/alph
   DB_EXISTS="$("$PY" -c "import json;print(json.load(open('/tmp/alphalab_db_status.json')).get('db_exists'))" 2>/dev/null)"
   IDEAS_COUNT="$("$PY" -c "import json;print(json.load(open('/tmp/alphalab_db_status.json')).get('ideas_count'))" 2>/dev/null)"
   TRADES_COUNT="$("$PY" -c "import json;print(json.load(open('/tmp/alphalab_db_status.json')).get('trades_count'))" 2>/dev/null)"
+  CATALYST_EVENTS_COUNT="$("$PY" -c "import json;print(json.load(open('/tmp/alphalab_db_status.json')).get('catalyst_events_count'))" 2>/dev/null)"
+  HEARTBEAT_AT="$("$PY" -c "import json;print(json.load(open('/tmp/alphalab_db_status.json')).get('scheduler_heartbeat_at'))" 2>/dev/null)"
   if [ "$DB_EXISTS" = "True" ]; then
-    ok "db_status confirms DB exists (ideas=${IDEAS_COUNT}, trades=${TRADES_COUNT})"
+    ok "db_status confirms DB exists (ideas=${IDEAS_COUNT}, trades=${TRADES_COUNT}, catalyst_events=${CATALYST_EVENTS_COUNT})"
+    if [ -n "$HEARTBEAT_AT" ] && [ "$HEARTBEAT_AT" != "None" ]; then
+      ok "scheduler heartbeat at ${HEARTBEAT_AT}"
+    else
+      warn "no scheduler heartbeat recorded yet (scheduler not started?)"
+    fi
   else
     err "db_status reports DB missing"
   fi

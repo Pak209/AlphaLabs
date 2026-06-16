@@ -325,7 +325,19 @@ Bonjour names, so you don't have to look them up by hand.
 ## Safety Rules
 
 - GitHub contains source code only.
-- The old Mac owns live `.env`, DB, logs, and LaunchAgents.
+- The old Mac owns the live `.env`, DB, logs, and LaunchAgents once deployed; its
+  `alpha_lab/data/alpha_lab.sqlite3` is the operational history of record.
 - Pull code with `git pull --ff-only`.
 - Never commit `.env`, DB files, logs, reports, broker/API secrets, or runtime data.
 - Keep scheduler mode `dry_run` unless you intentionally enable paper mode.
+- **Never network-mount the SQLite DB for live writes.** Do not point
+  `ALPHA_LAB_DB_PATH` at an iCloud/SMB/NFS share — concurrent or networked writes
+  corrupt the file.
+- **Only one machine writes the live DB.** The old Mac is the sole writer; never
+  have both Macs (or two processes on different hosts) write the same file. The
+  dev Mac and phone reach the old Mac's data through its API over Tailscale/LAN,
+  never by copying `alpha_lab.sqlite3` around.
+- **The dev Mac can still develop locally** against its own git-ignored DB at the
+  relative default (`alpha_lab/data/alpha_lab.sqlite3`). That local file is
+  scratch state for development only — it is never deployed, committed, or treated
+  as production history.

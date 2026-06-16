@@ -147,6 +147,9 @@ class AlphaLabService:
         with connect(self.db_path) as conn:
             status["ideas_count"] = int(conn.execute("SELECT COUNT(*) FROM alpha_ideas").fetchone()[0])
             status["trades_count"] = int(conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0])
+            status["catalyst_events_count"] = int(
+                conn.execute("SELECT COUNT(*) FROM catalyst_events").fetchone()[0]
+            )
             last_run = conn.execute(
                 "SELECT source, created_at FROM scanner_runs ORDER BY datetime(created_at) DESC, id DESC LIMIT 1"
             ).fetchone()
