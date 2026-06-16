@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Alpha Lab</title>
+
+    <!-- PWA: installable home-screen app -->
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <meta name="theme-color" content="#0B1220" />
+    <link rel="icon" href="/static/icon-192.png" />
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AlphaLab" />
+
+    <link rel="stylesheet" href="/static/styles.css?v=43" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="side-nav" class="side-nav">
+        <div class="nav-brand">
+          <p class="eyebrow">Alpha Lab</p>
+          <strong>Paper Research</strong>
+        </div>
+        <nav id="nav-links" class="nav-links" aria-label="AlphaLab pages"></nav>
+        <div class="nav-note">DRY-RUN DEFAULT<br />ALPACA PAPER ONLY</div>
+      </aside>
+
+      <div id="nav-backdrop" class="nav-backdrop"></div>
+
+      <main class="shell">
+        <header class="topbar app-topbar">
+          <button id="menu-toggle" class="icon-button" aria-label="Open menu" aria-expanded="false">☰</button>
+          <div>
+            <p id="page-eyebrow" class="eyebrow">Paper Research Command Center</p>
+            <h1 id="page-title">Overview</h1>
+            <p id="page-subtitle" class="page-subtitle">Snapshot of AlphaLab paper research, scan intake, and current market context.</p>
+          </div>
+          <div class="topbar-actions">
+            <button id="refresh" class="secondary">Refresh</button>
+            <div class="mode">PAPER ONLY</div>
+          </div>
+        </header>
+
+        <section class="page active" data-page="overview">
+          <div class="command-grid command-grid-hero">
+            <section class="panel hero-iq-panel" id="overview-iq"></section>
+            <section class="panel regime-panel" id="overview-regime"></section>
+          </div>
+
+          <div class="command-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Top Opportunities</h2>
+                <button id="overview-view-opps" class="link-btn">View All</button>
+              </div>
+              <div id="overview-opportunities" class="opps-list"></div>
+              <div class="muted command-note">Ranked by confidence · paper-research candidates only</div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Source Leaderboard</h2>
+                <button id="overview-view-sources" class="link-btn">View All</button>
+              </div>
+              <div id="overview-sources" class="leaderboard"></div>
+              <div class="muted command-note">Backward-looking realized paper-trade performance</div>
+            </section>
+          </div>
+
+          <section class="panel status-bar-panel">
+            <div class="panel-head"><h2>System Status</h2></div>
+            <div id="overview-status" class="status-bar"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="liquidity">
+          <section class="panel liquidity-panel">
+            <div>
+              <h2>Liquidity Flows</h2>
+              <p class="muted">Volume and dollar-volume proxies across crypto, AI stocks, semiconductors, and risk ETFs. Source-backed, not full order-flow.</p>
+            </div>
+            <div id="liquidity-flows" class="liquidity-flows"></div>
+          </section>
+
+          <section class="panel bitcoin-panel">
+            <div>
+              <h2>After-Hours BTC</h2>
+              <p class="muted">Crypto analysis and paper-trade ideas can run 24/7 while equities/options stay market-hours restricted.</p>
+            </div>
+            <div id="after-hours-btc" class="bitcoin-insight"></div>
+          </section>
+
+          <section class="panel bitcoin-panel">
+            <div>
+              <h2>Bitcoin Insight</h2>
+              <p class="muted">Live BTC/USD market read. Shows source and timestamp; no made-up directional claims.</p>
+            </div>
+            <div id="bitcoin-insight" class="bitcoin-insight"></div>
+          </section>
+
+          <section class="panel oil-panel">
+            <div>
+              <h2>Oil / Energy Insight</h2>
+              <p class="muted">Oil proxy read using USO, XLE, XOM, CVX, OXY, and SLB. This is not direct crude futures or inventory data yet.</p>
+            </div>
+            <div id="oil-insight" class="oil-insight"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="futures">
+          <section class="panel futures-pulse-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Overnight Futures Pulse</h2>
+                <p class="muted">Detect overnight futures movement from macro/geopolitical catalysts and convert it into a premarket regime read and suggested watchlist. Read-only research &mdash; futures data never places a trade.</p>
+              </div>
+              <button id="refresh-futures-detail" class="secondary">Refresh Pulse</button>
+            </div>
+            <div id="futures-pulse-detail" class="futures-pulse"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="trending">
+          <section class="panel trending-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Trending Stock Liquidity</h2>
+                <p class="muted">Where attention and dollar volume are showing up across AI stocks, semis, megacap risk, and ETFs.</p>
+              </div>
+              <div class="automation-actions">
+                <button id="test-trending-dry" class="secondary">Dry-Run Trending Strategies</button>
+                <button id="test-trending-paper" class="paper">Paper-Test Trending Strategies</button>
+              </div>
+            </div>
+            <div id="trending-stocks" class="trending-stocks"></div>
+            <div id="trending-source" class="muted"></div>
+          </section>
+
+          <section class="panel token-panel">
+            <div>
+              <h2>Trending Tokens</h2>
+              <p class="muted">Crypto-major liquidity snapshot from reported 24h spot volume and price change.</p>
+            </div>
+            <div id="trending-tokens" class="token-list"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="catalysts">
+          <section class="panel catalyst-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Catalyst Radar</h2>
+                <p class="muted">Fast news, filing, and press-release style alerts. AlphaLab scores the catalyst, keeps the source visible, then sends only qualified candidates into dry-run/paper rules.</p>
+              </div>
+              <div class="automation-actions">
+                <button id="refresh-catalysts" class="secondary">Refresh Live Sources</button>
+                <button id="test-catalysts-dry" class="secondary">Dry-Run Catalyst Candidates</button>
+              </div>
+            </div>
+            <div id="catalyst-providers" class="provider-grid"></div>
+            <div id="catalyst-intelligence" class="catalyst-intelligence"></div>
+            <div id="catalyst-radar" class="catalyst-grid"></div>
+            <div id="catalyst-source" class="muted"></div>
+          </section>
+
+          <form id="catalyst-form" class="panel catalyst-form">
+            <h2>Add News Catalyst</h2>
+            <div class="form-row">
+              <input name="ticker" placeholder="Ticker" required />
+              <select name="security_type"><option>stock</option><option>crypto</option><option>etf</option></select>
+              <input name="source" placeholder="Source, e.g. SEC, PR feed, manual" required />
+            </div>
+            <input name="headline" placeholder="Headline" required />
+            <textarea name="summary" placeholder="Short source-backed summary"></textarea>
+            <input name="source_url" placeholder="Source URL" />
+            <button type="submit">Score Catalyst</button>
+          </form>
+        </section>
+
+        <section class="page" data-page="business">
+          <section class="panel business-page-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Business / Fundamentals</h2>
+                <p class="muted">Plain-English business models, fundamental drivers, key metrics to watch, and risk notes. Curated qualitative profiles, not live financial statements.</p>
+              </div>
+              <input id="business-filter" class="business-filter" placeholder="Filter ticker, business, driver" />
+            </div>
+            <div id="business-profiles" class="business-grid"></div>
+            <div id="business-source" class="muted"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="strategies">
+          <section class="panel strategy-lab-panel">
+            <div>
+              <h2>Strategy Lab</h2>
+              <p class="muted">Possible dry-run strategies from current market conditions and indicators. These are hypotheses, not recommendations.</p>
+            </div>
+            <div id="strategy-candidates" class="strategy-candidates"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Strategy Win Rates</h2>
+            <div id="strategies" class="stat-list"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="paper">
+          <section class="grid paper-grid">
+            <div class="panel">
+              <h2>Paper / Dry-Run Log</h2>
+              <div id="trades" class="stat-list"></div>
+            </div>
+            <div class="panel">
+              <h2>Rejected / Blocked Moves</h2>
+              <div id="rejections" class="stat-list"></div>
+            </div>
+          </section>
+          <section class="panel audit-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Execution Audit</h2>
+                <p class="muted">Every attempted execution, including risk blocks and broker errors. Paper only.</p>
+              </div>
+            </div>
+            <div id="execution-audit" class="audit-list"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="performance">
+          <section class="panel report-card-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Alpha Report Card</h2>
+                <p class="muted">Grades signal quality, not just P/L. Paper-trading research only — scores accumulate as signals resolve.</p>
+              </div>
+              <div id="report-grade" class="report-grade"></div>
+            </div>
+            <div id="report-card" class="report-card-stats"></div>
+          </section>
+
+          <section class="panel">
+            <div>
+              <h2>AlphaLabs Intelligence Layer</h2>
+              <p class="muted">Composite IQ from signal accuracy, consistency, source reliability, and regime awareness.</p>
+            </div>
+            <div id="alpha-iq" class="alpha-iq"></div>
+          </section>
+
+          <section class="panel">
+            <div>
+              <h2>Source Performance Leaderboard</h2>
+              <p class="muted">Which signal sources actually produce alpha.</p>
+            </div>
+            <div id="source-leaderboard" class="leaderboard"></div>
+          </section>
+
+          <section class="panel">
+            <div>
+              <h2>Market Regime Dashboard</h2>
+              <p class="muted">How signals perform across the market posture in force when they fired.</p>
+            </div>
+            <div id="regime-dashboard" class="leaderboard"></div>
+          </section>
+
+          <section class="panel performance-panel">
+            <div>
+              <h2>Recent Signals</h2>
+              <p class="muted">Latest graded signals with P/L tied back to the idea and LLM explanation.</p>
+            </div>
+            <div id="recent-signals" class="performance-list"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="briefings">
+          <section class="panel daily-brief-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Daily Market Brief</h2>
+                <p class="muted">Regime, liquidity, catalysts, and strict signals[] for the paper-trading automation.</p>
+              </div>
+              <div class="automation-actions">
+                <button id="refresh-brief" class="secondary">Refresh Brief</button>
+                <button id="feed-brief">Feed Dry-Run Agent</button>
+              </div>
+            </div>
+            <div id="daily-brief" class="daily-brief"></div>
+          </section>
+
+          <section class="panel briefing-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Market Briefings</h2>
+                <p class="muted">Saved daily research context used by the analyst and strategy engine.</p>
+              </div>
+              <button id="generate-briefing">Generate New Briefing</button>
+            </div>
+            <div id="saved-briefings" class="briefing-list"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="approvals">
+          <section class="panel approval-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Approval Dashboard</h2>
+                <p class="muted">Review LLM-assisted trade ideas before they can reach Alpaca paper execution. Approval does not place an order.</p>
+              </div>
+              <button id="refresh-approvals" class="secondary">Refresh Queue</button>
+            </div>
+            <div id="approval-queue" class="approval-queue"></div>
+          </section>
+        </section>
+
+        <section class="page" data-page="inbox">
+          <section class="panel automation-panel">
+            <div>
+              <h2>Automation Inbox</h2>
+              <p class="muted">Market-scan automations land here first. Dry-run testing evaluates strategy candidates without placing Alpaca orders.</p>
+            </div>
+            <div class="automation-actions">
+              <button id="test-new">Dry-Run Test New Ideas</button>
+            </div>
+            <div id="inbox-snapshot" class="snapshot"></div>
+          </section>
+          <section class="grid" id="inbox-section">
+            <div class="panel span-2">
+              <div class="panel-head">
+                <h2>Market Scanner Inbox</h2>
+              </div>
+              <div class="filters">
+                <input id="filter" placeholder="Filter ticker, strategy, source" />
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ticker</th><th>Bias</th><th>Conf.</th><th>Strategies</th><th>Status</th><th>Thesis</th><th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ideas"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <form id="idea-form" class="panel">
+              <h2>Manual Alpha Idea</h2>
+              <input name="ticker" placeholder="Ticker" required />
+              <select name="bias"><option>bullish</option><option>bearish</option><option>neutral</option></select>
+              <input name="confidence" type="number" min="0" max="1" step="0.01" value="0.78" />
+              <select name="timeframe"><option>intraday</option><option>swing</option></select>
+              <input name="strategies" placeholder="Strategies, comma separated" />
+              <input name="theme" placeholder="Theme / sector" />
+              <textarea name="thesis" placeholder="Thesis" required></textarea>
+              <textarea name="catalyst" placeholder="Catalyst"></textarea>
+              <button type="submit">Add Idea</button>
+            </form>
+          </section>
+        </section>
+        <section class="page" data-page="chat">
+          <section class="panel chat-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Analyst Chat</h2>
+                <p class="muted">Discuss market events, your catalysts, scored ideas, and possible strategies. Advisory only &mdash; the assistant cannot place or approve trades.</p>
+              </div>
+            </div>
+            <div id="chat-log" class="chat-log"></div>
+            <form id="chat-form" class="chat-form">
+              <textarea id="chat-input" rows="2" placeholder="Ask about today's market events, a ticker, or a strategy idea…"></textarea>
+              <button type="submit" id="chat-send">Send</button>
+            </form>
+          </section>
+        </section>
+        <section class="page" data-page="settings">
+          <section class="panel settings-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Settings</h2>
+                <p class="muted">Configure this device for remote actions (approvals, paper trades, chat) over Tailscale.</p>
+              </div>
+            </div>
+            <div class="settings-block">
+              <h3>API Action Token</h3>
+              <p class="muted">If the server has <code>ALPHALAB_API_TOKEN</code> set, paste the same value here. It is stored only in this browser and sent as a bearer token on actions. Reads work without it.</p>
+              <div id="token-status" class="token-status"></div>
+              <form id="token-form" class="token-form">
+                <input id="token-input" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste API token" />
+                <div class="token-actions">
+                  <button type="submit" id="token-save">Save token</button>
+                  <button type="button" id="token-test" class="secondary">Test</button>
+                  <button type="button" id="token-clear" class="danger">Clear</button>
+                </div>
+              </form>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script src="/static/app.js?v=43"></script>
+    <script>
+      // Register the service worker (served from root so its scope is "/").
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch((err) => {
+            console.warn("AlphaLab SW registration failed:", err);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

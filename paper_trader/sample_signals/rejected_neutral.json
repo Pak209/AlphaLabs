@@ -1,0 +1,10 @@
+{
+  "ticker": "NVDA",
+  "bias": "neutral",
+  "confidence": 0.91,
+  "timeframe": "swing",
+  "reason": "Strong headline flow but no directional setup.",
+  "source": "market_scan_bot",
+  "timestamp": "2026-06-04T13:00:00Z"
+}
+

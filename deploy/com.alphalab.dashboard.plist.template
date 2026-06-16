@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  AlphaLab dashboard API — always-on KeepAlive agent.
+
+  Runs alpha_lab.main via scripts/run_dashboard.sh, which sources ~/AlphaLab/.env
+  and binds uvicorn to 127.0.0.1:8787 ONLY (loopback). It is never exposed off
+  the machine; reach it over SSH/Tailscale, not a public bind.
+
+  Render __HOME__ and install (on the old Mac):
+    sed "s|__HOME__|$HOME|g" deploy/com.alphalab.dashboard.plist.template \
+      > ~/Library/LaunchAgents/com.alphalab.dashboard.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.alphalab.dashboard.plist
+
+  After editing .env, pick up the change with:
+    launchctl kickstart -k gui/$(id -u)/com.alphalab.dashboard
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.alphalab.dashboard</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__HOME__/AlphaLab/scripts/run_dashboard.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/AlphaLab</string>
+
+    <!-- Start on login and keep alive if it crashes. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- Wait 10s before restarting after an exit, to avoid a crash-loop. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/AlphaLab/logs/dashboard.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/AlphaLab/logs/dashboard.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Standard</string>
+</dict>
+</plist>

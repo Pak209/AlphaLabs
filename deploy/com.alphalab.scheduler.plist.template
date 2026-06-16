@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  AlphaLab automation scheduler — always-on KeepAlive agent.
+
+  Runs alpha_lab.scheduler, which polls catalysts + builds/imports the daily
+  brief on a market-hours cron. Behavior (dry-run vs paper) is set by
+  ALPHALAB_SCHEDULER_MODE in ~/AlphaLab/.env, sourced by run_scheduler.sh.
+
+  Render __HOME__ and install:
+    sed "s|__HOME__|$HOME|g" deploy/com.alphalab.scheduler.plist.template \
+      > ~/Library/LaunchAgents/com.alphalab.scheduler.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.alphalab.scheduler.plist
+
+  After editing .env (e.g. flipping to paper mode), pick up the change with:
+    launchctl kickstart -k gui/$(id -u)/com.alphalab.scheduler
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.alphalab.scheduler</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__HOME__/AlphaLab/scripts/run_scheduler.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/AlphaLab</string>
+
+    <!-- Start on login and keep alive; the scheduler is a long-lived process
+         that internally fires cron jobs, so it should always be up. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- Wait 10s before restarting after an exit, to avoid a crash-loop. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/AlphaLab/logs/launchd_scheduler.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/AlphaLab/logs/launchd_scheduler.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Standard</string>
+</dict>
+</plist>

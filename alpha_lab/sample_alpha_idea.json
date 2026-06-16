@@ -1,0 +1,31 @@
+{
+  "signals": [
+    {
+      "ticker": "NVDA",
+      "sector": "Semiconductors",
+      "theme": "AI bottleneck",
+      "strategy_tags": ["AI bottleneck", "breakout", "unusual volume"],
+      "bias": "bullish",
+      "confidence": 0.82,
+      "timeframe": "intraday",
+      "thesis": "NVDA is leading AI infrastructure momentum with relative strength and above-normal volume.",
+      "catalyst": "Premarket strength in AI hardware leaders.",
+      "source": "market_scan_bot",
+      "timestamp": "2026-06-04T13:00:00Z"
+    },
+    {
+      "ticker": "MSFT",
+      "sector": "Software",
+      "theme": "AI platform",
+      "strategy_tags": ["AI bottleneck", "sector rotation"],
+      "bias": "neutral",
+      "confidence": 0.71,
+      "timeframe": "swing",
+      "thesis": "AI platform narrative remains strong, but the setup is not directional yet.",
+      "catalyst": "Cloud AI sentiment.",
+      "source": "market_scan_bot",
+      "timestamp": "2026-06-04T13:00:00Z"
+    }
+  ]
+}
+

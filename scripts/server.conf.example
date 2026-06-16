@@ -1,0 +1,19 @@
+# AlphaLab server connection config (used by deploy_to_old_mac.sh + check_old_mac.sh).
+#
+# SETUP: copy this file to "server.conf" in the same folder and edit the values.
+#   cp scripts/server.conf.example scripts/server.conf
+#
+# server.conf holds only a hostname/username (no secrets) but is git-ignored and
+# excluded from deploys so the dev and server machines can differ freely.
+
+# The login user on the OLD MacBook (the always-on runner).
+SERVER_USER="danielpak"
+
+# The OLD MacBook's address on your home network.
+# Easiest: its Bonjour name, e.g. "old-macbook.local" (System Settings > General >
+# About > Name, lowercased, with .local). A reserved LAN IP also works.
+SERVER_HOST="old-macbook.local"
+
+# Where AlphaLab lives on the OLD MacBook, relative to that machine's home dir.
+# Leave as "AlphaLab" unless you deliberately put it elsewhere.
+REMOTE_PATH="AlphaLab"

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for the AlphaLab scheduled paper-options runner.
+  setup_old_mac.sh renders this into ~/Library/LaunchAgents/ on the old MacBook,
+  substituting __HOME__ with that machine's real home directory. Editing the
+  installed copy by hand is discouraged: change THIS template and re-run setup.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.alphalab.options-validation</string>
+
+    <!-- zsh wrapper sources .env and runs the validator under the project venv. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__HOME__/AlphaLab/scripts/run_options_validation.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/AlphaLab</string>
+
+    <!-- 06:32 Pacific on weekdays = ~09:32 ET, just after the US market open.
+         launchd StartCalendarInterval uses system LOCAL time, which tracks DST
+         the same way ET does, so this stays aligned to the open year-round.
+         The old MacBook MUST be set to America/Los_Angeles for this to line up. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>32</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>32</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>32</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>32</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>32</integer></dict>
+    </array>
+
+    <!-- Do not fire on load; only on the schedule above. If the machine is asleep
+         at 06:32, launchd runs the missed job once on the next wake. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- launchd-level capture (start failures, before the wrapper's own tee log). -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/AlphaLab/logs/launchd_options_validation.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/AlphaLab/logs/launchd_options_validation.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Standard</string>
+</dict>
+</plist>

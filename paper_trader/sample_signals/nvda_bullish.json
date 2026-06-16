@@ -1,0 +1,10 @@
+{
+  "ticker": "NVDA",
+  "bias": "bullish",
+  "confidence": 0.82,
+  "timeframe": "intraday",
+  "reason": "AI semiconductor leadership showing relative strength with elevated volume.",
+  "source": "market_scan_bot",
+  "timestamp": "2026-06-04T13:00:00Z"
+}
+
