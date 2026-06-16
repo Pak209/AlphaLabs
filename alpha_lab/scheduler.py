@@ -46,6 +46,13 @@ def build_scheduler(service: AlphaLabService | None = None) -> BlockingScheduler
     service = service or AlphaLabService()
     scheduler = BlockingScheduler(timezone="America/Los_Angeles")
 
+    # --- Liveness heartbeat: prove the writer is alive AND on the shared DB --- #
+    # Every 5 minutes the scheduler stamps app_config.scheduler_heartbeat (with its
+    # resolved db_path) on the SAME database it writes ideas/trades to. The status
+    # command and dashboard read this to confirm the always-on writer is healthy
+    # and pointed at the same DB the API reads. Read/write of one row; harmless.
+    scheduler.add_job(lambda: service.record_scheduler_heartbeat("scheduler"), "cron", minute="*/5", id="scheduler_heartbeat")
+
     # --- Always-safe jobs: state sync, inbox, read-only briefings ----------- #
     scheduler.add_job(lambda: service.sync_alpaca(dry_run=True), "cron", day_of_week="mon-fri", hour="6-13", minute="*/30")
     scheduler.add_job(_process_inbox, "cron", day_of_week="mon-fri", hour="5-14", minute="*/5")
@@ -95,8 +102,13 @@ def start() -> None:
     load_dotenv()
     mode = automation_mode()
     banner = "PAPER ORDERS ENABLED" if mode == "paper" else "dry-run only — NO orders placed"
-    print(f"[alphalab-scheduler] starting in mode={mode} ({banner})", flush=True)
-    build_scheduler().start()
+    service = AlphaLabService()
+    # Stamp an immediate heartbeat at boot so the status command shows liveness
+    # without waiting for the first 5-minute cron tick, and log the resolved DB
+    # path so the launchd logs make the active database unambiguous.
+    beat = service.record_scheduler_heartbeat("scheduler-start")
+    print(f"[alphalab-scheduler] starting in mode={mode} ({banner}) db={beat['db_path']}", flush=True)
+    build_scheduler(service=service).start()
 
 
 def _process_inbox() -> None:

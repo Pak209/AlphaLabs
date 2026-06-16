@@ -32,7 +32,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from alpha_lab.database import connect
+from alpha_lab.database import connect, resolve_db_path
 from alpha_lab.options_selector import OptionSelectionError, select_atm_contract
 from alpha_lab.service import AlphaLabService
 from paper_trader.config import load_config
@@ -78,7 +78,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate the paper options lifecycle end-to-end.")
     parser.add_argument("--bias", choices=["bullish", "bearish"], default="bullish")
     parser.add_argument("--candidates", nargs="*", default=DEFAULT_CANDIDATES)
-    parser.add_argument("--db", default=os.getenv("ALPHA_LAB_DB_PATH", "alpha_lab/data/alpha_lab.sqlite3"))
+    parser.add_argument("--db", default=None, help="SQLite DB path; defaults to ALPHA_LAB_DB_PATH or app default.")
     parser.add_argument("--risk-config", default="alpha_lab/config.example.json")
     parser.add_argument("--allow-closed", action="store_true", help="select+inspect without requiring an open market")
     parser.add_argument("--keep-open", action="store_true", help="do not close the position (skip realized P/L)")
@@ -88,7 +88,8 @@ def main() -> int:
     os.environ.setdefault("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
 
     failures: list[str] = []
-    lab = AlphaLabService(db_path=args.db, risk_config_path=args.risk_config)
+    db_path = resolve_db_path(args.db)
+    lab = AlphaLabService(db_path=db_path, risk_config_path=args.risk_config)
 
     print("=" * 72)
     print("OPTIONS LIFECYCLE VALIDATION (paper-only)")
@@ -190,7 +191,7 @@ def main() -> int:
         failures.append("position tracking")
 
     # Stage 7: logging (entry feature set in training_rows).
-    with connect(args.db) as conn:
+    with connect(db_path) as conn:
         row = conn.execute(
             "SELECT * FROM training_rows WHERE trade_id = ?", (trade_id,)
         ).fetchone()
@@ -228,7 +229,7 @@ def main() -> int:
         exit_price = close.get("exit_price")
         _print_stage("8b. Realized P/L", PASS, f"exit=${exit_price} realized=${realized}")
 
-        with connect(args.db) as conn:
+        with connect(db_path) as conn:
             out = conn.execute(
                 "SELECT contract_symbol, strike, expiry, dte, option_type, entry_price, exit_price, "
                 "realized_pl, trade_status, closed_at, decision_action, "

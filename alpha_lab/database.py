@@ -5,7 +5,14 @@ import sqlite3
 from pathlib import Path
 
 
+# Repo-relative fallback used ONLY for local dev and hermetic tests (no env set).
+# Production servers pin an absolute path via ALPHA_LAB_DB_PATH (see below).
 DEFAULT_DB_PATH = "alpha_lab/data/alpha_lab.sqlite3"
+
+# Canonical persistent path within the checkout. Deployments may pin the absolute
+# form of this path via ALPHA_LAB_DB_PATH so dashboard, scheduler, and reports
+# resolve the same file.
+CANONICAL_SERVER_DB_PATH = DEFAULT_DB_PATH
 
 
 def resolve_db_path(explicit: str | None = None) -> str:
@@ -17,7 +24,8 @@ def resolve_db_path(explicit: str | None = None) -> str:
     module — or constructing a service in a hermetic test without setting the
     var — still falls back to the local-dev default, while production entry
     points that have loaded their .env automatically resolve to the configured
-    path. Pass an explicit path (e.g. in tests) to override both.
+    path. Pass an explicit path (e.g. in tests) to override both. ``~`` is
+    expanded so deployment env files can use user-relative absolute paths.
     """
     resolved = explicit or os.getenv("ALPHA_LAB_DB_PATH") or DEFAULT_DB_PATH
     return str(Path(resolved).expanduser())

@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 from fastapi.testclient import TestClient
 
 from alpha_lab.api import create_app
-from alpha_lab.database import DEFAULT_DB_PATH, connect
+from alpha_lab.database import connect, resolve_db_path
 from alpha_lab.service import AlphaLabService
 from paper_trader.alpaca_client import AlpacaClient, AlpacaSafetyError, load_credentials_from_env, redact_secrets
 
@@ -42,7 +42,9 @@ def load_local_env(path: Path = ROOT / ".env") -> None:
 
 
 def rows(query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    with connect(DEFAULT_DB_PATH) as conn:
+    # Resolve at call time (after load_local_env) so this reads the SAME env-pinned
+    # DB the service uses, not the bare relative default.
+    with connect(resolve_db_path()) as conn:
         return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
@@ -84,8 +86,9 @@ def main() -> None:
     level, detail = alpaca_connectivity()
     status("Alpaca connectivity", level, detail)
 
-    if not Path(DEFAULT_DB_PATH).exists():
-        status("Database", "FAIL", f"missing {DEFAULT_DB_PATH}")
+    db_path = resolve_db_path()
+    if not Path(db_path).exists():
+        status("Database", "FAIL", f"missing {db_path}")
         return
 
     service = AlphaLabService()

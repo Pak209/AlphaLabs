@@ -15,7 +15,7 @@ load_dotenv()
 import uvicorn  # noqa: E402
 
 from .api import create_app  # noqa: E402
-from .database import init_db  # noqa: E402
+from .database import init_db, resolve_db_path  # noqa: E402
 from .seed import seed  # noqa: E402
 from .service import AlphaLabService  # noqa: E402
 
@@ -29,7 +29,10 @@ def main() -> None:
     parser.add_argument("--sample-catalysts", action="store_true", help="Use sample catalyst fallback for the briefing job")
     args = parser.parse_args()
 
-    init_db()
+    # Initialize the SAME database the service/scheduler resolve to (env-pinned on
+    # the server). Calling init_db() with no path would seed the bare relative
+    # default and silently create a SECOND, empty DB next to the real one.
+    init_db(resolve_db_path())
     if args.seed:
         seed()
     if args.briefing_job:

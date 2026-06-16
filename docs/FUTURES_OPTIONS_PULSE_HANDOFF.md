@@ -159,7 +159,8 @@ makes the hermetic suite hit the network (this regression was hit twice and fixe
   after most of the overnight session (6pm→9:30am ET) has landed and before the
   6:30am PT cash open. Uses a throttled `PolygonFuturesProvider` (default 13s) and
   persists into the three SQLite tables. No-op when `POLYGON_API_KEY` is unset.
-  Total scheduler job count is now **17** (asserted in `test_scheduler.py`).
+  Total scheduler job count is now **18** including the DB heartbeat job
+  (asserted in `test_scheduler.py`).
 - **Persistence verified** end-to-end (session 2025-06-12): `futures_snapshots`=1,
   `futures_moves`=6, `catalyst_futures_reactions`=0, regime=`risk_off`.
 - **Options-flow preview:** `scheduler.py` registers
@@ -185,7 +186,7 @@ Key coverage:
 - `test_signal_sources.py` — live options provider with **HTTP mocked** (no
   network): protocol conformance, chain volume aggregation + baseline math,
   no-key → None, empty-chain → None.
-- `test_scheduler.py` — 17-job count, overnight pull and options preview are weekday premarket jobs.
+- `test_scheduler.py` — 18-job count, heartbeat, overnight pull, and options preview are scheduled jobs.
 - `test_env.py` — `.env` parse/load (real env wins, override, missing-file no-op).
 
 **Live smoke (throttled; ~2.5 min each, needs real key):**

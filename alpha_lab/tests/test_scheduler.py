@@ -41,9 +41,9 @@ def test_build_scheduler_registers_all_jobs(monkeypatch):
     # service is sufficient to introspect the wiring without a DB.
     sched = scheduler.build_scheduler(service=object())
     jobs = sched.get_jobs()
-    # 6 always-safe + 2 premarket context pulls + 6 weekday idea/trade
-    # + 3 weekend read/crypto jobs = 16
-    assert len(jobs) == 17
+    # 1 heartbeat + 6 always-safe + 2 premarket context pulls
+    # + 6 weekday idea/trade + 3 weekend read/crypto jobs = 18
+    assert len(jobs) == 18
     assert all(job.trigger is not None for job in jobs)
 
 

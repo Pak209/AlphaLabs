@@ -57,8 +57,21 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
         return await call_next(request)
 
     @app.get("/api/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "mode": "paper-research", "default_execution": "dry-run"}
+    def health() -> dict[str, Any]:
+        # Expose the resolved DB identity (path + device:inode) so a health check
+        # can PROVE the dashboard and scheduler are reading/writing the SAME file,
+        # not just two same-named DBs. Identity errors must never down the probe.
+        try:
+            identity = lab.db_identity()
+        except Exception as exc:  # pragma: no cover - defensive
+            identity = {"db_error": str(exc)}
+        return {"status": "ok", "mode": "paper-research", "default_execution": "dry-run", **identity}
+
+    @app.get("/api/db-status")
+    def db_status() -> dict[str, Any]:
+        # Full operational snapshot of the active database for dashboards / phone:
+        # path, existence, idea + trade counts, and the scheduler heartbeat.
+        return lab.db_status()
 
     @app.get("/api/dashboard")
     def dashboard() -> dict[str, Any]:

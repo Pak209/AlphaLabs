@@ -22,7 +22,7 @@ setopt pipefail
 PROJECT_DIR="$HOME/AlphaLab"
 PY="$PROJECT_DIR/.venv/bin/python"
 PORT="${ALPHALAB_PORT:-8787}"
-EXPECTED_JOBS="${ALPHALAB_EXPECTED_JOBS:-17}"
+EXPECTED_JOBS="${ALPHALAB_EXPECTED_JOBS:-18}"
 UID_NUM="$(id -u)"
 DASHBOARD_LABEL="com.alphalab.dashboard"
 SCHEDULER_LABEL="com.alphalab.scheduler"
@@ -121,7 +121,7 @@ step "Scheduler job count"
 JOBS="$("$PY" -c "import json;print(json.load(open('/tmp/alphalab_diag.json'))['scheduler_job_count'])" 2>/dev/null)"
 if [ -n "$JOBS" ]; then
   if [ "$JOBS" = "$EXPECTED_JOBS" ]; then
-    ok "scheduler has $JOBS jobs (expected $EXPECTED_JOBS, incl. futures + options preview)"
+    ok "scheduler has $JOBS jobs (expected $EXPECTED_JOBS, incl. heartbeat + futures + options preview)"
   else
     warn "scheduler has $JOBS jobs (expected $EXPECTED_JOBS) — verify the job set"
   fi

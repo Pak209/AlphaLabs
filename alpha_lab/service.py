@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from paper_trader.alpaca_client import AlpacaAPIError, AlpacaClient, AlpacaSafetyError, load_credentials_from_env
@@ -14,7 +15,7 @@ from paper_trader.models import Signal
 from paper_trader.simulated_broker import SimulatedPaperBroker
 
 from .analyst import build_market_briefing, build_trade_explanation, chat_reply
-from .database import DEFAULT_DB_PATH, connect, init_db, resolve_db_path
+from .database import connect, init_db, resolve_db_path
 from .models import normalize_idea_payload
 from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
@@ -74,6 +75,87 @@ class AlphaLabService:
         init_db(self.db_path)
         with connect(self.db_path) as conn:
             AlphaLabRepository(conn).seed_defaults()
+
+    # ----------------------------------------------------------------------- #
+    # DB identity, heartbeat, and status — used by /api/health, the status
+    # command, and the runtime verifier to PROVE the API and scheduler share one
+    # database file (same path AND same inode/device), not just the same string.
+    # ----------------------------------------------------------------------- #
+    def db_identity(self) -> dict[str, Any]:
+        """Resolved DB path plus filesystem identity (device:inode) when it exists.
+
+        Two processes that report the same device:inode are demonstrably writing
+        the SAME file even if symlinks or differing relative paths are involved.
+        """
+        path = Path(self.db_path).expanduser().resolve()
+        identity: dict[str, Any] = {"db_path": str(path), "db_exists": path.exists()}
+        if path.exists():
+            st = path.stat()
+            identity["db_inode"] = f"{st.st_dev}:{st.st_ino}"
+            identity["db_size_bytes"] = st.st_size
+            identity["db_modified"] = datetime.fromtimestamp(st.st_mtime, timezone.utc).astimezone().isoformat()
+        else:
+            identity["db_inode"] = None
+        return identity
+
+    def record_scheduler_heartbeat(self, label: str = "scheduler") -> dict[str, Any]:
+        """Upsert a single liveness row into app_config on the SHARED DB.
+
+        The scheduler calls this on startup and on a periodic job, so the status
+        command / dashboard can show that the always-on writer is alive AND prove
+        it is writing the same database the dashboard reads (db_path is stamped).
+        """
+        beat = {
+            "timestamp": datetime.now(timezone.utc).astimezone().isoformat(),
+            "pid": os.getpid(),
+            "label": label,
+            "db_path": str(Path(self.db_path).expanduser().resolve()),
+            "scheduler_mode": os.getenv("ALPHALAB_SCHEDULER_MODE", "dry_run").strip().lower() or "dry_run",
+        }
+        with connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO app_config (key, value_json, updated_at) VALUES ('scheduler_heartbeat', ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=CURRENT_TIMESTAMP",
+                (json.dumps(beat, sort_keys=True),),
+            )
+            conn.commit()
+        return beat
+
+    def get_scheduler_heartbeat(self) -> dict[str, Any] | None:
+        """Return the last recorded scheduler heartbeat, or None if never written."""
+        with connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT value_json, updated_at FROM app_config WHERE key='scheduler_heartbeat'"
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            beat = json.loads(row["value_json"])
+        except (TypeError, ValueError):
+            beat = {}
+        beat.setdefault("updated_at", row["updated_at"])
+        return beat
+
+    def db_status(self) -> dict[str, Any]:
+        """One-shot operational snapshot of the active database.
+
+        Powers `python -m alpha_lab.db_status` and the /api/health summary:
+        active path, existence, idea/trade counts, and the latest scheduler
+        heartbeat + scanner-run timestamps (the scheduler's "is it alive" signal).
+        """
+        status = self.db_identity()
+        with connect(self.db_path) as conn:
+            status["ideas_count"] = int(conn.execute("SELECT COUNT(*) FROM alpha_ideas").fetchone()[0])
+            status["trades_count"] = int(conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0])
+            last_run = conn.execute(
+                "SELECT source, created_at FROM scanner_runs ORDER BY datetime(created_at) DESC, id DESC LIMIT 1"
+            ).fetchone()
+        status["last_scanner_run_at"] = last_run["created_at"] if last_run else None
+        status["last_scanner_run_source"] = last_run["source"] if last_run else None
+        heartbeat = self.get_scheduler_heartbeat()
+        status["scheduler_heartbeat_at"] = heartbeat.get("timestamp") if heartbeat else None
+        status["scheduler_heartbeat"] = heartbeat
+        return status
 
     def _score_idea(self, idea: dict[str, Any]) -> Any:
         """
@@ -1679,8 +1761,10 @@ class AlphaLabService:
         return select_atm_contract(idea["ticker"], idea["bias"])
 
 
-def reset_local_data(db_path: str = DEFAULT_DB_PATH) -> None:
-    path = Path(db_path)
+def reset_local_data(db_path: str | None = None) -> None:
+    # Resolve through the shared precedence chain so a no-arg call targets the
+    # SAME database the service/scheduler use — never the bare relative default.
+    path = Path(resolve_db_path(db_path))
     if path.exists():
         path.unlink()
-    init_db(db_path)
+    init_db(str(path))

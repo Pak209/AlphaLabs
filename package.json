@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "./.venv/bin/python -m alpha_lab.main --seed",
     "scheduler": "./.venv/bin/python -m alpha_lab.scheduler",
+    "db:status": "./.venv/bin/python -m alpha_lab.db_status",
     "test": "./.venv/bin/python -m pytest alpha_lab/tests paper_trader/tests",
     "paper:dry-run": "./.venv/bin/python -m paper_trader.main ingest --file paper_trader/sample_signals/nvda_bullish.json --dry-run",
     "paper:inbox:dry-run": "./.venv/bin/python -m paper_trader.main inbox --dry-run",
