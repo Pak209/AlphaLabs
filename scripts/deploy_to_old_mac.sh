@@ -1,7 +1,13 @@
 #!/bin/zsh
 #
-# deploy_to_old_mac.sh — push code from the NEW MacBook (source of truth) to the
-# OLD MacBook (runner) over SSH with rsync. Run this ON the new Mac.
+# deploy_to_old_mac.sh — LEGACY rsync helper.
+#
+# Preferred deployment is now GitHub on the old Mac:
+#   git clone https://github.com/Pak209/AlphaLabs.git ~/AlphaLab
+#   cd ~/AlphaLab && ./scripts/bootstrap_old_mac_from_github.sh
+#
+# Keep this only as a manual fallback for a private LAN copy. Run this ON the
+# new Mac if you deliberately choose rsync for an emergency/offline transfer.
 #
 #   ./scripts/deploy_to_old_mac.sh            # preview, then confirm, then sync
 #   ./scripts/deploy_to_old_mac.sh --dry-run  # preview only, change nothing
@@ -61,6 +67,9 @@ EXCLUDES=(
   --exclude='.pytest_cache/'
   # Secrets + connection config: the server keeps its OWN protected .env.
   --exclude='.env'
+  # Timestamped .env backups are server-only state; never push or let --delete
+  # remove them.
+  --exclude='.env.bak.*'
   --exclude='scripts/server.conf'
   # Logs are server-local and grow there; never push or delete them.
   --exclude='logs/'

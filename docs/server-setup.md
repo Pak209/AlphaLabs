@@ -1,196 +1,331 @@
-# AlphaLab two-Mac setup (dev → always-on runner)
+# AlphaLabs Old Mac Deployment From GitHub
 
-A deliberately simple split: your **new MacBook (M4 Pro)** is where you build and
-test and is the single source of truth; your **old MacBook** is a dedicated,
-always-on machine that runs the scheduled paper-trading jobs. Updates flow one
-way — new → old — over your home network with `rsync`. No Docker, no cloud, no
-CI, no GitHub required.
+GitHub is the source of truth for code. The old Mac is the source of truth for
+runtime state once deployed: its own `.env`, SQLite DB, logs, LaunchAgents, and
+Tailscale/LAN exposure stay local on that machine.
 
-```
-NEW MacBook (dev, source of truth)            OLD MacBook (runner, always on)
-  ~/AlphaLab  ──deploy_to_old_mac.sh──rsync/ssh──▶  ~/AlphaLab
-                                                     ├─ .venv      (its own)
-  check_old_mac.sh ──────ssh────────────────────▶   ├─ .env       (its own keys)
-                                                     ├─ logs/      (its own)
-                                                     ├─ data/*.sqlite3 (its own history)
-                                                     └─ launchd schedule → 06:32 weekdays
+Current known-good commit:
+
+```text
+291fdcb7a908afac5c3d8a35a6b62f6414fc69a6
+Add DB status and heartbeat diagnostics
 ```
 
-The deploy **never** overwrites the old Mac's `.env`, `.venv`, `logs/`, or
-SQLite database — those stay local to the server.
+Repository:
 
-## Folder layout (same on both Macs)
-
-```
-~/AlphaLab/
-├── alpha_lab/                 # research/scoring package
-├── paper_trader/              # trading package (paper-only)
-├── scripts/
-│   ├── setup_old_mac.sh       # ① run ONCE on the OLD Mac
-│   ├── deploy_to_old_mac.sh   # run on the NEW Mac to push code
-│   ├── check_old_mac.sh       # run on the NEW Mac to check health
-│   ├── run_options_validation.sh  # the job launchd runs each morning
-│   ├── server.conf.example    # template for connection settings
-│   └── server.conf            # YOUR host/user (git-ignored, not deployed)
-├── deploy/
-│   └── com.alphalab.options-validation.plist.template  # launchd schedule
-├── docs/server-setup.md       # this file
-├── logs/                      # run logs (server-local, git-ignored)
-├── requirements.txt
-├── .env.example
-└── .env                       # secrets (git-ignored, never overwritten)
+```text
+https://github.com/Pak209/AlphaLabs.git
 ```
 
----
+## What Never Gets Overwritten
 
-## One-time setup
+These are intentionally local to the old Mac and git-ignored:
 
-### On the OLD MacBook (the runner)
+```text
+.env
+.venv/
+alpha_lab/data/
+logs/
+paper_trader/inbox/
+paper_trader/logs/
+paper_trader/generated/
+paper_trader/reports/
+reports/
+scripts/server.conf
+```
 
-1. **Name it & set timezone.** System Settings → General → About → set a memorable
-   name (e.g. `old-macbook`; its network address becomes `old-macbook.local`).
-   Then Date & Time → set timezone to **America/Los_Angeles** (the 06:32 schedule
-   depends on this).
+Do not copy a SQLite DB from the dev Mac onto the old Mac as part of deployment.
+After cutover, the old Mac's `alpha_lab/data/alpha_lab.sqlite3` is the operational
+history of record.
 
-2. **Enable Remote Login (SSH).** System Settings → General → Sharing → turn on
-   **Remote Login**. Note the username shown.
+## Clean Setup Flow
 
-3. **Install standalone Python.** Download the macOS installer from
-   <https://www.python.org/downloads/macos/> (3.11 or 3.12), or `brew install python`.
-   Do **not** rely on Xcode's Python for a server.
+Run these steps on the old Mac unless a step says otherwise.
 
-4. **Plug it in** to AC power and connect to your network (Ethernet preferred; Wi-Fi is fine).
+### 1. Install Git And Python
 
-### On the NEW MacBook (dev)
+Check whether Git exists:
 
-5. **Set up SSH key login** so deploys don't prompt for a password each time:
-   ```bash
-   ssh-keygen -t ed25519        # press Enter through the prompts if you have no key yet
-   ssh-copy-id you@old-macbook.local
-   ssh you@old-macbook.local 'echo connected'   # should print without a password
-   ```
+```bash
+git --version
+```
 
-6. **Configure the connection** once:
-   ```bash
-   cd ~/AlphaLab
-   cp scripts/server.conf.example scripts/server.conf
-   # edit scripts/server.conf → set SERVER_USER and SERVER_HOST to the old Mac
-   ```
+If missing:
 
-7. **First deploy** (pushes code to the old Mac):
-   ```bash
-   ./scripts/deploy_to_old_mac.sh
-   ```
+```bash
+xcode-select --install
+```
 
-8. **Get the old Mac's `.env` in place.** The deploy intentionally skips secrets.
-   Copy your keys over once (or create the file directly on the old Mac):
-   ```bash
-   scp ~/AlphaLab/.env you@old-macbook.local:AlphaLab/.env
-   ```
+Install standalone Python 3.11+ from python.org or Homebrew:
 
-9. **Run the server setup** — SSH in and run it on the old Mac:
-   ```bash
-   ssh you@old-macbook.local
-   cd ~/AlphaLab && ./scripts/setup_old_mac.sh
-   ```
-   This rebuilds the venv, locks down `.env`, installs + loads the launchd
-   schedule, applies power settings (you'll be asked for the admin password once),
-   and prints a verification including a live dry-run of the trade chain.
+```bash
+python3 --version
+```
 
-10. **Verify from the dev Mac:**
-    ```bash
-    ./scripts/check_old_mac.sh
-    ```
-    Expect: reachable, schedule loaded, won't-sleep, auto-restart ON, venv present.
+Avoid relying on Xcode's bundled Python for a long-running server.
 
-You're done. The runner fires automatically each weekday at 06:32 local.
+### 2. Clone AlphaLabs
 
----
+```bash
+cd ~
+git clone https://github.com/Pak209/AlphaLabs.git AlphaLab
+cd ~/AlphaLab
+git checkout main
+git rev-parse HEAD
+```
 
-## Day-to-day
+The hash should match the commit you intend to deploy, for example:
 
-| Goal | On which Mac | Command |
-|------|--------------|---------|
-| Build / test / iterate | New | normal editing + `.venv/bin/python -m pytest` |
-| Preview a deploy (no changes) | New | `./scripts/deploy_to_old_mac.sh --dry-run` |
-| Push code to the runner | New | `./scripts/deploy_to_old_mac.sh` |
-| Check the runner is healthy | New | `./scripts/check_old_mac.sh` |
-| Check health + see last log | New | `./scripts/check_old_mac.sh --logs` |
-| Force a test run now | Old (ssh) | `cd ~/AlphaLab && ./scripts/run_options_validation.sh --allow-closed` |
-| Reload the schedule after a plist change | Old (ssh) | `./scripts/setup_old_mac.sh` |
+```text
+291fdcb7a908afac5c3d8a35a6b62f6414fc69a6
+```
 
-Routine code edits (Python/strategy logic) need **no** restart on the server —
-the next scheduled run picks them up. Only changes to the schedule itself (the
-plist template) require re-running `setup_old_mac.sh`.
+For an existing checkout:
 
----
+```bash
+cd ~/AlphaLab
+git status --short
+git fetch origin main
+git pull --ff-only origin main
+```
 
-## Testing / verification cheatsheet
+Do not pull over uncommitted source changes. Runtime files should be ignored and
+do not need to be committed.
 
-- **Deployment test:** `./scripts/deploy_to_old_mac.sh --dry-run` — shows exactly
-  what would change, touches nothing.
-- **Manual run test (on the server):** `./scripts/run_options_validation.sh --allow-closed`
-  — exercises signal → option-select end-to-end without placing an order when the
-  market is closed. Expect `Pre-flight / Signal gen / Option select` all PASS.
-- **Health check:** `./scripts/check_old_mac.sh` — green across the board means
-  reachable, scheduled, awake-on-AC, auto-restarting, venv ready.
+### 3. Create The Virtualenv
 
----
+```bash
+cd ~/AlphaLab
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+```
 
-## Risks & macOS gotchas (read these once)
+### 4. Create `.env` Manually
 
-1. **TCC / protected folders.** Keep AlphaLab in `~/AlphaLab`, never under
-   `~/Desktop`, `~/Documents`, or `~/Downloads`. macOS blocks launchd background
-   jobs from reading file *contents* in those folders without Full Disk Access —
-   that's the exact bug that broke the schedule before the project was relocated.
+Create the old Mac's `.env` on the old Mac:
 
-2. **FileVault + unattended reboot (the big one).** A LaunchAgent only runs while a
-   user is **logged in**. If FileVault is on, a reboot after a power outage stops
-   at the disk-unlock screen and nothing runs until someone types the password.
-   For an unattended home server, either turn **FileVault off**, or enable
-   **automatic login** (System Settings → Users & Groups → Automatically log in as…).
-   Auto-login trades some physical security for unattended restart — reasonable for
-   a home runner, your call. `autorestart 1` only helps if the Mac can reach the
-   desktop on its own.
+```bash
+cd ~/AlphaLab
+cp .env.example .env
+chmod 600 .env
+```
 
-3. **Clamshell (lid-closed) sleep.** A MacBook normally sleeps when the lid closes.
-   `setup_old_mac.sh` runs `sudo pmset -a disablesleep 1`, which keeps it awake lid
-   closed. If you'd rather, leave the lid open. Keep it on **AC** — `pmset -c`
-   settings only apply on power; on battery it will still sleep.
+Edit `.env` locally and fill real values there. Do not commit `.env`, paste
+secrets into chat, or assume the dev Mac and old Mac share environment values.
 
-4. **Standalone Python, not Xcode's.** Rebuild the venv on the server with a
-   python.org/Homebrew Python. A venv copied from the dev Mac points at absolute
-   paths that won't exist on the other machine — `setup_old_mac.sh` rebuilds it
-   from `requirements.txt` instead, which is why `.venv/` is excluded from deploys.
+At minimum, set a local DB path for this machine:
 
-5. **Timezone drift.** The schedule is 06:32 *local* time, chosen to equal ~09:32
-   ET. If the old Mac's timezone isn't America/Los_Angeles, the job fires at the
-   wrong moment. `check_old_mac.sh` flags this.
+```text
+ALPHA_LAB_DB_PATH=alpha_lab/data/alpha_lab.sqlite3
+ALPHALAB_SCHEDULER_MODE=dry_run
+```
 
-6. **rsync `--delete`.** The deploy mirrors your dev tree, so files you delete on
-   the dev Mac are removed on the server too — *within synced code only*. `.env`,
-   `.venv`, `logs/`, and the database are excluded and therefore protected. Always
-   run `--dry-run` first if unsure; the default flow previews and asks before
-   applying.
+Use absolute paths if you prefer, but keep them old-Mac-local.
 
-7. **Network address changes.** `.local` Bonjour names usually just work. If the
-   old Mac becomes unreachable, give it a reserved IP in your router's DHCP
-   settings and use that for `SERVER_HOST`.
+### 5. Create Runtime Folders
 
-8. **Missed runs on wake.** If the Mac is asleep at 06:32, launchd runs the missed
-   job once on the next wake (`StartCalendarInterval` behavior). With sleep
-   disabled on AC this shouldn't happen, but it's a safe fallback.
+```bash
+cd ~/AlphaLab
+mkdir -p logs alpha_lab/data paper_trader/logs paper_trader/inbox paper_trader/processed paper_trader/rejected paper_trader/generated
+```
 
-9. **Secrets hygiene.** `.env` is git-ignored, excluded from deploys, and chmod-600
-   on the server. Don't email/AirDrop it; use `scp` over your LAN as shown.
+This preserves existing DB/log data if those folders already exist.
 
----
+### 6. Run DB Diagnostics
 
-## Future expansion (structure only — not built yet)
+```bash
+cd ~/AlphaLab
+.venv/bin/python -m alpha_lab.db_status
+.venv/bin/python -m alpha_lab.db_status --json
+```
 
-The same one-way deploy + launchd pattern extends cleanly to additional jobs:
-alpha scanners, catalyst/news agents, market summaries, broader paper trading,
-Alpaca execution, and ML data collection. Each becomes another wrapper script
-under `scripts/` plus its own plist in `deploy/`, installed by extending
-`setup_old_mac.sh`. Deployment, monitoring, and secrets handling stay identical.
-Don't build these yet — the minimum reliable runner above is the foundation.
+Before first startup, the DB may not exist. After startup, this should show the
+old Mac's active DB path, idea/trade counts, latest scanner run, and scheduler
+heartbeat when the scheduler has started.
+
+### 7. Start The Server Manually
+
+For a foreground smoke test:
+
+```bash
+cd ~/AlphaLab
+./scripts/run_dashboard.sh
+```
+
+Then, from another terminal on the same Mac:
+
+```bash
+curl -s http://127.0.0.1:8787/api/health
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8787/api/catalysts/intelligence
+curl -s http://127.0.0.1:8787/api/db-status
+```
+
+Expected:
+
+```text
+/api/health returns JSON with status ok and db_path
+/api/catalysts/intelligence returns HTTP 200
+/api/db-status returns the same active DB path
+```
+
+Stop the foreground server with `Ctrl-C` before installing launchd.
+
+### 8. Install And Verify LaunchAgents
+
+Run the setup script on the old Mac:
+
+```bash
+cd ~/AlphaLab
+./scripts/setup_old_mac.sh
+```
+
+It rebuilds or verifies the virtualenv, installs dependencies, ensures runtime
+folders, locks `.env` permissions, renders LaunchAgent plists, loads dashboard,
+scheduler, and options-validation jobs, and prints a verification summary.
+
+Verify:
+
+```bash
+cd ~/AlphaLab
+./scripts/verify_old_mac_runtime.sh
+```
+
+This checks:
+
+```text
+git commit hash
+active DB path
+DB exists
+API responds
+/api/catalysts/intelligence returns 200
+scheduler heartbeat exists
+LaunchAgent status
+Tailscale/LAN URL hints when detectable
+```
+
+## One-Command Bootstrap
+
+For a new old Mac, you can run:
+
+```bash
+/bin/zsh -c "$(curl -fsSL https://raw.githubusercontent.com/Pak209/AlphaLabs/main/scripts/bootstrap_old_mac_from_github.sh)"
+```
+
+The bootstrap script clones or fast-forwards `~/AlphaLab`, creates `.venv`,
+installs requirements, creates runtime directories, and prints the remaining
+manual `.env` and launchd steps. It refuses to pull over a dirty source checkout.
+
+## Updating The Old Mac Later
+
+On the old Mac:
+
+```bash
+cd ~/AlphaLab
+git status --short
+git fetch origin main
+git pull --ff-only origin main
+.venv/bin/python -m pip install -r requirements.txt
+launchctl kickstart -k gui/$(id -u)/com.alphalab.dashboard
+launchctl kickstart -k gui/$(id -u)/com.alphalab.scheduler
+./scripts/verify_old_mac_runtime.sh
+```
+
+Never use `git reset --hard` as a routine deploy command. It can discard local
+source edits. It does not remove ignored DB files, but it is still too blunt for
+normal operations.
+
+## Rollback
+
+Before rolling back code, preserve the old Mac DB:
+
+```bash
+cd ~/AlphaLab
+mkdir -p alpha_lab/data/backups
+cp alpha_lab/data/alpha_lab.sqlite3 alpha_lab/data/backups/alpha_lab.sqlite3.$(date +%Y%m%d%H%M%S).bak
+```
+
+Then return to a previous commit:
+
+```bash
+git log --oneline -10
+git checkout <previous_commit>
+.venv/bin/python -m pip install -r requirements.txt
+launchctl kickstart -k gui/$(id -u)/com.alphalab.dashboard
+launchctl kickstart -k gui/$(id -u)/com.alphalab.scheduler
+./scripts/verify_old_mac_runtime.sh
+```
+
+To return to latest main later:
+
+```bash
+git checkout main
+git pull --ff-only origin main
+launchctl kickstart -k gui/$(id -u)/com.alphalab.dashboard
+launchctl kickstart -k gui/$(id -u)/com.alphalab.scheduler
+```
+
+## Access URLs
+
+The old Mac is the **single source of truth for data**: it runs the backend and
+scheduler and owns the SQLite DB. The dev Mac and phone are clients that reach
+that data through the API — **never by copying `alpha_lab.sqlite3` around, and
+never by pointing `ALPHA_LAB_DB_PATH` at a network/iCloud/SMB mount** (live
+SQLite writes over a share corrupt the file).
+
+The dashboard binds to loopback only:
+
+```text
+http://127.0.0.1:8787/
+```
+
+Reach it from the dev Mac or phone one of two ways. Both keep the bind on
+loopback — do **not** bind the app to `0.0.0.0` unless you have deliberately
+reviewed the network exposure.
+
+### Option A — SSH tunnel (dev Mac, most secure)
+
+Forward the old Mac's loopback port to your laptop over LAN or Tailscale:
+
+```bash
+# On the dev Mac; then open http://127.0.0.1:8787 locally. Leave it running.
+ssh -N -L 8787:127.0.0.1:8787 <user>@old-macbook.local   # LAN (Bonjour)
+ssh -N -L 8787:127.0.0.1:8787 <user>@100.x.y.z           # Tailscale IP
+```
+
+Only someone who can SSH in can reach it, so no API token is required.
+
+### Option B — Tailscale Serve (phone, no SSH needed)
+
+`tailscale serve` proxies the loopback dashboard onto your private tailnet over
+HTTPS without rebinding the app or exposing it to the public internet:
+
+```bash
+# On the old Mac (one-time; persists across reboots):
+tailscale serve --bg 127.0.0.1:8787
+tailscale serve status        # prints the https://<magic-dns-name> to use
+```
+
+Then browse to that `https://<old-mac>.<tailnet>.ts.net` URL from the phone or
+dev Mac (both must be signed into the same tailnet). Because any tailnet device
+can now reach write endpoints, set an API token on the old Mac so mutating
+requests need a bearer token. In `~/AlphaLab/.env`:
+
+```bash
+ALPHALAB_API_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+# then: launchctl kickstart -k gui/$(id -u)/com.alphalab.dashboard
+```
+
+Reads (the dashboard) stay open; approve / paper-trade / import / chat then
+require `Authorization: Bearer <token>`. To undo: `tailscale serve --https=443 off`.
+
+The runtime verifier prints these URL hints when it can detect Tailscale or
+Bonjour names, so you don't have to look them up by hand.
+
+## Safety Rules
+
+- GitHub contains source code only.
+- The old Mac owns live `.env`, DB, logs, and LaunchAgents.
+- Pull code with `git pull --ff-only`.
+- Never commit `.env`, DB files, logs, reports, broker/API secrets, or runtime data.
+- Keep scheduler mode `dry_run` unless you intentionally enable paper mode.

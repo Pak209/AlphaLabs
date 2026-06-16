@@ -1,14 +1,15 @@
 #!/bin/zsh
 #
 # setup_old_mac.sh — one-time (and safely re-runnable) setup for the OLD MacBook,
-# the always-on AlphaLab runner. Run this ON the old Mac after the first deploy.
+# the always-on AlphaLabs runner. Run this ON the old Mac after cloning/pulling
+# the GitHub repo.
 #
-#   ssh you@old-macbook.local         # or sit at the machine
+#   git clone https://github.com/Pak209/AlphaLabs.git ~/AlphaLab
 #   cd ~/AlphaLab && ./scripts/setup_old_mac.sh
 #
 # What it does:
 #   1. Verifies a standalone Python (not Xcode's) and rebuilds the venv.
-#   2. Creates runtime dirs and locks down .env permissions.
+#   2. Creates runtime dirs and locks down .env permissions when present.
 #   3. Installs + loads the launchd schedule (renders the plist template).
 #   4. Applies power settings: no sleep on AC, auto-restart after power loss.
 #   5. Prints a verification summary.
@@ -35,8 +36,14 @@ warn() { print -P "%F{yellow}[WARN]%f $*"; }
 err()  { print -P "%F{red}[FAIL]%f $*"; }
 step() { print -P "\n%F{cyan}== $* ==%f"; }
 
-cd "$PROJECT_DIR" || { err "project not found at $PROJECT_DIR (deploy it first)"; exit 1; }
+cd "$PROJECT_DIR" || { err "project not found at $PROJECT_DIR (clone https://github.com/Pak209/AlphaLabs.git first)"; exit 1; }
 ok "project dir: $PROJECT_DIR"
+
+if [ -d ".git" ]; then
+  ok "git checkout: $(git rev-parse --short HEAD 2>/dev/null) ($(git branch --show-current 2>/dev/null))"
+else
+  warn "$PROJECT_DIR is not a Git checkout. Future deploys should use GitHub as source of truth."
+fi
 
 # --- 1. Python + venv -------------------------------------------------------
 step "Python + virtualenv"
@@ -77,12 +84,8 @@ if [ -f ".env" ]; then
   chmod 600 .env
   ok ".env present, permissions locked to 600 (owner-only)"
 else
-  if [ -f ".env.example" ]; then
-    cp .env.example .env && chmod 600 .env
-    warn "no .env found — copied .env.example to .env. EDIT IT with your Alpaca/Polygon keys before the first scheduled run."
-  else
-    warn "no .env and no .env.example — create ~/AlphaLab/.env with your keys (chmod 600)."
-  fi
+  warn "no .env found. Create it manually on this Mac from .env.example, fill real values, then chmod 600 .env."
+  warn "setup will continue, but provider-backed jobs stay disabled until .env is configured."
 fi
 
 # --- 3. launchd agents ------------------------------------------------------
@@ -138,5 +141,7 @@ print "\nDry inspection of the full chain (market may be closed → expected):"
 
 print "\nRun the full runtime check next:"
 print "  ./scripts/verify_old_mac_runtime.sh"
+print "\nGitHub update flow:"
+print "  git fetch origin main && git pull --ff-only origin main"
 print -P "\n%F{green}Setup complete.%f Keep this Mac plugged in and on the network."
 print "Dashboard binds 127.0.0.1:8787; scheduler runs in dry_run unless .env says otherwise."
