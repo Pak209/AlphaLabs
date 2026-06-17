@@ -23,7 +23,7 @@ DEFAULT_WATCHLIST = [
     "AAPL", "AMZN", "AMD", "AVGO", "COIN", "GOOGL", "META", "MSFT", "MSTR",
     "NVDA", "ORCL", "PLTR", "SMCI", "TSLA",
 ]
-MATERIAL_SEC_FORMS = {"8-K", "6-K", "10-Q", "10-K", "S-1", "S-3", "424B5", "4"}
+MATERIAL_SEC_FORMS = {"8-K", "6-K", "10-Q", "10-K", "S-1", "S-3", "424B5", "424B3", "4"}
 
 
 def fetch_live_catalysts(watchlist: list[str] | None = None, limit: int = 40) -> dict[str, Any]:
@@ -82,10 +82,11 @@ def _fetch_sec_filings(symbols: list[str]) -> dict[str, Any]:
                         continue
                 except ValueError:
                     pass
+                headline, summary = _sec_filing_text(symbol, form)
                 catalysts.append({
                     "ticker": symbol,
-                    "headline": f"{symbol} filed {form} with the SEC",
-                    "summary": f"SEC filing detected: {form}. Review the filing before treating this as directional.",
+                    "headline": headline,
+                    "summary": summary,
                     "source": "SEC EDGAR submissions",
                     "source_url": _sec_filing_url(cik, accession, primary_doc),
                     "published_at": f"{filing_date}T13:00:00Z",
@@ -95,6 +96,31 @@ def _fetch_sec_filings(symbols: list[str]) -> dict[str, Any]:
         return {"name": "SEC EDGAR", "status": "ok", "catalysts": catalysts, "count": len(catalysts)}
     except Exception as exc:
         return _error("SEC EDGAR", exc)
+
+
+def _sec_filing_text(symbol: str, form: str) -> tuple[str, str]:
+    """Build the headline/summary for a SEC filing.
+
+    Offering/shelf forms get directional language so the catalyst scorer can read
+    them as dilution/bearish signals; all other forms keep the neutral wording.
+    """
+    form_u = form.upper()
+    if form_u in {"424B5", "424B3"}:
+        return (
+            f"{symbol} filed {form} offering prospectus with the SEC",
+            f"SEC {form} offering prospectus detected for {symbol} — a registered securities "
+            "offering that is typically dilutive. Confirm price/volume before any paper test.",
+        )
+    if form_u == "S-3":
+        return (
+            f"{symbol} filed S-3 shelf registration with the SEC",
+            f"SEC S-3 shelf registration detected for {symbol} — enables a future offering and is "
+            "a potential dilution signal. Confirm price/volume before any paper test.",
+        )
+    return (
+        f"{symbol} filed {form} with the SEC",
+        f"SEC filing detected: {form}. Review the filing before treating this as directional.",
+    )
 
 
 def _fetch_polygon_news(symbols: list[str]) -> dict[str, Any]:
