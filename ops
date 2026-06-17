@@ -421,6 +421,99 @@ raise SystemExit(0 if status == "ok" else 1)
 PY'
 }
 
+cmd_agent_status() {
+  load_conf; require_reachable
+  step "Agent / scanner status (read-only)"
+  inproj '.venv/bin/python - <<'"'"'PY'"'"'
+import json
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from alpha_lab.database import resolve_db_path
+from alpha_lab.env import load_dotenv
+from alpha_lab.scheduler import build_scheduler
+
+load_dotenv()
+db_path = Path(resolve_db_path()).expanduser().resolve()
+conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+conn.row_factory = sqlite3.Row
+
+def payload(raw):
+    try:
+        data = json.loads(raw or "{}")
+    except Exception:
+        return {"status": "error", "error_message": "invalid payload_json"}
+    return data if isinstance(data, dict) else {"status": "error", "error_message": "non-object payload_json"}
+
+def status_of(data):
+    value = str(data.get("status") or "").strip().lower()
+    if value:
+        return value
+    if data.get("source_problems"):
+        return "warning"
+    if data.get("error") or data.get("error_message"):
+        return "error"
+    return "ok"
+
+def items_created(data):
+    for key in ("ideas_persisted", "items_created", "orders_created", "candidates_found", "raw_items"):
+        value = data.get(key)
+        if isinstance(value, (int, float)):
+            return int(value)
+    return 0
+
+with conn:
+    rows = conn.execute("""
+        SELECT source, run_type, payload_json, created_at
+        FROM scanner_runs
+        ORDER BY datetime(created_at) DESC, id DESC
+        LIMIT 20
+    """).fetchall()
+
+print(f"  db path: {db_path}")
+print("  recent scanner runs:")
+for row in rows:
+    data = payload(row["payload_json"])
+    err = data.get("error_message") or data.get("error") or data.get("reason") or ""
+    if not err and data.get("source_problems"):
+        err = json.dumps(data["source_problems"], sort_keys=True, default=str)
+    agent = row["source"]
+    run_type = row["run_type"]
+    created_at = row["created_at"]
+    last_started_at = data.get("started_at") or data.get("timestamp") or created_at
+    last_finished_at = data.get("finished_at") or created_at
+    status = status_of(data)
+    created = items_created(data)
+    duration_ms = data.get("duration_ms")
+    print(
+        "    "
+        f"agent={agent} "
+        f"run_type={run_type} "
+        f"last_started_at={last_started_at} "
+        f"last_finished_at={last_finished_at} "
+        f"status={status} "
+        f"items_created={created} "
+        f"duration_ms={duration_ms} "
+        f"error_message={err}"
+    )
+
+scheduler = build_scheduler(service=object())
+now = datetime.now(ZoneInfo("America/Los_Angeles"))
+jobs = scheduler.get_jobs()
+print(f"  scheduler_job_count: {len(jobs)}")
+for job in jobs:
+    next_run = job.trigger.get_next_fire_time(None, now)
+    next_run_text = next_run.isoformat() if next_run else ""
+    print(f"    job={job.id} next_run_time={next_run_text} trigger={job.trigger}")
+try:
+    scheduler.shutdown(wait=False)
+except Exception:
+    pass
+PY'
+}
+
 # --- runtime provider checks (no secrets printed) --------------------------
 cmd_check() {
   load_conf; require_reachable
@@ -536,6 +629,7 @@ Focused reads:
   ./ops api-status        Loopback API health (/api/health, db-status, catalysts)
   ./ops safety-status     Scheduler mode + automation paper-trade guard status
   ./ops db-info           Resolved DB path + idea/trade/catalyst counts
+  ./ops agent-status      Recent scanner runs + registered scheduler jobs
   ./ops strategy-audit    Read-only check for idea/trade strategy labels
 
 Runtime provider checks (secrets never printed):
@@ -578,6 +672,7 @@ main() {
     api-status)        cmd_api_status "$@" ;;
     safety-status)     cmd_safety_status "$@" ;;
     db-info)           cmd_db_info "$@" ;;
+    agent-status)      cmd_agent_status "$@" ;;
     strategy-audit)    cmd_strategy_audit "$@" ;;
     check)             cmd_check "$@" ;;
     status)            cmd_status "$@" ;;

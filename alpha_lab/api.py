@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .agent_status import build_agent_status
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .market_data import get_bitcoin_market, get_business_profiles, get_liquidity_flows, get_oil_market, get_trending_stocks
 from .scheduler import scheduler_safety_status
@@ -77,6 +78,10 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
     @app.get("/api/safety-status")
     def safety_status() -> dict[str, Any]:
         return scheduler_safety_status()
+
+    @app.get("/api/ops/agent-status")
+    def agent_status(limit: int = 50) -> dict[str, Any]:
+        return build_agent_status(lab.db_path, limit=limit)
 
     @app.get("/api/dashboard")
     def dashboard() -> dict[str, Any]:
