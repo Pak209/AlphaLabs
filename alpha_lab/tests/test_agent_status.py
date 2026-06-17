@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from alpha_lab.agent_status import build_agent_status
 from alpha_lab.api import create_app
 from alpha_lab.database import connect, init_db
+from alpha_lab.repository import AlphaLabRepository
 from alpha_lab.service import AlphaLabService
 
 
@@ -82,3 +83,30 @@ def test_agent_status_endpoint_is_read_only(tmp_path: Path):
     assert body["scanner_runs"][0]["agent"] == "runtime_path_smoke_test"
     assert body["scanner_runs"][0]["last_started_at"] == "2026-06-17T13:00:00Z"
     assert body["scanner_runs"][0]["duration_ms"] is None
+
+
+def test_scanner_run_preserves_timing_fields_for_agent_status(tmp_path: Path):
+    db_path = str(tmp_path / "scanner_timing.sqlite3")
+    init_db(db_path)
+    with connect(db_path) as conn:
+        repo = AlphaLabRepository(conn)
+        repo.log_scanner_run(
+            "catalyst_radar",
+            "scheduled_poll",
+            {
+                "status": "ok",
+                "started_at": "2026-06-17T13:00:00Z",
+                "finished_at": "2026-06-17T13:00:03Z",
+                "duration_ms": 3000,
+                "items_created": 4,
+                "error_message": "",
+                "secretish_extra": "must not persist",
+            },
+        )
+        row = repo.list_scanner_runs(1)[0]
+
+    assert row["payload"]["started_at"] == "2026-06-17T13:00:00Z"
+    assert row["payload"]["finished_at"] == "2026-06-17T13:00:03Z"
+    assert row["payload"]["duration_ms"] == 3000
+    assert row["payload"]["items_created"] == 4
+    assert "secretish_extra" not in row["payload"]

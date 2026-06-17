@@ -408,6 +408,11 @@ class AlphaLabRepository:
                 "source_problems",
                 "note",
                 "dry_run",
+                "started_at",
+                "finished_at",
+                "duration_ms",
+                "items_created",
+                "error_message",
             )
             if key in payload
         }
