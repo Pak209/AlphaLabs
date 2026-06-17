@@ -87,6 +87,38 @@ require_reachable() {
   fi
 }
 
+remote_safety_kv() {
+  inproj 'set -a; [ -f .env ] && source .env; set +a
+    mode="$(printf "%s" "${ALPHALAB_SCHEDULER_MODE:-dry_run}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    [ "$mode" = "paper" ] || mode="dry_run"
+    armed="$(printf "%s" "${ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES:-}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    paper_guard_armed=false; [ "$armed" = "true" ] && paper_guard_armed=true
+    scheduler_paper_jobs_enabled=false; [ "$mode" = "paper" ] && scheduler_paper_jobs_enabled=true
+    can_trigger=false
+    if [ "$scheduler_paper_jobs_enabled" = true ] && [ "$paper_guard_armed" = true ]; then can_trigger=true; fi
+    safe_stabilization=false
+    if [ "$mode" = "dry_run" ] && [ "$paper_guard_armed" = false ]; then safe_stabilization=true; fi
+    echo "scheduler_mode=$mode"
+    echo "automation_paper_trading_armed=$paper_guard_armed"
+    echo "scheduler_paper_jobs_enabled=$scheduler_paper_jobs_enabled"
+    echo "paper_trades_can_be_triggered_by_scheduler=$can_trigger"
+    echo "safe_stabilization_mode=$safe_stabilization"'
+}
+
+require_safe_service_reload() {
+  local action="$1"
+  local SAFETY; SAFETY="$(remote_safety_kv)" || die "could not read scheduler safety status"
+  local CAN_TRIGGER; CAN_TRIGGER="$(print -r -- "$SAFETY" | awk -F= '$1=="paper_trades_can_be_triggered_by_scheduler"{print $2; exit}')"
+  local MODE; MODE="$(print -r -- "$SAFETY" | awk -F= '$1=="scheduler_mode"{print $2; exit}')"
+  local ARMED; ARMED="$(print -r -- "$SAFETY" | awk -F= '$1=="automation_paper_trading_armed"{print $2; exit}')"
+  if [ "$CAN_TRIGGER" = "true" ]; then
+    err "refusing to ${action}: scheduler paper jobs are armed (mode=${MODE}, automation_paper_trading_armed=${ARMED})."
+    print "  For stabilization, switch ALPHALAB_SCHEDULER_MODE=dry_run on the server and restart intentionally."
+    print "  This command did not change services, .env, or the database."
+    exit 1
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -187,6 +219,7 @@ cmd_health() {
 cmd_deploy() {
   load_conf; require_reachable
   step "Deploy (GitHub ff-only pull on the server)"
+  require_safe_service_reload "deploy/reload services"
   local BEFORE; BEFORE="$(inproj 'git rev-parse --short HEAD 2>/dev/null')"
   print "  target:        $TARGET"
   print "  project:       $PROJ"
@@ -278,30 +311,27 @@ cmd_api_status() {
 cmd_safety_status() {
   load_conf; require_reachable
   step "Scheduler safety status"
-  inproj 'set -a; [ -f .env ] && source .env; set +a
-    mode="$(printf "%s" "${ALPHALAB_SCHEDULER_MODE:-dry_run}" | tr "[:upper:]" "[:lower:]" | xargs)"
-    [ "$mode" = "paper" ] || mode="dry_run"
-    armed="$(printf "%s" "${ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES:-}" | tr "[:upper:]" "[:lower:]" | xargs)"
-    paper_guard_armed=false; [ "$armed" = "true" ] && paper_guard_armed=true
-    scheduler_paper_jobs_enabled=false; [ "$mode" = "paper" ] && scheduler_paper_jobs_enabled=true
-    can_trigger=false
-    if [ "$scheduler_paper_jobs_enabled" = true ] && [ "$paper_guard_armed" = true ]; then can_trigger=true; fi
-    safe_stabilization=false
-    if [ "$mode" = "dry_run" ] && [ "$paper_guard_armed" = false ]; then safe_stabilization=true; fi
-    echo "  ALPHALAB_SCHEDULER_MODE: $mode"
-    echo "  automation paper trading armed: $paper_guard_armed"
-    echo "  scheduler paper jobs enabled: $scheduler_paper_jobs_enabled"
-    echo "  paper trades can be triggered by scheduler jobs: $can_trigger"
-    echo "  safe stabilization mode: $safe_stabilization"
-    if [ "$safe_stabilization" = true ]; then
-      echo "  recommendation: safe for stabilization: scheduler dry_run and automation paper-trade guard disarmed"
-    elif [ "$can_trigger" = true ]; then
-      echo "  recommendation: paper orders are armed: switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization unless this is intentional"
-    elif [ "$mode" = "paper" ]; then
-      echo "  recommendation: scheduler is paper but automation paper-trade guard is disarmed; switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization clarity"
-    else
-      echo "  recommendation: scheduler is dry_run but automation paper-trade guard is armed; unset ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES for stabilization"
-    fi'
+  local SAFETY; SAFETY="$(remote_safety_kv)" || die "could not read scheduler safety status"
+  local MODE ARMED PAPER_ENABLED CAN_TRIGGER SAFE
+  MODE="$(print -r -- "$SAFETY" | awk -F= '$1=="scheduler_mode"{print $2; exit}')"
+  ARMED="$(print -r -- "$SAFETY" | awk -F= '$1=="automation_paper_trading_armed"{print $2; exit}')"
+  PAPER_ENABLED="$(print -r -- "$SAFETY" | awk -F= '$1=="scheduler_paper_jobs_enabled"{print $2; exit}')"
+  CAN_TRIGGER="$(print -r -- "$SAFETY" | awk -F= '$1=="paper_trades_can_be_triggered_by_scheduler"{print $2; exit}')"
+  SAFE="$(print -r -- "$SAFETY" | awk -F= '$1=="safe_stabilization_mode"{print $2; exit}')"
+  echo "  ALPHALAB_SCHEDULER_MODE: $MODE"
+  echo "  automation paper trading armed: $ARMED"
+  echo "  scheduler paper jobs enabled: $PAPER_ENABLED"
+  echo "  paper trades can be triggered by scheduler jobs: $CAN_TRIGGER"
+  echo "  safe stabilization mode: $SAFE"
+  if [ "$SAFE" = true ]; then
+    echo "  recommendation: safe for stabilization: scheduler dry_run and automation paper-trade guard disarmed"
+  elif [ "$CAN_TRIGGER" = true ]; then
+    echo "  recommendation: paper orders are armed: switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization unless this is intentional"
+  elif [ "$MODE" = "paper" ]; then
+    echo "  recommendation: scheduler is paper but automation paper-trade guard is disarmed; switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization clarity"
+  else
+    echo "  recommendation: scheduler is dry_run but automation paper-trade guard is armed; unset ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES for stabilization"
+  fi
 }
 
 cmd_db_info() {
@@ -360,6 +390,7 @@ cmd_status() {
 
 cmd_start() {
   load_conf; require_reachable
+  require_safe_service_reload "start LaunchAgents"
   confirm "Start (bootstrap) all AlphaLab LaunchAgents on $TARGET?" || exit 0
   step "Starting LaunchAgents"
   inproj 'U=$(id -u); for L in '"${AGENTS[*]}"'; do
@@ -382,6 +413,7 @@ cmd_stop() {
 
 cmd_restart() {
   load_conf; require_reachable
+  require_safe_service_reload "restart dashboard + scheduler"
   confirm "Restart (kickstart) the always-on AlphaLab services on $TARGET?" || exit 0
   step "Restarting dashboard + scheduler"
   inproj 'U=$(id -u)
@@ -392,6 +424,7 @@ cmd_restart() {
 
 cmd_reload() {
   load_conf; require_reachable
+  require_safe_service_reload "reload LaunchAgents"
   confirm "Reload all AlphaLab LaunchAgents (re-render plists + bootout/bootstrap) on $TARGET?" || exit 0
   step "Reloading LaunchAgents via scripts/setup_old_mac.sh"
   warn "setup_old_mac.sh also applies power settings and may prompt for the server's sudo password."
