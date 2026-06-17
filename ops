@@ -340,6 +340,87 @@ cmd_db_info() {
   inproj '.venv/bin/python -m alpha_lab.db_status'
 }
 
+cmd_strategy_audit() {
+  load_conf; require_reachable
+  step "Strategy attribution audit (read-only)"
+  inproj '.venv/bin/python - <<'"'"'PY'"'"'
+import json
+import os
+import sqlite3
+from pathlib import Path
+
+try:
+    from alpha_lab.env import load_dotenv
+    from alpha_lab.database import resolve_db_path
+except Exception as exc:
+    print(f"failed to import AlphaLab helpers: {exc}")
+    raise SystemExit(1)
+
+load_dotenv()
+db_path = Path(resolve_db_path()).expanduser().resolve()
+conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+conn.row_factory = sqlite3.Row
+with conn:
+    total_ideas = conn.execute("SELECT COUNT(*) FROM alpha_ideas").fetchone()[0]
+    total_trades = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+    total_strategies = conn.execute("SELECT COUNT(*) FROM strategies").fetchone()[0]
+    ideas_missing = conn.execute("""
+        SELECT COUNT(*)
+        FROM alpha_ideas i
+        LEFT JOIN idea_strategies ix ON ix.idea_id = i.id
+        WHERE ix.strategy_id IS NULL
+    """).fetchone()[0]
+    trades_missing = conn.execute("""
+        SELECT COUNT(*)
+        FROM trades t
+        LEFT JOIN idea_strategies ix ON ix.idea_id = t.idea_id
+        WHERE ix.strategy_id IS NULL
+    """).fetchone()[0]
+    orphan_links = conn.execute("""
+        SELECT COUNT(*)
+        FROM idea_strategies ix
+        LEFT JOIN alpha_ideas i ON i.id = ix.idea_id
+        LEFT JOIN strategies s ON s.id = ix.strategy_id
+        WHERE i.id IS NULL OR s.id IS NULL
+    """).fetchone()[0]
+    sample_ideas = [dict(row) for row in conn.execute("""
+        SELECT i.id, i.ticker, i.source, i.status, i.created_at
+        FROM alpha_ideas i
+        LEFT JOIN idea_strategies ix ON ix.idea_id = i.id
+        WHERE ix.strategy_id IS NULL
+        ORDER BY i.id DESC
+        LIMIT 5
+    """).fetchall()]
+    sample_trades = [dict(row) for row in conn.execute("""
+        SELECT t.id, t.idea_id, t.ticker, t.status, t.dry_run, t.opened_at
+        FROM trades t
+        LEFT JOIN idea_strategies ix ON ix.idea_id = t.idea_id
+        WHERE ix.strategy_id IS NULL
+        ORDER BY t.id DESC
+        LIMIT 5
+    """).fetchall()]
+status = "ok" if ideas_missing == 0 and trades_missing == 0 and orphan_links == 0 else "needs_attention"
+print(f"  status:                         {status}")
+print(f"  read only:                      true")
+print(f"  db path:                        {db_path}")
+print(f"  total ideas:                    {total_ideas}")
+print(f"  total trades:                   {total_trades}")
+print(f"  total strategies:               {total_strategies}")
+print(f"  ideas missing strategy labels:  {ideas_missing}")
+print(f"  trades missing strategy labels: {trades_missing}")
+print(f"  orphan strategy links:          {orphan_links}")
+if sample_ideas:
+    print("  sample ideas missing labels:")
+    for row in sample_ideas:
+        print("    " + json.dumps(row, sort_keys=True))
+if sample_trades:
+    print("  sample trades missing labels:")
+    for row in sample_trades:
+        print("    " + json.dumps(row, sort_keys=True))
+raise SystemExit(0 if status == "ok" else 1)
+PY'
+}
+
 # --- runtime provider checks (no secrets printed) --------------------------
 cmd_check() {
   load_conf; require_reachable
@@ -455,6 +536,7 @@ Focused reads:
   ./ops api-status        Loopback API health (/api/health, db-status, catalysts)
   ./ops safety-status     Scheduler mode + automation paper-trade guard status
   ./ops db-info           Resolved DB path + idea/trade/catalyst counts
+  ./ops strategy-audit    Read-only check for idea/trade strategy labels
 
 Runtime provider checks (secrets never printed):
   ./ops check polygon
@@ -496,6 +578,7 @@ main() {
     api-status)        cmd_api_status "$@" ;;
     safety-status)     cmd_safety_status "$@" ;;
     db-info)           cmd_db_info "$@" ;;
+    strategy-audit)    cmd_strategy_audit "$@" ;;
     check)             cmd_check "$@" ;;
     status)            cmd_status "$@" ;;
     start)             cmd_start "$@" ;;
