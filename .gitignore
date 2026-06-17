@@ -21,6 +21,7 @@ paper_trader/generated/
 paper_trader/reports/
 reports/daily_activity/
 reports/source_coverage/
+reports/production_audit/
 logs/
 scripts/server.conf
 .DS_Store

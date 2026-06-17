@@ -42,6 +42,9 @@ step() { print -P "\n%F{cyan}== $* ==%f"; }
 
 die() { err "$*"; exit 1; }
 
+# Read one value from a multi-line "key=value" blob (handles '=' in the value).
+_kv_get() { print -r -- "$1" | awk -F= -v k="$2" '$1==k{sub(/^[^=]*=/,"");print;exit}'; }
+
 # --- connection ------------------------------------------------------------
 load_conf() {
   if [ ! -f "$CONF" ]; then
@@ -566,6 +569,187 @@ except Exception:
 PY'
 }
 
+cmd_production_audit() {
+  load_conf
+  step "Production audit (read-only)"
+  local DAY_LOCAL; DAY_LOCAL="$(date +%F)"
+
+  # 1) reachability ---------------------------------------------------------
+  local REACHABLE=1
+  rsh "echo ok" >/dev/null 2>&1 || REACHABLE=0
+
+  local INFRA="" METRICS=""
+  local SERVER_TIME="" COMMIT="" DASH="UNREACHABLE" SCHED="UNREACHABLE"
+  local API_CODE="000" API_DB="" HEARTBEAT="" RATE_HITS="0" RES_DB=""
+
+  if [ "$REACHABLE" -eq 1 ]; then
+    # 2)+3) infra: agent states, loopback API health + db_path, heartbeat, log rate-limit hits
+    INFRA="$(inproj '
+      echo "server_time=$(date "+%Y-%m-%d %H:%M:%S %Z")"
+      echo "commit=$(git rev-parse --short HEAD 2>/dev/null)"
+      for L in com.alphalab.dashboard com.alphalab.scheduler; do
+        S="$(launchctl print gui/$(id -u)/$L 2>/dev/null | awk -F"= " "/state =/{print \$2; exit}")"
+        echo "agent_${L}=${S:-NOT_LOADED}"
+      done
+      code=$(curl -sS --max-time 10 -o /tmp/ops_audit_health.json -w "%{http_code}" http://127.0.0.1:'"$PORT"'/api/health 2>/dev/null || echo 000)
+      echo "api_health_code=$code"
+      echo "api_db_path=$(sed -n "s/.*\"db_path\": *\"\([^\"]*\)\".*/\1/p" /tmp/ops_audit_health.json 2>/dev/null | head -n1)"
+      echo "heartbeat=$(.venv/bin/python -m alpha_lab.db_status --json 2>/dev/null | sed -n "s/.*\"scheduler_heartbeat_at\": *\"\{0,1\}\([^\",]*\).*/\1/p" | head -n1)"
+      rl=$(grep -Eic "rate.?limit|429|too many requests" logs/dashboard.err.log logs/dashboard.out.log logs/scheduler.log 2>/dev/null | awk -F: "{s+=\$2} END{print s+0}")
+      echo "rate_limit_hits=$rl"
+      true
+    ')" || INFRA=""
+    # 4)-10) data side: read-only DB + automation posture (no secrets)
+    METRICS="$(inproj '.venv/bin/python -m alpha_lab.production_audit --format kv 2>/dev/null')" || METRICS=""
+
+    SERVER_TIME="$(_kv_get "$INFRA" server_time)"
+    COMMIT="$(_kv_get "$INFRA" commit)"
+    DASH="$(_kv_get "$INFRA" agent_com.alphalab.dashboard)"; DASH="${DASH:-NOT_LOADED}"
+    SCHED="$(_kv_get "$INFRA" agent_com.alphalab.scheduler)"; SCHED="${SCHED:-NOT_LOADED}"
+    API_CODE="$(_kv_get "$INFRA" api_health_code)"; API_CODE="${API_CODE:-000}"
+    API_DB="$(_kv_get "$INFRA" api_db_path)"
+    HEARTBEAT="$(_kv_get "$INFRA" heartbeat)"
+    RATE_HITS="$(_kv_get "$INFRA" rate_limit_hits)"; RATE_HITS="${RATE_HITS:-0}"
+    RES_DB="$(_kv_get "$METRICS" db_path)"
+  fi
+
+  # data metrics (default to '?' so a failed read is obvious, never crashes) --
+  local AUDIT_DAY DB_EXISTS POLY_TODAY POLY_TOTAL POLY_LATEST SEC_TODAY SEC_TOTAL SEC_LATEST
+  local IDEAS_TODAY PAPER_TRADES DRY_TRADES PAPER_ORDERS PAPER_ORDERS_ID REJECTS BROKER_UNAVAIL
+  local SCANNER_ERRS RADAR_RUNS MODE ARMED CANTRIG
+  AUDIT_DAY="$(_kv_get "$METRICS" audit_day)"
+  DB_EXISTS="$(_kv_get "$METRICS" db_exists)"
+  POLY_TODAY="$(_kv_get "$METRICS" polygon_today)";  POLY_TOTAL="$(_kv_get "$METRICS" polygon_total)";  POLY_LATEST="$(_kv_get "$METRICS" polygon_latest)"
+  SEC_TODAY="$(_kv_get "$METRICS" sec_today)";        SEC_TOTAL="$(_kv_get "$METRICS" sec_total)";       SEC_LATEST="$(_kv_get "$METRICS" sec_latest)"
+  IDEAS_TODAY="$(_kv_get "$METRICS" ideas_today)"
+  PAPER_TRADES="$(_kv_get "$METRICS" paper_trades_today)"; DRY_TRADES="$(_kv_get "$METRICS" dry_run_trades_today)"
+  PAPER_ORDERS="$(_kv_get "$METRICS" paper_orders_today)"; PAPER_ORDERS_ID="$(_kv_get "$METRICS" paper_orders_with_broker_id)"
+  REJECTS="$(_kv_get "$METRICS" rejects_today)"; BROKER_UNAVAIL="$(_kv_get "$METRICS" broker_unavailable_today)"
+  SCANNER_ERRS="$(_kv_get "$METRICS" scanner_errors_today)"; RADAR_RUNS="$(_kv_get "$METRICS" catalyst_radar_runs_today)"
+  MODE="$(_kv_get "$METRICS" scheduler_mode)"; ARMED="$(_kv_get "$METRICS" paper_trades_armed)"; CANTRIG="$(_kv_get "$METRICS" paper_trades_can_trigger)"
+
+  # status determination ----------------------------------------------------
+  local -a RED YELLOW
+  if [ "$REACHABLE" -eq 0 ]; then
+    RED+=("server unreachable over SSH/Tailscale")
+  else
+    [ "$DASH" = "running" ]  || RED+=("dashboard LaunchAgent not running (state=${DASH})")
+    [ "$SCHED" = "running" ] || RED+=("scheduler LaunchAgent not running (state=${SCHED})")
+    [ "$API_CODE" = "200" ]  || RED+=("loopback API unhealthy (/api/health HTTP ${API_CODE})")
+    if [ -z "$METRICS" ]; then
+      YELLOW+=("could not read DB audit metrics (python module returned nothing)")
+    else
+      [ "$DB_EXISTS" = "true" ] || RED+=("resolved DB file does not exist on server")
+      if [ -n "$RES_DB" ] && [ -n "$API_DB" ] && [ "$RES_DB" != "$API_DB" ]; then
+        RED+=("split-brain DB: resolver=${RES_DB} vs API=${API_DB}")
+      fi
+    fi
+    [ -n "$HEARTBEAT" ] || YELLOW+=("no scheduler heartbeat recorded")
+    [ "${RATE_HITS:-0}" = "0" ] || YELLOW+=("${RATE_HITS} rate-limit/429 mention(s) in recent logs")
+  fi
+  # data-derived yellow reasons emitted by the module
+  local DR; DR="$(print -r -- "$METRICS" | sed -n 's/^data_reason=//p')"
+  if [ -n "$DR" ]; then
+    while IFS= read -r r; do [ -n "$r" ] && YELLOW+=("$r"); done <<< "$DR"
+  fi
+
+  local STATUS
+  if   [ ${#RED[@]}    -gt 0 ]; then STATUS="RED"
+  elif [ ${#YELLOW[@]} -gt 0 ]; then STATUS="YELLOW"
+  else STATUS="GREEN"; fi
+
+  # render markdown report --------------------------------------------------
+  local DAY="${AUDIT_DAY:-$DAY_LOCAL}"
+  local OUTDIR="$OPS_DIR/reports/production_audit"
+  mkdir -p "$OUTDIR"
+  local OUT="$OUTDIR/$DAY.md"
+
+  {
+    print -r -- "# AlphaLabs Production Audit — ${DAY}"
+    print -r -- ""
+    print -r -- "- Status: **${STATUS}**"
+    print -r -- "- Generated: $(date '+%Y-%m-%d %H:%M:%S %Z') (dev Mac) for server day ${DAY}"
+    print -r -- "- Server: ${TARGET} — ${SERVER_TIME:-unreachable} — commit ${COMMIT:-?}"
+    print -r -- "- Read-only: no trades placed, no .env/DB/code modified, no secrets printed."
+    print -r -- ""
+    print -r -- "## Status"
+    print -r -- ""
+    case "$STATUS" in
+      GREEN)  print -r -- "**GREEN** — data gathered today and core system healthy." ;;
+      YELLOW) print -r -- "**YELLOW** — system reachable but partial ingestion / no trades / needs attention." ;;
+      RED)    print -r -- "**RED** — a core path (server / scheduler / API / DB) is broken." ;;
+    esac
+    print -r -- ""
+    print -r -- "## Checks"
+    print -r -- ""
+    print -r -- "| # | Check | Result |"
+    print -r -- "| - | ----- | ------ |"
+    print -r -- "| 1 | Server reachable over Tailscale/SSH | $([ "$REACHABLE" -eq 1 ] && echo yes || echo NO) |"
+    print -r -- "| 2 | Dashboard / scheduler running | dashboard=${DASH} · scheduler=${SCHED} |"
+    print -r -- "| 3 | Resolver/API DB match | resolver=\`${RES_DB:-?}\` · api=\`${API_DB:-?}\` · heartbeat=${HEARTBEAT:-none} |"
+    print -r -- "| 4 | Polygon gathered alpha today | ${POLY_TODAY:-?} (total ${POLY_TOTAL:-?}, latest ${POLY_LATEST:-none}) |"
+    print -r -- "| 5 | SEC EDGAR gathered alpha today | ${SEC_TODAY:-?} (total ${SEC_TOTAL:-?}, latest ${SEC_LATEST:-none}) |"
+    print -r -- "| 6 | Ideas generated today | ${IDEAS_TODAY:-?} |"
+    print -r -- "| 7 | Paper trades submitted today | ${PAPER_TRADES:-?} trades · ${PAPER_ORDERS:-?} orders (${PAPER_ORDERS_ID:-?} w/ broker id) |"
+    print -r -- "| 8 | Ideas → trades today | see table below |"
+    print -r -- "| 9 | Rejects / errors / rate limits | rejects=${REJECTS:-?} · broker_unavailable=${BROKER_UNAVAIL:-?} · scanner_errors=${SCANNER_ERRS:-?} · rate_limit_log_hits=${RATE_HITS} |"
+    print -r -- "| 10 | Automation mode | mode=${MODE:-?} · paper_armed=${ARMED:-?} · can_trigger=${CANTRIG:-?} |"
+    print -r -- ""
+    print -r -- "## Ideas that became trades today"
+    print -r -- ""
+    local TLINES; TLINES="$(print -r -- "$METRICS" | sed -n 's/^trade=//p')"
+    if [ -n "$TLINES" ]; then
+      print -r -- "| Ticker | Mode | Idea source | Catalyst source | Status | Broker order |"
+      print -r -- "| ------ | ---- | ----------- | --------------- | ------ | ------------ |"
+      while IFS='|' read -r tk md isrc csrc st bk; do
+        [ -n "$tk" ] && print -r -- "| ${tk} | ${md} | ${isrc} | ${csrc} | ${st} | ${bk} |"
+      done <<< "$TLINES"
+    else
+      print -r -- "_No trades opened today._"
+    fi
+    print -r -- ""
+    print -r -- "## Blockers"
+    print -r -- ""
+    if [ ${#RED[@]} -gt 0 ]; then
+      for x in "${RED[@]}"; do print -r -- "- RED: ${x}"; done
+    fi
+    if [ ${#YELLOW[@]} -gt 0 ]; then
+      for x in "${YELLOW[@]}"; do print -r -- "- YELLOW: ${x}"; done
+    fi
+    [ ${#RED[@]} -eq 0 ] && [ ${#YELLOW[@]} -eq 0 ] && print -r -- "None."
+    print -r -- ""
+    if [ "$CANTRIG" = "true" ]; then
+      print -r -- "## Next safest fix"
+      print -r -- ""
+      print -r -- "Scheduler can trigger Alpaca **paper** orders (mode=paper, armed=true). If this is"
+      print -r -- "not intended, set \`ALPHALAB_SCHEDULER_MODE=dry_run\` in the server .env and run"
+      print -r -- "\`./ops restart\`. This audit changed nothing."
+      print -r -- ""
+    fi
+  } > "$OUT"
+
+  # concise terminal summary ------------------------------------------------
+  case "$STATUS" in
+    GREEN)  ok   "STATUS: GREEN — data gathered today and system healthy" ;;
+    YELLOW) warn "STATUS: YELLOW — partial ingestion / no trades / attention" ;;
+    RED)    err  "STATUS: RED — core path broken" ;;
+  esac
+  print "  server:    ${SERVER_TIME:-unreachable}   commit=${COMMIT:-?}"
+  print "  agents:    dashboard=${DASH}  scheduler=${SCHED}   API /api/health HTTP ${API_CODE}"
+  print "  DB:        resolver=${RES_DB:-?}"
+  print "             api=${API_DB:-?}   heartbeat=${HEARTBEAT:-none}"
+  print "  Polygon:   today=${POLY_TODAY:-?}  (total ${POLY_TOTAL:-?}, latest ${POLY_LATEST:-none})"
+  print "  SEC EDGAR: today=${SEC_TODAY:-?}  (total ${SEC_TOTAL:-?}, latest ${SEC_LATEST:-none})"
+  print "  ideas today=${IDEAS_TODAY:-?}   paper trades=${PAPER_TRADES:-?} (orders ${PAPER_ORDERS:-?}, broker-id ${PAPER_ORDERS_ID:-?})   dry-run trades=${DRY_TRADES:-?}"
+  print "  rejects=${REJECTS:-?}  broker_unavailable=${BROKER_UNAVAIL:-?}  scanner_errors=${SCANNER_ERRS:-?}  rate_limit_log_hits=${RATE_HITS}"
+  print "  automation: mode=${MODE:-?}  paper_armed=${ARMED:-?}  can_trigger=${CANTRIG:-?}"
+  if [ ${#RED[@]} -gt 0 ]; then print ""; err "blockers:"; for x in "${RED[@]}"; do print "    - $x"; done; fi
+  if [ ${#YELLOW[@]} -gt 0 ]; then print ""; warn "notes:"; for x in "${YELLOW[@]}"; do print "    - $x"; done; fi
+  print ""
+  ok "report saved: ${OUT#$OPS_DIR/}"
+  [ "$STATUS" = "RED" ] && return 1 || return 0
+}
+
 # --- runtime provider checks (no secrets printed) --------------------------
 cmd_check() {
   load_conf; require_reachable
@@ -595,9 +779,23 @@ cmd_check() {
           -H "APCA-API-KEY-ID: ${ALPACA_API_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET_KEY}" \
           "$base/v2/account" 2>/dev/null || echo 000)
         echo "$base/v2/account -> HTTP $code (200 = authed paper account, 401/403 = reachable but check keys)"'
+      inproj 'set -a; [ -f .env ] && source .env; set +a
+        data_code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
+          -H "APCA-API-KEY-ID: ${ALPACA_API_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET_KEY}" \
+          "https://data.alpaca.markets/v2/stocks/SPY/quotes/latest" 2>/dev/null || echo 000)
+        echo "data.alpaca.markets/v2/stocks/SPY/quotes/latest -> HTTP $data_code (200 = market data reachable, 401/403 = reachable but check entitlement/keys)"'
       ;;
     *) die "unknown provider '$provider' (use: polygon | sec | alpaca)" ;;
   esac
+}
+
+cmd_provider_status() {
+  step "Provider status (read-only; secrets hidden)"
+  cmd_check polygon
+  print ""
+  cmd_check sec
+  print ""
+  cmd_check alpaca
 }
 
 # --- launchd service management --------------------------------------------
@@ -684,8 +882,11 @@ Focused reads:
   ./ops db-info           Resolved DB path + idea/trade/catalyst counts
   ./ops agent-status      Recent scanner runs + registered scheduler jobs
   ./ops strategy-audit    Read-only check for idea/trade strategy labels
+  ./ops production-audit  Daily GREEN/YELLOW/RED audit (ingestion, trades, automation)
+                          saved to reports/production_audit/YYYY-MM-DD.md
 
 Runtime provider checks (secrets never printed):
+  ./ops provider-status
   ./ops check polygon
   ./ops check sec
   ./ops check alpaca
@@ -728,6 +929,8 @@ main() {
     db-info)           cmd_db_info "$@" ;;
     agent-status)      cmd_agent_status "$@" ;;
     strategy-audit)    cmd_strategy_audit "$@" ;;
+    production-audit)  cmd_production_audit "$@" ;;
+    provider-status)   cmd_provider_status "$@" ;;
     check)             cmd_check "$@" ;;
     status)            cmd_status "$@" ;;
     start)             cmd_start "$@" ;;
