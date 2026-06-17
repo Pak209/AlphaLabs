@@ -216,6 +216,58 @@ cmd_health() {
   rsh_tty "cd \"$PROJ\" && ./scripts/verify_old_mac_runtime.sh"
 }
 
+cmd_deploy_preflight() {
+  load_conf; require_reachable
+  step "Deploy preflight (read-only)"
+  local LOCAL_HEAD LOCAL_SHORT LOCAL_BRANCH LOCAL_DIRTY
+  LOCAL_HEAD="$(git -C "$OPS_DIR" rev-parse HEAD 2>/dev/null || true)"
+  LOCAL_SHORT="$(git -C "$OPS_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+  LOCAL_BRANCH="$(git -C "$OPS_DIR" branch --show-current 2>/dev/null || true)"
+  LOCAL_DIRTY="$(git -C "$OPS_DIR" status --porcelain 2>/dev/null | wc -l | tr -d " ")"
+
+  local REMOTE_REPORT
+  REMOTE_REPORT="$(inproj '
+    echo "remote_head=$(git rev-parse HEAD 2>/dev/null)"
+    echo "remote_short=$(git rev-parse --short HEAD 2>/dev/null)"
+    echo "remote_branch=$(git branch --show-current 2>/dev/null)"
+    echo "remote_dirty=$(git status --porcelain 2>/dev/null | wc -l | tr -d " ")"
+  ')" || die "could not read remote git state"
+  local REMOTE_HEAD REMOTE_SHORT REMOTE_BRANCH REMOTE_DIRTY
+  REMOTE_HEAD="$(print -r -- "$REMOTE_REPORT" | awk -F= '$1=="remote_head"{print $2; exit}')"
+  REMOTE_SHORT="$(print -r -- "$REMOTE_REPORT" | awk -F= '$1=="remote_short"{print $2; exit}')"
+  REMOTE_BRANCH="$(print -r -- "$REMOTE_REPORT" | awk -F= '$1=="remote_branch"{print $2; exit}')"
+  REMOTE_DIRTY="$(print -r -- "$REMOTE_REPORT" | awk -F= '$1=="remote_dirty"{print $2; exit}')"
+
+  local SAFETY; SAFETY="$(remote_safety_kv)" || die "could not read scheduler safety status"
+  local CAN_TRIGGER SAFE_MODE
+  CAN_TRIGGER="$(print -r -- "$SAFETY" | awk -F= '$1=="paper_trades_can_be_triggered_by_scheduler"{print $2; exit}')"
+  SAFE_MODE="$(print -r -- "$SAFETY" | awk -F= '$1=="safe_stabilization_mode"{print $2; exit}')"
+
+  print "  local:  ${LOCAL_SHORT:-unknown} (${LOCAL_BRANCH:-detached}), dirty=${LOCAL_DIRTY:-unknown}"
+  print "  remote: ${REMOTE_SHORT:-unknown} (${REMOTE_BRANCH:-detached}), dirty=${REMOTE_DIRTY:-unknown}"
+  if [ -n "$LOCAL_HEAD" ] && [ -n "$REMOTE_HEAD" ] && [ "$LOCAL_HEAD" = "$REMOTE_HEAD" ]; then
+    ok "code parity: local HEAD matches old Mac"
+  else
+    warn "code gap: local HEAD differs from old Mac"
+  fi
+  if [ "${LOCAL_DIRTY:-0}" = "0" ]; then ok "local checkout clean"
+  else warn "local checkout has ${LOCAL_DIRTY} uncommitted change(s); commit safe changes before deploy"; fi
+  if [ "${REMOTE_DIRTY:-0}" = "0" ]; then ok "old Mac checkout clean"
+  else warn "old Mac checkout has ${REMOTE_DIRTY} uncommitted change(s); bootstrap deploy will refuse to pull"; fi
+  if [ "$SAFE_MODE" = "true" ]; then ok "safe stabilization mode is true"
+  else warn "safe stabilization mode is false"; fi
+  if [ "$CAN_TRIGGER" = "true" ]; then
+    err "deploy blocked: scheduler paper jobs can trigger Alpaca PAPER orders"
+    print "  Next safe step: switch ALPHALAB_SCHEDULER_MODE=dry_run on the old Mac, restart scheduler intentionally, then rerun ./ops deploy-preflight."
+    exit 1
+  fi
+  if [ "${LOCAL_DIRTY:-0}" != "0" ] || [ "${REMOTE_DIRTY:-0}" != "0" ]; then
+    warn "deploy not ready: resolve dirty checkout(s) first"
+    exit 1
+  fi
+  ok "deploy preflight passed. Next command would be: ./ops deploy"
+}
+
 cmd_deploy() {
   load_conf; require_reachable
   step "Deploy (GitHub ff-only pull on the server)"
@@ -614,6 +666,7 @@ Setup / diagnostics:
   ./ops remote-status     One-glance server status (host, commit, agents, heartbeat)
 
 Deploy & health:
+  ./ops deploy-preflight  Read-only deploy readiness check (commit gap, dirty trees, safety)
   ./ops deploy            Pull code (git ff-only) + reload services + verify  [confirm]
   ./ops health            Run the full server-side runtime verifier
 
@@ -664,6 +717,7 @@ main() {
   case "$cmd" in
     doctor)            cmd_doctor "$@" ;;
     remote-status)     cmd_remote_status "$@" ;;
+    deploy-preflight)  cmd_deploy_preflight "$@" ;;
     deploy)            cmd_deploy "$@" ;;
     health)            cmd_health "$@" ;;
     logs)              cmd_logs "$@" ;;
