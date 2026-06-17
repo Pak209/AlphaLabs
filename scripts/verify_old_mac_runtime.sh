@@ -111,10 +111,25 @@ if [ -f "$PROJECT_DIR/.env" ]; then
   [ -n "${POLYGON_API_KEY:-}" ] && ok "POLYGON_API_KEY is present (value hidden)" || err "POLYGON_API_KEY is not set"
   [ -n "${SEC_USER_AGENT:-}" ]  && ok "SEC_USER_AGENT is present (value hidden)"  || err "SEC_USER_AGENT is not set"
   MODE="${ALPHALAB_SCHEDULER_MODE:-dry_run}"
+  ARMED="${ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES:-}"
   if [ "$MODE" = "dry_run" ]; then
     ok "ALPHALAB_SCHEDULER_MODE=dry_run (no live/paper orders)"
   else
     warn "ALPHALAB_SCHEDULER_MODE=$MODE (NOT dry_run — confirm this is intentional)"
+  fi
+  if [ "${ARMED:l}" = "true" ]; then
+    warn "ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES is armed (value hidden)"
+  else
+    ok "ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES is not armed"
+  fi
+  if [ "$MODE" = "paper" ] && [ "${ARMED:l}" = "true" ]; then
+    err "scheduler paper jobs can trigger Alpaca PAPER orders — switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization unless intentionally armed"
+  elif [ "$MODE" = "dry_run" ] && [ "${ARMED:l}" != "true" ]; then
+    ok "safe stabilization mode: scheduler dry_run + automation paper-trade guard disarmed"
+  elif [ "$MODE" = "paper" ]; then
+    warn "scheduler is paper, but automation paper-trade guard is disarmed; switch scheduler mode to dry_run for stabilization clarity"
+  else
+    warn "scheduler is dry_run, but automation paper-trade guard is armed; unset it for stabilization"
   fi
 else
   err ".env not found at $PROJECT_DIR/.env"
@@ -171,6 +186,18 @@ if "$PY" -m alpha_lab.runtime_diagnostics >/tmp/alphalab_diag.json 2>/tmp/alphal
   DIAG_DB="$("$PY" -c "import json;print(json.load(open('/tmp/alphalab_diag.json'))['db_path'])" 2>/dev/null)"
   [ "$DIAG_DB" = "$DB_PATH" ] && ok "diagnostics DB path matches resolver ($DIAG_DB)" \
     || warn "diagnostics DB path ($DIAG_DB) differs from resolver ($DB_PATH)"
+  SAFETY_LINE="$("$PY" - <<'PY' 2>/dev/null
+import json
+d=json.load(open('/tmp/alphalab_diag.json'))['scheduler_safety']
+print(
+    f"mode={d['scheduler_mode']} "
+    f"automation_paper_trading_armed={d['automation_paper_trading_armed']} "
+    f"paper_trades_can_be_triggered_by_scheduler={d['paper_trades_can_be_triggered_by_scheduler']} "
+    f"safe_stabilization_mode={d['safe_stabilization_mode']}"
+)
+PY
+)"
+  [ -n "$SAFETY_LINE" ] && ok "scheduler safety: $SAFETY_LINE" || warn "could not parse scheduler safety diagnostics"
 else
   err "runtime diagnostics failed (see /tmp/alphalab_diag.err)"
 fi

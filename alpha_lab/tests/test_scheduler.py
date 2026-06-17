@@ -35,6 +35,43 @@ def test_anything_but_paper_stays_dry_run(monkeypatch, value):
     assert scheduler._dry_run() is True
 
 
+def test_scheduler_safety_status_is_safe_by_default(monkeypatch):
+    monkeypatch.delenv("ALPHALAB_SCHEDULER_MODE", raising=False)
+    monkeypatch.delenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", raising=False)
+
+    status = scheduler.scheduler_safety_status()
+
+    assert status["scheduler_mode"] == "dry_run"
+    assert status["automation_paper_trading_armed"] is False
+    assert status["paper_trades_can_be_triggered_by_scheduler"] is False
+    assert status["safe_stabilization_mode"] is True
+
+
+def test_scheduler_safety_status_detects_fully_armed_paper_mode(monkeypatch):
+    monkeypatch.setenv("ALPHALAB_SCHEDULER_MODE", "paper")
+    monkeypatch.setenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "true")
+
+    status = scheduler.scheduler_safety_status()
+
+    assert status["scheduler_mode"] == "paper"
+    assert status["automation_paper_trading_armed"] is True
+    assert status["scheduler_paper_jobs_enabled"] is True
+    assert status["paper_trades_can_be_triggered_by_scheduler"] is True
+    assert status["safe_stabilization_mode"] is False
+
+
+def test_scheduler_safety_status_reports_half_armed_states(monkeypatch):
+    monkeypatch.setenv("ALPHALAB_SCHEDULER_MODE", "paper")
+    monkeypatch.delenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", raising=False)
+    assert scheduler.scheduler_safety_status()["paper_trades_can_be_triggered_by_scheduler"] is False
+    assert scheduler.scheduler_safety_status()["safe_stabilization_mode"] is False
+
+    monkeypatch.setenv("ALPHALAB_SCHEDULER_MODE", "dry_run")
+    monkeypatch.setenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "true")
+    assert scheduler.scheduler_safety_status()["paper_trades_can_be_triggered_by_scheduler"] is False
+    assert scheduler.scheduler_safety_status()["safe_stabilization_mode"] is False
+
+
 def test_build_scheduler_registers_all_jobs(monkeypatch):
     monkeypatch.delenv("ALPHALAB_SCHEDULER_MODE", raising=False)
     # Jobs are stored as lambdas and not invoked at build time, so a sentinel

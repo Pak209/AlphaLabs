@@ -1,0 +1,477 @@
+#!/bin/zsh
+#
+# ops — single remote-operations interface for AlphaLab.
+#
+# Runs on the DEV Mac and drives the dedicated OLD Mac runtime server over
+# Tailscale/SSH. It is a thin, read-mostly orchestrator: every action it takes
+# is an EXISTING on-server capability (scripts/*.sh, alpha_lab.* diagnostics,
+# launchctl, the loopback API). It changes no trading logic, scheduler logic,
+# database schema, or runtime behavior.
+#
+# Connection comes from scripts/server.conf (git-ignored). It prefers
+# TAILSCALE_HOST when set, so you can manage the server from anywhere on your
+# tailnet; otherwise it falls back to SERVER_HOST (LAN/Bonjour).
+#
+# Safety: state-changing actions (deploy, start, stop, restart, reload) ask for
+# confirmation. Pass --yes/-y to skip the prompt in trusted automation. ops
+# NEVER overwrites the server's .env, database, logs, or launchd config — it only
+# ever pulls code (git ff-only) and reloads services.
+#
+# Usage:
+#   ./ops <command> [subcommand] [--yes]
+#   ./ops help
+#
+set -u
+emulate -L zsh
+setopt pipefail
+
+OPS_DIR="${0:A:h}"
+CONF="$OPS_DIR/scripts/server.conf"
+EXAMPLE="$OPS_DIR/scripts/server.conf.example"
+
+# The always-on launchd services on the production Mac.
+AGENTS=(com.alphalab.dashboard com.alphalab.scheduler com.alphalab.options-validation)
+PORT="${ALPHALAB_PORT:-8787}"
+
+ASSUME_YES=0
+
+ok()   { print -P "%F{green}[OK]%f   $*"; }
+warn() { print -P "%F{yellow}[WARN]%f $*"; }
+err()  { print -P "%F{red}[FAIL]%f $*"; }
+step() { print -P "\n%F{cyan}== $* ==%f"; }
+
+die() { err "$*"; exit 1; }
+
+# --- connection ------------------------------------------------------------
+load_conf() {
+  if [ ! -f "$CONF" ]; then
+    err "missing $CONF"
+    print "Create it once:  cp ${EXAMPLE#$OPS_DIR/} scripts/server.conf  (then edit host/user)"
+    exit 1
+  fi
+  source "$CONF"
+  : "${SERVER_USER:?set SERVER_USER in scripts/server.conf}"
+  : "${REMOTE_PATH:=AlphaLab}"
+  # Prefer the tailnet name/IP for from-anywhere management; fall back to LAN.
+  REMOTE_HOST="${TAILSCALE_HOST:-${SERVER_HOST:-}}"
+  [ -n "$REMOTE_HOST" ] || die "set TAILSCALE_HOST or SERVER_HOST in scripts/server.conf"
+  TARGET="${SERVER_USER}@${REMOTE_HOST}"
+  # Literal $HOME (expanded on the SERVER, not locally) + the configured subdir.
+  PROJ='$HOME/'"$REMOTE_PATH"
+}
+
+# Run a one-shot command string on the server. Quiet connection, hard timeout.
+rsh() { ssh -o ConnectTimeout=8 -o BatchMode=no "$TARGET" "$1"; }
+
+# Run a command string with the working dir already inside the project.
+inproj() { rsh "cd \"$PROJ\" 2>/dev/null || { echo '__NO_PROJECT__'; exit 7; }; $1"; }
+
+# Interactive/streaming remote (for tail -f). Allocates a TTY.
+rsh_tty() { ssh -t -o ConnectTimeout=8 "$TARGET" "$1"; }
+
+confirm() {
+  local prompt="$1"
+  [ "$ASSUME_YES" -eq 1 ] && return 0
+  print ""
+  read "REPLY?${prompt} [y/N] "
+  case "$REPLY" in y|Y|yes|YES) return 0 ;; *) warn "aborted; nothing changed."; return 1 ;; esac
+}
+
+require_reachable() {
+  if ! rsh "echo ok" >/dev/null 2>&1; then
+    err "cannot reach $TARGET over SSH."
+    print "  - Is the old Mac awake and on the tailnet/LAN?"
+    print "  - Is Remote Login on? (System Settings > General > Sharing > Remote Login)"
+    print "  - Diagnose with:  ./ops doctor"
+    exit 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+cmd_doctor() {
+  load_conf
+  step "Tailscale + SSH readiness (target: $TARGET)"
+
+  # --- dev-Mac side ---
+  if command -v tailscale >/dev/null 2>&1; then
+    ok "tailscale installed on this Mac"
+    local DEV_IP; DEV_IP="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
+    if [ -n "$DEV_IP" ]; then ok "this Mac is connected to the tailnet ($DEV_IP)"
+    else warn "tailscale present but no tailnet IP — run: tailscale up"; fi
+  else
+    warn "tailscale not installed on this Mac — install from https://tailscale.com/download (or 'brew install tailscale')"
+  fi
+  if [ -n "${TAILSCALE_HOST:-}" ]; then ok "using TAILSCALE_HOST=$TAILSCALE_HOST"
+  else warn "TAILSCALE_HOST not set in server.conf; using SERVER_HOST=${SERVER_HOST:-<unset>} (LAN only)"; fi
+
+  # --- SSH reachability (proves Remote Login is enabled on the server) ---
+  if rsh "echo ok" >/dev/null 2>&1; then
+    ok "SSH reachable — Remote Login is enabled on the server"
+  else
+    err "SSH to $TARGET failed (Remote Login off, host down, or wrong host/user)"
+    print "  Test directly:  ssh $TARGET 'echo ok'"
+    exit 1
+  fi
+
+  # --- server side ---
+  local HOSTN; HOSTN="$(rsh 'scutil --get LocalHostName 2>/dev/null || hostname -s' 2>/dev/null)"
+  ok "server hostname: ${HOSTN:-unknown}"
+  local TS_IP; TS_IP="$(rsh 'command -v tailscale >/dev/null 2>&1 && tailscale ip -4 2>/dev/null | head -n1' 2>/dev/null)"
+  if [ -n "$TS_IP" ]; then ok "server tailnet IP: $TS_IP"
+  else warn "server has no detectable Tailscale IP (tailscale not up there?)"; fi
+
+  if inproj 'test -d .git && echo yes' 2>/dev/null | grep -q yes; then
+    ok "AlphaLab checkout found at $PROJ"
+  else
+    err "no AlphaLab git checkout at $PROJ on the server"
+    print "  Bootstrap it:  ssh $TARGET '/bin/zsh -c \"\$(curl -fsSL https://raw.githubusercontent.com/Pak209/AlphaLabs/main/scripts/bootstrap_old_mac_from_github.sh)\"'"
+    exit 1
+  fi
+  if inproj 'test -x .venv/bin/python && echo yes' 2>/dev/null | grep -q yes; then
+    ok "server virtualenv present"
+  else
+    warn "server virtualenv missing — run: ./ops deploy (or scripts/setup_old_mac.sh on the server)"
+  fi
+  print ""
+  ok "doctor complete. If all green, remote operations are ready."
+}
+
+cmd_remote_status() {
+  load_conf; require_reachable
+  step "Remote status: $TARGET"
+  local REPORT
+  REPORT="$(inproj '
+    echo "HOST $(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+    echo "TIME $(date "+%Y-%m-%d %H:%M:%S %Z")"
+    echo "UP $(uptime | sed "s/.*up //; s/,.*users.*//")"
+    echo "COMMIT $(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null)"
+    echo "DIRTY $(git status --porcelain 2>/dev/null | wc -l | tr -d " ")"
+    command -v tailscale >/dev/null 2>&1 && echo "TSIP $(tailscale ip -4 2>/dev/null | head -n1)"
+    for L in '"${AGENTS[*]}"'; do
+      S="$(launchctl print gui/$(id -u)/$L 2>/dev/null | awk -F"= " "/state =/{print \$2; exit}")"
+      echo "AGENT $L ${S:-NOT_LOADED}"
+    done
+  ')" || { err "status query failed"; exit 1; }
+
+  ok "reachable over SSH"
+  print -r -- "$REPORT" | awk '
+    $1=="HOST"  {printf "  host:    %s\n",$2}
+    $1=="TIME"  {$1="";sub(/^ /,"");printf "  time:    %s\n",$0}
+    $1=="UP"    {$1="";sub(/^ /,"");printf "  uptime:  %s\n",$0}
+    $1=="COMMIT"{printf "  commit:  %s (%s)\n",$2,$3}
+    $1=="DIRTY"{ if($2=="0") printf "  tree:    clean\n"; else printf "  tree:    %s uncommitted change(s)\n",$2}
+    $1=="TSIP"  {printf "  tailnet: %s\n",$2}
+    $1=="AGENT" {printf "  agent:   %-32s %s\n",$2,$3}
+  '
+  # Scheduler heartbeat (proves the always-on writer is alive on the same DB).
+  # Parse the server's own db_status JSON remotely — no local python involved.
+  local HBAT
+  HBAT="$(inproj '.venv/bin/python -m alpha_lab.db_status --json 2>/dev/null' \
+            | sed -n 's/.*"scheduler_heartbeat_at": *"\{0,1\}\([^",]*\).*/\1/p' | head -n1)"
+  if [ -n "$HBAT" ] && [ "$HBAT" != "null" ]; then ok "scheduler heartbeat: $HBAT"
+  else warn "no scheduler heartbeat yet"; fi
+  print ""
+  cmd_safety_status
+}
+
+cmd_health() {
+  load_conf; require_reachable
+  step "Full runtime health check (server-side verifier)"
+  print "Running scripts/verify_old_mac_runtime.sh on $TARGET …\n"
+  rsh_tty "cd \"$PROJ\" && ./scripts/verify_old_mac_runtime.sh"
+}
+
+cmd_deploy() {
+  load_conf; require_reachable
+  step "Deploy (GitHub ff-only pull on the server)"
+  local BEFORE; BEFORE="$(inproj 'git rev-parse --short HEAD 2>/dev/null')"
+  print "  target:        $TARGET"
+  print "  project:       $PROJ"
+  print "  current commit: ${BEFORE:-unknown}"
+  print "  action:        bootstrap (git fetch + pull --ff-only + pip), reload services, verify"
+  print "  PRESERVED:     .env, database, logs, reports, launchd config (never touched)"
+  confirm "Proceed with deploy?" || exit 0
+
+  step "1/3 — pull + dependencies (scripts/bootstrap_old_mac_from_github.sh)"
+  if ! rsh_tty "cd \"$PROJ\" && ./scripts/bootstrap_old_mac_from_github.sh"; then
+    err "bootstrap failed (dirty checkout, fetch error, or pip failure). Nothing reloaded."
+    exit 1
+  fi
+  local AFTER; AFTER="$(inproj 'git rev-parse --short HEAD 2>/dev/null')"
+
+  step "2/3 — reload always-on services"
+  inproj "launchctl kickstart -k gui/\$(id -u)/com.alphalab.dashboard 2>/dev/null; \
+          launchctl kickstart -k gui/\$(id -u)/com.alphalab.scheduler 2>/dev/null; echo reloaded" \
+    && ok "dashboard + scheduler kickstarted" || warn "kickstart returned non-zero (check ./ops status)"
+
+  step "3/3 — post-deploy verification"
+  rsh_tty "cd \"$PROJ\" && ./scripts/verify_old_mac_runtime.sh"
+
+  step "Deployment summary"
+  ok "commit: ${BEFORE:-unknown} -> ${AFTER:-unknown}"
+  print "  API:       ./ops api-status"
+  print "  scheduler: ./ops scheduler-status"
+  print "  database:  ./ops db-info"
+}
+
+# --- logs ------------------------------------------------------------------
+_log_paths() {
+  case "${1:-}" in
+    scheduler) print "logs/scheduler.log logs/launchd_scheduler.err.log" ;;
+    api)       print "logs/dashboard.err.log logs/dashboard.out.log" ;;
+    errors)    print "logs/dashboard.err.log logs/launchd_scheduler.err.log logs/launchd_options_validation.err.log" ;;
+    *)         print "" ;;
+  esac
+}
+
+cmd_logs() {
+  load_conf; require_reachable
+  local which="${1:-scheduler}"
+  local paths; paths="$(_log_paths "$which")"
+  [ -n "$paths" ] || die "unknown log target '$which' (use: scheduler | api | errors)"
+  local n="${2:-60}"
+  step "logs ($which): last $n lines from $TARGET"
+  inproj "for f in $paths; do [ -f \"\$f\" ] && { echo \"----- \$f -----\"; tail -n $n \"\$f\"; }; done; true"
+}
+
+cmd_tail() {
+  load_conf; require_reachable
+  local which="${1:-scheduler}"
+  local file
+  case "$which" in
+    scheduler) file="logs/scheduler.log" ;;
+    api)       file="logs/dashboard.err.log" ;;
+    *) die "unknown tail target '$which' (use: scheduler | api)" ;;
+  esac
+  step "tail -f $file on $TARGET (Ctrl-C to stop)"
+  rsh_tty "cd \"$PROJ\" && touch \"$file\" 2>/dev/null; tail -n 40 -f \"$file\""
+}
+
+# --- focused status reads --------------------------------------------------
+cmd_scheduler_status() {
+  load_conf; require_reachable
+  step "Scheduler status"
+  inproj 'L=com.alphalab.scheduler
+    S="$(launchctl print gui/$(id -u)/$L 2>/dev/null | awk -F"= " "/state =/{print \$2; exit}")"
+    echo "agent: ${S:-NOT_LOADED}"
+    .venv/bin/python -m alpha_lab.db_status --json 2>/dev/null \
+      | sed -n "s/.*\"scheduler_heartbeat_at\": *\"\{0,1\}\([^\",]*\).*/heartbeat: \1/p" | head -n1
+    echo "--- recent scheduler log ---"
+    [ -f logs/scheduler.log ] && tail -n 15 logs/scheduler.log || echo "(no scheduler.log yet)"'
+}
+
+cmd_api_status() {
+  load_conf; require_reachable
+  step "API status (loopback http://127.0.0.1:${PORT} on the server)"
+  inproj "code=\$(curl -sS --max-time 10 -o /tmp/ops_health.json -w '%{http_code}' http://127.0.0.1:${PORT}/api/health 2>/dev/null || echo 000)
+    echo \"/api/health -> HTTP \$code\"
+    [ \"\$code\" = 200 ] && cat /tmp/ops_health.json && echo
+    dbc=\$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:${PORT}/api/db-status 2>/dev/null || echo 000)
+    echo \"/api/db-status -> HTTP \$dbc\"
+    cat=\$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:${PORT}/api/catalysts/intelligence 2>/dev/null || echo 000)
+    echo \"/api/catalysts/intelligence -> HTTP \$cat\""
+}
+
+cmd_safety_status() {
+  load_conf; require_reachable
+  step "Scheduler safety status"
+  inproj 'set -a; [ -f .env ] && source .env; set +a
+    mode="$(printf "%s" "${ALPHALAB_SCHEDULER_MODE:-dry_run}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    [ "$mode" = "paper" ] || mode="dry_run"
+    armed="$(printf "%s" "${ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES:-}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    paper_guard_armed=false; [ "$armed" = "true" ] && paper_guard_armed=true
+    scheduler_paper_jobs_enabled=false; [ "$mode" = "paper" ] && scheduler_paper_jobs_enabled=true
+    can_trigger=false
+    if [ "$scheduler_paper_jobs_enabled" = true ] && [ "$paper_guard_armed" = true ]; then can_trigger=true; fi
+    safe_stabilization=false
+    if [ "$mode" = "dry_run" ] && [ "$paper_guard_armed" = false ]; then safe_stabilization=true; fi
+    echo "  ALPHALAB_SCHEDULER_MODE: $mode"
+    echo "  automation paper trading armed: $paper_guard_armed"
+    echo "  scheduler paper jobs enabled: $scheduler_paper_jobs_enabled"
+    echo "  paper trades can be triggered by scheduler jobs: $can_trigger"
+    echo "  safe stabilization mode: $safe_stabilization"
+    if [ "$safe_stabilization" = true ]; then
+      echo "  recommendation: safe for stabilization: scheduler dry_run and automation paper-trade guard disarmed"
+    elif [ "$can_trigger" = true ]; then
+      echo "  recommendation: paper orders are armed: switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization unless this is intentional"
+    elif [ "$mode" = "paper" ]; then
+      echo "  recommendation: scheduler is paper but automation paper-trade guard is disarmed; switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization clarity"
+    else
+      echo "  recommendation: scheduler is dry_run but automation paper-trade guard is armed; unset ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES for stabilization"
+    fi'
+}
+
+cmd_db_info() {
+  load_conf; require_reachable
+  step "Database info (server-resolved path + live counts)"
+  inproj '.venv/bin/python -m alpha_lab.db_status'
+}
+
+# --- runtime provider checks (no secrets printed) --------------------------
+cmd_check() {
+  load_conf; require_reachable
+  local provider="${1:-}"
+  [ -n "$provider" ] || die "usage: ./ops check <polygon|sec|alpaca>"
+  step "Runtime check: $provider (key presence + endpoint reachability; secrets hidden)"
+  case "$provider" in
+    polygon)
+      inproj 'set -a; [ -f .env ] && source .env; set +a
+        [ -n "${POLYGON_API_KEY:-}" ] && echo "POLYGON_API_KEY: present (hidden)" || echo "POLYGON_API_KEY: MISSING"
+        code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" "https://api.polygon.io/v1/marketstatus/now?apiKey=${POLYGON_API_KEY}" 2>/dev/null || echo 000)
+        echo "api.polygon.io -> HTTP $code (200/401/403 = reachable)"'
+      ;;
+    sec)
+      inproj 'set -a; [ -f .env ] && source .env; set +a
+        [ -n "${SEC_USER_AGENT:-}" ] && echo "SEC_USER_AGENT: present" || echo "SEC_USER_AGENT: MISSING"
+        code=$(curl -sS --max-time 10 -A "${SEC_USER_AGENT:-AlphaLab/0.1}" -o /dev/null -w "%{http_code}" "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&output=atom" 2>/dev/null || echo 000)
+        echo "www.sec.gov -> HTTP $code (200 = reachable)"'
+      ;;
+    alpaca)
+      inproj 'set -a; [ -f .env ] && source .env; set +a
+        [ -n "${ALPACA_API_KEY:-}" ] && echo "ALPACA_API_KEY: present (hidden)" || echo "ALPACA_API_KEY: MISSING"
+        [ -n "${ALPACA_SECRET_KEY:-}" ] && echo "ALPACA_SECRET_KEY: present (hidden)" || echo "ALPACA_SECRET_KEY: MISSING"
+        base="${ALPACA_PAPER_BASE_URL:-https://paper-api.alpaca.markets}"
+        echo "base URL: $base"
+        code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
+          -H "APCA-API-KEY-ID: ${ALPACA_API_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET_KEY}" \
+          "$base/v2/account" 2>/dev/null || echo 000)
+        echo "$base/v2/account -> HTTP $code (200 = authed paper account, 401/403 = reachable but check keys)"'
+      ;;
+    *) die "unknown provider '$provider' (use: polygon | sec | alpaca)" ;;
+  esac
+}
+
+# --- launchd service management --------------------------------------------
+_agent_states() {
+  inproj 'for L in '"${AGENTS[*]}"'; do
+    S="$(launchctl print gui/$(id -u)/$L 2>/dev/null | awk -F"= " "/state =/{print \$2; exit}")"
+    printf "  %-34s %s\n" "$L" "${S:-NOT_LOADED}"
+  done'
+}
+
+cmd_status() {
+  load_conf; require_reachable
+  step "LaunchAgent status on $TARGET"
+  _agent_states
+}
+
+cmd_start() {
+  load_conf; require_reachable
+  confirm "Start (bootstrap) all AlphaLab LaunchAgents on $TARGET?" || exit 0
+  step "Starting LaunchAgents"
+  inproj 'U=$(id -u); for L in '"${AGENTS[*]}"'; do
+    P="$HOME/Library/LaunchAgents/$L.plist"
+    if [ -f "$P" ]; then launchctl bootstrap gui/$U "$P" 2>/dev/null && echo "started $L" || echo "already loaded: $L"; \
+    else echo "MISSING plist: $P (run scripts/setup_old_mac.sh)"; fi
+  done'
+  _agent_states
+}
+
+cmd_stop() {
+  load_conf; require_reachable
+  confirm "Stop (bootout) all AlphaLab LaunchAgents on $TARGET? This halts the scheduler + dashboard." || exit 0
+  step "Stopping LaunchAgents"
+  inproj 'U=$(id -u); for L in '"${AGENTS[*]}"'; do
+    launchctl bootout gui/$U/$L 2>/dev/null && echo "stopped $L" || echo "not loaded: $L"
+  done'
+  _agent_states
+}
+
+cmd_restart() {
+  load_conf; require_reachable
+  confirm "Restart (kickstart) the always-on AlphaLab services on $TARGET?" || exit 0
+  step "Restarting dashboard + scheduler"
+  inproj 'U=$(id -u)
+    launchctl kickstart -k gui/$U/com.alphalab.dashboard 2>/dev/null && echo "restarted dashboard" || echo "dashboard not loaded"
+    launchctl kickstart -k gui/$U/com.alphalab.scheduler 2>/dev/null && echo "restarted scheduler" || echo "scheduler not loaded"'
+  _agent_states
+}
+
+cmd_reload() {
+  load_conf; require_reachable
+  confirm "Reload all AlphaLab LaunchAgents (re-render plists + bootout/bootstrap) on $TARGET?" || exit 0
+  step "Reloading LaunchAgents via scripts/setup_old_mac.sh"
+  warn "setup_old_mac.sh also applies power settings and may prompt for the server's sudo password."
+  rsh_tty "cd \"$PROJ\" && ./scripts/setup_old_mac.sh"
+}
+
+usage() {
+  cat <<'EOF'
+ops — AlphaLab remote operations (dev Mac -> old Mac over Tailscale/SSH)
+
+Setup / diagnostics:
+  ./ops doctor            Verify Tailscale + SSH + server checkout are ready
+  ./ops remote-status     One-glance server status (host, commit, agents, heartbeat)
+
+Deploy & health:
+  ./ops deploy            Pull code (git ff-only) + reload services + verify  [confirm]
+  ./ops health            Run the full server-side runtime verifier
+
+Monitoring:
+  ./ops logs scheduler    Tail recent scheduler logs (also: api | errors) [N lines]
+  ./ops logs api
+  ./ops logs errors
+  ./ops tail scheduler    Stream a log live (also: api). Ctrl-C to stop.
+  ./ops tail api
+
+Focused reads:
+  ./ops scheduler-status  Scheduler agent state + heartbeat + recent log
+  ./ops api-status        Loopback API health (/api/health, db-status, catalysts)
+  ./ops safety-status     Scheduler mode + automation paper-trade guard status
+  ./ops db-info           Resolved DB path + idea/trade/catalyst counts
+
+Runtime provider checks (secrets never printed):
+  ./ops check polygon
+  ./ops check sec
+  ./ops check alpaca
+
+LaunchAgent management:
+  ./ops status            Show all agent states
+  ./ops start             Bootstrap all agents                [confirm]
+  ./ops stop              Bootout all agents                  [confirm]
+  ./ops restart           Kickstart dashboard + scheduler     [confirm]
+  ./ops reload            Re-render + reload via setup script [confirm]
+
+Flags:
+  --yes, -y               Skip confirmation prompts
+
+Connection comes from scripts/server.conf (prefers TAILSCALE_HOST, falls back to
+SERVER_HOST). ops never overwrites the server's .env, database, logs, or config.
+EOF
+}
+
+# ---------------------------------------------------------------------------
+main() {
+  local args=()
+  for a in "$@"; do
+    case "$a" in --yes|-y) ASSUME_YES=1 ;; *) args+=("$a") ;; esac
+  done
+  set -- "${args[@]}"
+
+  local cmd="${1:-help}"; shift 2>/dev/null || true
+  case "$cmd" in
+    doctor)            cmd_doctor "$@" ;;
+    remote-status)     cmd_remote_status "$@" ;;
+    deploy)            cmd_deploy "$@" ;;
+    health)            cmd_health "$@" ;;
+    logs)              cmd_logs "$@" ;;
+    tail)              cmd_tail "$@" ;;
+    scheduler-status)  cmd_scheduler_status "$@" ;;
+    api-status)        cmd_api_status "$@" ;;
+    safety-status)     cmd_safety_status "$@" ;;
+    db-info)           cmd_db_info "$@" ;;
+    check)             cmd_check "$@" ;;
+    status)            cmd_status "$@" ;;
+    start)             cmd_start "$@" ;;
+    stop)              cmd_stop "$@" ;;
+    restart)           cmd_restart "$@" ;;
+    reload)            cmd_reload "$@" ;;
+    help|-h|--help)    usage ;;
+    *) err "unknown command: $cmd"; print ""; usage; exit 2 ;;
+  esac
+}
+
+main "$@"

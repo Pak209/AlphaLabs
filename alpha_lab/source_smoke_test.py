@@ -24,7 +24,7 @@ import json
 import os
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from .env import load_dotenv
@@ -62,6 +62,69 @@ def _http_get_json(url: str, headers: dict[str, str] | None = None) -> tuple[str
         return "error", None, f"HTTP {exc.code}"
     except Exception as exc:  # noqa: BLE001 — network/parse errors all collapse to "error"
         return "error", None, _safe_error(exc)
+
+
+# --------------------------------------------------------------------------- #
+# Alpaca paper account + market data
+# --------------------------------------------------------------------------- #
+def _alpaca_headers() -> dict[str, str]:
+    return {
+        "APCA-API-KEY-ID": os.getenv("ALPACA_API_KEY", "").strip(),
+        "APCA-API-SECRET-KEY": os.getenv("ALPACA_SECRET_KEY", "").strip(),
+        "Accept": "application/json",
+    }
+
+
+def probe_alpaca_paper() -> dict[str, Any]:
+    api_key = os.getenv("ALPACA_API_KEY", "").strip()
+    secret_key = os.getenv("ALPACA_SECRET_KEY", "").strip()
+    base_url = os.getenv("ALPACA_PAPER_BASE_URL", "https://paper-api.alpaca.markets").strip()
+    result: dict[str, Any] = {
+        "api_key_present": _present(api_key),
+        "secret_key_present": _present(secret_key),
+        "paper_base_url_present": _present(base_url),
+        "paper_base_url_valid": urlparse(base_url).netloc.lower() == "paper-api.alpaca.markets",
+        "account_status": "not_checked",
+        "market_data_status": "not_checked",
+        "status": "no_credentials",
+    }
+    if not api_key or not secret_key:
+        result["action"] = "Set ALPACA_API_KEY and ALPACA_SECRET_KEY for the paper account."
+        return result
+    if not result["paper_base_url_valid"]:
+        result["status"] = "invalid_paper_base_url"
+        result["action"] = "Set ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets."
+        return result
+
+    account_status, account_data, account_error = _http_get_json(
+        base_url.rstrip("/") + "/v2/account",
+        headers=_alpaca_headers(),
+    )
+    result["account_status"] = account_status
+    if account_error:
+        result["account_error"] = account_error
+    if isinstance(account_data, dict):
+        result["trading_blocked"] = bool(account_data.get("trading_blocked") or account_data.get("account_blocked"))
+
+    market_status, market_data, market_error = _http_get_json(
+        "https://data.alpaca.markets/v2/stocks/SPY/quotes/latest",
+        headers=_alpaca_headers(),
+    )
+    result["market_data_status"] = market_status
+    if market_error:
+        result["market_data_error"] = market_error
+    if isinstance(market_data, dict):
+        result["market_data_has_quote"] = bool(market_data.get("quote"))
+
+    if account_status == "success" and market_status in {"success", "no_data"}:
+        result["status"] = "success"
+    elif account_status in {"unauthorized", "rate_limited"} or market_status in {"unauthorized", "rate_limited"}:
+        result["status"] = account_status if account_status != "success" else market_status
+        result["action"] = "Check Alpaca paper credentials and market-data entitlement."
+    else:
+        result["status"] = "error"
+        result["action"] = "Check network access to paper-api.alpaca.markets and data.alpaca.markets."
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -223,6 +286,7 @@ def run_smoke_test(futures_limit: int = 3, sec_max_symbols: int = 5) -> dict[str
     return {
         "polygon": probe_polygon(symbols),
         "sec_edgar": probe_sec(symbols, max_symbols=sec_max_symbols),
+        "alpaca_paper": probe_alpaca_paper(),
         "futures": probe_futures(limit=futures_limit),
         "options": probe_options(),
     }
@@ -231,6 +295,7 @@ def run_smoke_test(futures_limit: int = 3, sec_max_symbols: int = 5) -> dict[str
 def _print_human(report: dict[str, Any]) -> None:
     poly = report["polygon"]
     sec = report["sec_edgar"]
+    alpaca = report["alpaca_paper"]
     fut = report["futures"]
     opt = report["options"]
 
@@ -253,6 +318,17 @@ def _print_human(report: dict[str, Any]) -> None:
     print(f"  candidate count:    {sec['candidate_count']}")
 
     print("")
+    print("Alpaca paper:")
+    print(f"  API key present:      {'yes' if alpaca['api_key_present'] else 'no'}")
+    print(f"  secret key present:   {'yes' if alpaca['secret_key_present'] else 'no'}")
+    print(f"  paper base URL valid: {'yes' if alpaca['paper_base_url_valid'] else 'no'}")
+    print(f"  account status:       {alpaca['account_status']}")
+    print(f"  market data status:   {alpaca['market_data_status']}")
+    print(f"  overall status:       {alpaca['status']}")
+    if alpaca.get("action"):
+        print(f"  action:               {alpaca['action']}")
+
+    print("")
     print("Futures (Polygon aggregates):")
     print(f"  key present:          {'yes' if fut['key_present'] else 'no'}")
     print(f"  contracts checked:    {fut['contracts_checked']}")
@@ -269,7 +345,7 @@ def _print_human(report: dict[str, Any]) -> None:
 
 # A source is "healthy enough" for --strict if it succeeded, returned no data
 # (entitled but quiet, e.g. market closed), or is simply not configured.
-_OK_STATUSES = {"success", "no_data", "no_key", "no_user_agent"}
+_OK_STATUSES = {"success", "no_data", "no_key", "no_user_agent", "no_credentials"}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -31,6 +31,45 @@ def automation_mode() -> str:
     return "paper" if mode == "paper" else "dry_run"
 
 
+def automation_paper_trading_armed() -> bool:
+    """Return whether the second automation-paper-trade guard is armed."""
+    return os.getenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "").strip().lower() == "true"
+
+
+def scheduler_safety_status() -> dict[str, object]:
+    """Read-only summary of whether scheduler jobs can place paper orders."""
+    mode = automation_mode()
+    paper_guard_armed = automation_paper_trading_armed()
+    scheduler_paper_jobs_enabled = mode == "paper"
+    paper_trades_can_be_triggered_by_scheduler = scheduler_paper_jobs_enabled and paper_guard_armed
+    safe_stabilization_mode = mode == "dry_run" and not paper_guard_armed
+    if safe_stabilization_mode:
+        recommendation = "safe for stabilization: scheduler dry_run and automation paper-trade guard disarmed"
+    elif paper_trades_can_be_triggered_by_scheduler:
+        recommendation = (
+            "paper orders are armed: switch ALPHALAB_SCHEDULER_MODE=dry_run "
+            "for stabilization unless this is intentional"
+        )
+    elif mode == "paper":
+        recommendation = (
+            "scheduler is paper but automation paper-trade guard is disarmed; "
+            "switch ALPHALAB_SCHEDULER_MODE=dry_run for stabilization clarity"
+        )
+    else:
+        recommendation = (
+            "scheduler is dry_run but automation paper-trade guard is armed; "
+            "unset ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES for stabilization"
+        )
+    return {
+        "scheduler_mode": mode,
+        "automation_paper_trading_armed": paper_guard_armed,
+        "scheduler_paper_jobs_enabled": scheduler_paper_jobs_enabled,
+        "paper_trades_can_be_triggered_by_scheduler": paper_trades_can_be_triggered_by_scheduler,
+        "safe_stabilization_mode": safe_stabilization_mode,
+        "recommendation": recommendation,
+    }
+
+
 def _dry_run() -> bool:
     """True unless the scheduler is explicitly in paper mode. Evaluated per run."""
     return automation_mode() != "paper"

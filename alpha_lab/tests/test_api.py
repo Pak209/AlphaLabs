@@ -43,6 +43,24 @@ def test_health_and_idea_flow(tmp_path: Path):
     assert dashboard["counts"]["paper_orders_today"] == 0
 
 
+def test_safety_status_endpoint_reports_scheduler_guard(tmp_path: Path, monkeypatch):
+    lab = AlphaLabService(
+        db_path=str(tmp_path / "api_safety.sqlite3"),
+        risk_config_path="alpha_lab/config.example.json",
+        audit_log_path=str(tmp_path / "audit_safety.jsonl"),
+    )
+    client = TestClient(create_app(lab))
+    monkeypatch.setenv("ALPHALAB_SCHEDULER_MODE", "paper")
+    monkeypatch.delenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", raising=False)
+
+    body = client.get("/api/safety-status").json()
+
+    assert body["scheduler_mode"] == "paper"
+    assert body["automation_paper_trading_armed"] is False
+    assert body["paper_trades_can_be_triggered_by_scheduler"] is False
+    assert body["safe_stabilization_mode"] is False
+
+
 def test_import_and_test_endpoint(tmp_path: Path):
     lab = AlphaLabService(
         db_path=str(tmp_path / "api_import.sqlite3"),

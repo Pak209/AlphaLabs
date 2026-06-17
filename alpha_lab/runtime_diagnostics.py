@@ -14,7 +14,7 @@ from apscheduler.schedulers.base import SchedulerNotRunningError
 
 from .database import connect, resolve_db_path
 from .env import find_dotenv, load_dotenv, parse_dotenv
-from .scheduler import automation_mode, build_scheduler
+from .scheduler import automation_mode, build_scheduler, scheduler_safety_status
 
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
@@ -124,6 +124,7 @@ def build_diagnostics() -> dict[str, Any]:
             datetime.fromtimestamp(db_stat.st_mtime, LOCAL_TZ).isoformat() if db_stat else None
         ),
         "scheduler_mode": automation_mode(),
+        "scheduler_safety": scheduler_safety_status(),
         "scheduler_enabled_by_launchd": "unknown",
         "scheduler_job_count": len(jobs),
         "scheduler_jobs": jobs,
