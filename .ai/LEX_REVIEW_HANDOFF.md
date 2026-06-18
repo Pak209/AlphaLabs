@@ -6,17 +6,21 @@ Keep this current and concise: replace stale information instead of appending hi
 _Last updated: 2026-06-18_
 
 ## Current Branch
-`tooling/codexpro-devspace` (5 commits ahead of `main`, 0 behind).
+`tooling/codexpro-devspace` (6 commits ahead of `main`, 0 behind).
 
 ## Git Status Summary
-- Working tree: **clean** (`git status --short` empty).
-- HEAD: `e1999c1` — docs: add remote-ops runbook, dated handoff, and Cloudflare stable launcher.
+- Working tree (before this pass): clean. This pass adds `docs/MANUAL_PAPER_VALIDATION.md`
+  (new) + this handoff edit; nothing committed/pushed.
+- HEAD: `be3757c` — docs: add Lex review handoff.
 - `main` / `origin/main`: `366597b` — feat: classify SEC offering filings as bearish catalysts.
-- **Not pushed.** No upstream tracking configured; the 5 ahead commits are local only.
+- **Not pushed.** No upstream tracking configured; the 6 ahead commits are local only.
+- Old-Mac runner: on `main` @ `366597b` (= `origin/main`), working tree clean.
 
-## This Pass Made Changes (NOT read-only)
-This session performed two authorized remediations: a **production scheduler disarm on
-the old-Mac runner** and a **working-tree cleanup**. Details below.
+## This Pass Was Read-Only (audit + planning docs)
+No trades, no scheduler/automation re-arm, no `.env`/launchd/deploy/push changes. This pass
+only read code, performed a **read-only** old-Mac audit over Tailscale, authored the manual
+paper-validation checklist, and updated this handoff. The disarm/cleanup notes below are from
+the prior pass (retained for context).
 
 ## Known Risks
 - **Exposure-limit widening is INTENTIONAL (paper-test capacity) — file is RUNTIME-ACTIVE.**
@@ -82,57 +86,96 @@ the old-Mac runner** and a **working-tree cleanup**. Details below.
 ## Latest Task
 
 ### Task Summary
-Resolved the `dacdca2` review: the exposure-limit widening is **intentional paper-test
-capacity, KEPT (equity=20, crypto=25), not reverted.** Confirmed `config.example.json` is
-runtime-active. Reframed the handoff from "accidental config risk" to "intentional decision
-with safety dependent on the other gates." No config/code changed.
+Stabilization pass: (1) defined "manual paper validation passed" as a concrete checklist in
+`docs/MANUAL_PAPER_VALIDATION.md`; (2) analyzed the `ALPHALAB_REQUIRE_PAPER_APPROVAL` gate and
+recommended setting it `true` on the runner before any paper re-arm; (3) audited dev↔old-Mac
+drift read-only and produced a deploy-readiness plan (no deploy). Read-only — no config/code/
+env/launchd/runtime changes.
 
-### Decisions Recorded
-1. **`config.example.json` is runtime-active** — the live default risk config for the
-   scheduler (`scheduler.py:144`) and API (`api.py:39`) via `DEFAULT_RISK_CONFIG`
-   (`service.py:46`); enforced at `paper_trader/decision_engine.py:56`. No alternate
-   `config.json`; not gitignored.
-2. **`max_open_positions` widening (equity 20, crypto 25) is intentional** for paper-test
-   capacity to exercise multiple concurrent ideas/signals. Do NOT revert `dacdca2`.
-3. **Wider position count is acceptable for PAPER ONLY.** With the position-count cap
-   deliberately loosened, remaining safety must be enforced by controlling:
-   - **scheduler mode** — keep `ALPHALAB_SCHEDULER_MODE=dry_run`
-   - **automation paper-trade flag** — keep `ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES` off
-   - **max trades per day** — equity `max_trades_per_day=10`, crypto `=3` (current)
-   - **position size** — equity `max_position_size_usd=1900` / `max_equity_pct_per_trade=0.02`;
-     crypto `max_position_size_usd=250` / `max_equity_pct_per_trade=0.01` (current)
-   - **approval policy** — `ALPHALAB_REQUIRE_PAPER_APPROVAL` (currently false on runner)
-4. **Hard guardrails this stabilization window:** old-Mac scheduler stays disarmed/dry_run;
-   NO automated paper trading until manual paper validation passes; no deploy, no scheduler
-   re-arm, no trades.
+### 1. Manual paper validation — DEFINED
+- Full checklist: `docs/MANUAL_PAPER_VALIDATION.md`. First test is conservative: ONE
+  human-selected EQUITY idea, manual paper path, scheduler `dry_run`, automation flag off,
+  human approval required, paper endpoint only.
+- Pass = single attributable equity paper order (idea→approval→trade→audit→Performance), with
+  the scheduler proven idle/`dry_run` and same-DB proof intact. Any live-endpoint contact,
+  scheduler-placed order, missing approval, blank price, or missing audit/DB record = fail →
+  stop, stay `dry_run`/disarmed.
+
+### 2. Approval policy (`ALPHALAB_REQUIRE_PAPER_APPROVAL`) — RECOMMENDATION
+- **How it works:** `_paper_approval_required()` (`service.py:1752`) reads the env var
+  (default `true`; only `false`-ish values disable it). It is consumed by
+  `_paper_execution_approval_error()` (`service.py:1716`), which `place_trade()` calls on EVERY
+  non-dry-run execution (`service.py:846`).
+- **Scope:** `place_trade` is the single choke point for BOTH manual (`test_trending_strategies`)
+  and automation (`import_and_test`, `poll_live_catalysts`, etc.) paper paths → the flag
+  governs **both**. BUT the gate only applies to ideas that are **analyst-assisted** OR
+  **crypto** (`service.py:1722`); plain non-assisted equity ideas skip it entirely. Rejected/
+  expired ideas are ALWAYS blocked regardless of the flag.
+- **true vs false:** `true` → an analyst-assisted/crypto idea must be `approved` in the
+  Approvals page before a paper order places; otherwise `needs_human_approval`, no order.
+  `false` → those ideas skip the human gate (only rejected/expired still blocked).
+- **Recommendation:** Set `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` on the old Mac **before any
+  paper re-arm**. It is the safest value for first manual validation (defense-in-depth for the
+  manual path and a hard prerequisite once automation is later considered). Currently `false`
+  on the runner. NOT changed this pass — recommendation only. Caveat: it does not cover plain
+  non-assisted equity ideas, so the validation idea should be analyst-assisted (or rely on the
+  human nature of the manual test) for the gate to bite.
+
+### 3. Dev ↔ Old-Mac drift / deploy-readiness — PLAN (no deploy)
+- **Dev:** `tooling/codexpro-devspace` @ `be3757c`, 6 ahead / 0 behind `main`, clean, NOT pushed.
+- **Old Mac:** `main` @ `366597b` (= `origin/main`), clean.
+- **Delta (dev has, runner lacks):** `bf7f64d`, `2c4c52c`, `6227f46`, `dacdca2`, `e1999c1`,
+  `be3757c` (CodexPro tooling/docs, multi-coin crypto + Yahoo fallback, exposure widening,
+  runbook/handoff/launcher, this handoff).
+- **Old-Mac safety (audited read-only over Tailscale):** `safe_stabilization_mode: true`
+  (mode=`dry_run`, automation guard `false`, paper-trigger `false`). Scheduler + dashboard
+  LaunchAgents `running`; fresh heartbeat `2026-06-18T16:30 PT`. `require_approval=false`,
+  `manual_paper=true`, `.env` perms `600`.
+- **DB path correct:** yes — resolver == heartbeat == db_status ==
+  `/Users/danielkimoto/AlphaLab/alpha_lab/data/alpha_lab.sqlite3` (no split-brain). ideas=119,
+  trades=32, catalyst_events=213.
+- **Before deploying this branch:** (a) pass manual paper validation first; (b) reconcile the
+  6 unpushed commits into `main` (PR or merge — runner tracks `main`); (c) re-confirm the
+  `dacdca2` widening is intended for the runner (it is — keep equity 20 / crypto 25); (d) keep
+  gates safe and set `REQUIRE_PAPER_APPROVAL=true` if re-arming; (e) back up `.env`; (f) deploy
+  code-only, never overwrite the live `.env`/DB; (g) stop services before any tree move.
+- **Immediately after deploy:** run `scripts/verify_old_mac_runtime.sh` (or
+  `./ops remote-status/safety-status/health`) — confirm commit matches, `safe_stabilization_mode:
+  true`, DB path unchanged + same-DB proof, fresh heartbeat, expected job count, dashboard on
+  loopback, paper checks 200.
 
 ### Files Changed
-- `.ai/LEX_REVIEW_HANDOFF.md` (this update only). **No config/code changed; `dacdca2` kept.**
+- `docs/MANUAL_PAPER_VALIDATION.md` (new) + `.ai/LEX_REVIEW_HANDOFF.md` (this update). **No
+  config/code/env/launchd changes; `dacdca2` kept.**
 
 ### Commands Run
-- None this pass beyond `git status` (handoff edit only). Prior pass: `git show dacdca2`,
-  Grep/Read of config load path — all read-only.
+- Local: `git rev-parse`/`log`/`status` (read-only). Read of scheduler/service/config/scripts.
+- Old Mac (read-only over Tailscale `danielkimoto@100.91.41.60`): `git rev-parse`/`status`,
+  `.env` gate names only (no secret values), `launchctl print` states, venv `resolve_db_path`,
+  `scheduler_safety_status`, `db_status --json`. No writes, no smoke-test, no order endpoints.
 
 ### Git State
-- Branch `tooling/codexpro-devspace`, 5 commits ahead of `main`, **not pushed**.
-  Working tree: only `.ai/LEX_REVIEW_HANDOFF.md` modified. Runner unchanged.
+- Branch `tooling/codexpro-devspace`, 6 commits ahead of `main`, **not pushed**. Working tree:
+  `docs/MANUAL_PAPER_VALIDATION.md` (untracked) + `.ai/LEX_REVIEW_HANDOFF.md` (modified).
+  Runner unchanged (`main` @ `366597b`).
 
 ### Safety Notes
-- Handoff edit only. No deploy, push, trades, scheduler start/re-arm, `.env`, launchd, or
-  runtime-code changes. Widened limits remain (intentional); safety rests on the gates above.
+- Read-only + doc authoring only. No deploy, push, trades, scheduler start/re-arm, `.env`,
+  launchd, or runtime-code changes. Old Mac left exactly as found: `dry_run`/disarmed.
 
 ### What Lex Should Inspect Next
-- Whether the current limits are reasonable for **paper-only** testing (equity 20 / crypto 25
-  concurrent) and whether any additional guardrails are needed before any deployment.
-- Confirm the per-day / position-size / approval gates above are tight enough to bound
-  exposure now that the concurrency cap is loosened.
-- Before ANY future deploy or scheduler re-arm: require passing manual paper validation first.
+- Review `docs/MANUAL_PAPER_VALIDATION.md`: are the pass/fail criteria and order-size limits
+  acceptable for the first paper test?
+- Confirm the recommendation to set `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` on the runner before
+  any re-arm, given the gate does not cover non-assisted equity ideas.
+- Decide branch reconciliation (PR vs merge of the 6 commits into `main`) before any deploy.
 
 ### Open Questions
-- What defines "manual paper validation passed" (criteria/duration) before automation may arm?
-- Should `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` be set on the runner as defense-in-depth
-  while concurrency is wide?
+- Should the first validation idea be forced analyst-assisted so the approval gate applies, or
+  is the human-placed manual nature sufficient for a non-assisted equity idea?
+- Reconciliation path for the 6 unpushed commits: PR review vs direct merge to `main`?
 
 ### Recommended Next Step
-- Lex reviews limit reasonableness + guardrails for paper-only testing. Keep scheduler
-  dry_run/disarmed until manual paper validation passes; no deploy or re-arm before then.
+- Lex reviews the validation checklist + approval recommendation. Keep scheduler
+  `dry_run`/disarmed; set `REQUIRE_PAPER_APPROVAL=true` only as part of an intentional re-arm
+  decision after a clean manual validation. No deploy/push/re-arm before then.
