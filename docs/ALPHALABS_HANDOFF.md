@@ -1,7 +1,7 @@
 # AlphaLab — Handoff
 
 > Living status document. **Update after every major milestone.**
-> Last updated: **2026-06-14** — Milestone: *Phone/PWA + Analyst Chat + opt-in API auth; weekend crypto jobs and a real intraday price/volume feed that makes the hard gate bite.*
+> Last updated: **2026-06-16** — Milestone: *Old Mac re-hosted on a GitHub-backed checkout (AirDrop copy → clean clone), split-brain DB fixed, remote access via Tailscale Serve.* Prior same-day milestone: *Crypto execution fixes + multi-coin (BTC/LINK/HYPE) idea generation. See [`HANDOFF_2026-06-16.md`](./HANDOFF_2026-06-16.md).*
 
 For the deep explanation of scoring, the hard gate, modifiers, no-data behavior,
 and real-vs-stub APIs, see [`scoring-and-signals.md`](./scoring-and-signals.md).
@@ -54,6 +54,17 @@ Two decoupled packages: `alpha_lab/` (research/scoring) and `paper_trader/`
 Runs on a dedicated Mac server (Intel/macOS; set the SSH user/host in
 `scripts/server.conf`), project at `~/AlphaLab`. Hardened for unattended uptime:
 
+- **GitHub-backed layout.** The server's `~/AlphaLab` is a real Git checkout of
+  `Pak209/AlphaLabs` (origin `main`), bootstrapped/updated by
+  `scripts/bootstrap_old_mac_from_github.sh` (idempotent: clones if missing,
+  ff-only pull, builds `.venv`, installs `requirements.txt`, ensures runtime
+  dirs, chmod 600 `.env`, runs `db_status`). It refuses to pull a dirty source
+  tree, so runtime state (`.env`, `alpha_lab/data/`, `logs/`, `reports/`) stays
+  local and untouched.
+- **`./ops` orchestrator** (dev Mac → server over Tailscale/SSH, config in
+  `scripts/server.conf`): `doctor` (SSH + checkout + venv readiness),
+  `remote-status`, `health` (full server-side verifier incl. same-DB proof),
+  `deploy`, and confirmed state changes `start` / `stop` / `restart` / `reload`.
 - **Dashboard API** — `com.alphalab.dashboard` LaunchAgent (KeepAlive + RunAtLoad)
   on `127.0.0.1:8787`, via `scripts/run_dashboard.sh` (sources `.env`).
 - **Automation scheduler** — `com.alphalab.scheduler` LaunchAgent (KeepAlive),
@@ -63,8 +74,32 @@ Runs on a dedicated Mac server (Intel/macOS; set the SSH user/host in
   auto-login so it self-recovers after a reboot. (`autorestart` N/A on a laptop —
   battery rides through outages; a multi-hour outage that drains the battery
   needs a manual power-on.)
-- Remote health from the dev Mac: `./scripts/check_old_mac.sh` over key-based SSH
-  (config in `scripts/server.conf`).
+- Remote health from the dev Mac: `./ops health` (or legacy
+  `./scripts/check_old_mac.sh`) over key-based SSH (config in `scripts/server.conf`).
+
+> **Gotcha — never `mv ~/AlphaLab` while the agents are running.** The launchd
+> services hold the project directory by inode, so renaming it out from under a
+> live process makes the running dashboard/scheduler keep reading/writing the
+> *renamed* path's DB while the resolver points at the new `~/AlphaLab` — a
+> **split-brain DB** (caught by `./ops health`'s same-DB proof). Correct order
+> when relocating: **`./ops stop` → move/sync files → `./ops start`** (a fresh
+> launch re-resolves `~/AlphaLab`). If you only renamed, copy the authoritative
+> DB from the old path into the clone *before* restarting.
+
+### Remote access (dashboard / PWA)
+
+The dashboard binds **loopback only** (`127.0.0.1:8787`); `alpha_lab/main.py`
+refuses any non-loopback bind unless `ALPHALAB_ALLOW_PUBLIC_BIND=true`. Reach it
+remotely without changing the bind:
+
+- **Dev Mac — SSH tunnel:** `ssh -N -L 8787:127.0.0.1:8787 <user>@<tailscale-ip>`,
+  then open `http://127.0.0.1:8787` (localhost = secure context, PWA installable).
+- **Phone + Dev Mac — Tailscale Serve** (run once on the server):
+  `tailscale serve --bg 127.0.0.1:8787` → yields a tailnet-only HTTPS URL
+  (`https://<magic-dns>.ts.net`). HTTPS = secure context, so the iPhone PWA
+  (`alpha_lab/static/sw.js` + `manifest.webmanifest`) installs via Safari →
+  Add to Home Screen. Requires the Tailscale app active on the phone. Undo with
+  `tailscale serve --https=443 off`.
 
 ### Automation modes — Pattern B vs C (one-flag switch)
 
@@ -189,6 +224,49 @@ An idea with no options/institutional data at all is **not** gated.
 
 ## Changelog
 
+- **2026-06-16** — Old Mac re-hosted on a GitHub-backed checkout + split-brain DB
+  fix + remote-access hardening. **No trading logic / scoring / schema changes.**
+  The server's `~/AlphaLab` was an AirDrop copy (no `.git`); converted it to a
+  clean clone of `Pak209/AlphaLabs` without losing state: renamed the old tree to
+  a timestamped backup, cloned fresh, restored `.env` (600), `logs/`, `reports/`,
+  and the live SQLite DB + `audit.jsonl`, then rebuilt the venv via
+  `scripts/bootstrap_old_mac_from_github.sh`. **`./ops health` caught a split-brain
+  DB:** the 2-day-old dashboard/scheduler LaunchAgents had followed the renamed
+  backup directory by inode and were still writing its DB, while the resolver
+  pointed at the new clone. Fixed with `./ops stop` → copy the authoritative
+  (newer) DB from the backup into the clone → `./ops start`; re-ran `./ops health`,
+  all hard checks green (same-DB proof, 18 scheduler jobs, dashboard on
+  `127.0.0.1:8787`, fresh heartbeat). **Remote access:** confirmed loopback-only
+  bind; enabled Tailscale Serve on the server for a tailnet-only HTTPS URL so the
+  PWA installs on the iPhone (SSH tunnel remains the Dev-Mac fallback). See the
+  Deployment section's gotcha + remote-access notes. Backup tree retained as a
+  rollback safety net. Open item: scheduler still on `ALPHALAB_SCHEDULER_MODE=paper`
+  — recommend `dry_run` for the post-migration stabilization window, then flip back.
+- **2026-06-16** — Crypto execution + multi-coin milestone (full detail:
+  [`HANDOFF_2026-06-16.md`](./HANDOFF_2026-06-16.md)). **Trading behavior:
+  CHANGED.** Driven by a hard Alpaca constraint confirmed this session: crypto is
+  **long-only** (no shorting) and **SOL/XRP are not supported**.
+  (1) **Crypto price routing** — `paper_trader/alpaca_client.py`
+  `get_latest_trade_price` now routes slash-pairs (`BTC/USD`) to Alpaca's
+  `v1beta3/crypto/us/latest/trades` market-data endpoint (new
+  `_latest_crypto_trade_price`); previously it only hit the equities endpoint and
+  returned `None` for crypto, breaking any price-dependent crypto path.
+  (2) **Honest crypto-short rejection** — `decision_engine.py` now rejects bearish
+  crypto up front with "Alpaca does not support shorting crypto (crypto is
+  long-only)" instead of the misleading late "latest price required" error.
+  (3) **Multi-coin generation** — generalized the BTC-only generator to a small
+  Alpaca-tradeable universe **BTC / LINK / HYPE**. `market_data.py` gains a
+  `CRYPTO_COINS` registry and `get_crypto_market(ticker)` (BTC kept as a wrapper);
+  the BTC-baked text helpers are parameterized by symbol/name. `service.py`
+  `_btc_signal_from_market` now derives identity from the market dict;
+  `poll_weekend_crypto` loops all 3 coins (per-coin dedupe + graceful skip);
+  added `_generate_crypto_idea` + `generate_after_hours_crypto_ideas`.
+  `config.example.json` crypto `approved_tickers`: dropped SOL/BNB (untradeable),
+  added HYPE. Tests: **189 green** (updated 2 `test_api.py` mocks to patch
+  `get_crypto_market`). **Not yet deployed.** Open decisions: CoinGecko free-tier
+  rate-limit on 6 uncached GETs/poll; the after-hours UI/API route is still
+  BTC-only (`generate_after_hours_crypto_ideas` unwired); ETH/DOGE are approved
+  but not in the generation registry.
 - **2026-06-14** — Phone/PWA milestone: weekend crypto jobs, real intraday
   price/volume feed, Analyst Chat, and opt-in API auth. **Trading behavior:
   CHANGED.** Two changes affect what gets traded:

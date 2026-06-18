@@ -1,4 +1,5 @@
-# AlphaLab server connection config (used by deploy_to_old_mac.sh + check_old_mac.sh).
+# AlphaLab server connection config (used by ./ops, deploy_to_old_mac.sh, and
+# check_old_mac.sh).
 #
 # SETUP: copy this file to "server.conf" in the same folder and edit the values.
 #   cp scripts/server.conf.example scripts/server.conf
@@ -13,6 +14,13 @@ SERVER_USER="danielpak"
 # Easiest: its Bonjour name, e.g. "old-macbook.local" (System Settings > General >
 # About > Name, lowercased, with .local). A reserved LAN IP also works.
 SERVER_HOST="old-macbook.local"
+
+# OPTIONAL — the OLD MacBook's Tailscale MagicDNS name or tailnet IP, e.g.
+# "old-macbook.tailnet-name.ts.net" or "100.x.y.z". When set, ./ops prefers this
+# over SERVER_HOST so you can manage the server from anywhere on your tailnet.
+# Leave blank/commented to use the LAN SERVER_HOST only.
+#   On the old Mac, find it with:  tailscale status   (or: tailscale ip -4)
+# TAILSCALE_HOST="old-macbook.tailnet-name.ts.net"
 
 # Where AlphaLab lives on the OLD MacBook, relative to that machine's home dir.
 # Leave as "AlphaLab" unless you deliberately put it elsewhere.
