@@ -14,6 +14,7 @@ SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 POLYGON_NEWS_URL = "https://api.polygon.io/v2/reference/news"
 POLYGON_SNAPSHOT_URL = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
 BENZINGA_NEWS_URL = "https://api.benzinga.com/api/v2/news"
 BENZINGA_INSIDER_URL = "https://api.benzinga.com/api/v2.1/calendar/insider-transactions"
 TIINGO_NEWS_URL = "https://api.tiingo.com/tiingo/news"
@@ -357,6 +358,37 @@ def fetch_polygon_intraday(ticker: str) -> dict[str, Any]:
             "relative_volume": relative_volume,
             "day_volume": day_vol,
             "prev_day_volume": prev_vol,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        return {"status": "error", "reason": _safe_error(exc)}
+
+
+def fetch_yahoo_price(ticker: str) -> dict[str, Any]:
+    """Keyless last-price read from Yahoo Finance's public chart endpoint.
+
+    Used as a fallback when Polygon has no key and Alpaca is unreachable (e.g.
+    restrictive networks that block the broker API). Yahoo requires a browser-ish
+    User-Agent or it returns 429, so we send one. Returns an {"status": "ok",
+    "last_price": ...} envelope or a disabled/error envelope so callers can fall
+    back to neutral handling.
+    """
+    if os.getenv("YAHOO_PRICE_ENABLED", "true").strip().lower() != "true":
+        return {"status": "disabled", "reason": "Set YAHOO_PRICE_ENABLED=true to allow Yahoo Finance price fallback."}
+    try:
+        url = YAHOO_CHART_URL.format(ticker=ticker.upper()) + "?" + urlencode({"interval": "1d", "range": "1d"})
+        data = _fetch_json(url, headers={"User-Agent": "Mozilla/5.0 (AlphaLab paper-research)"})
+        result = ((data.get("chart") or {}).get("result") or [{}])[0]
+        meta = result.get("meta") or {}
+        price = meta.get("regularMarketPrice") or meta.get("previousClose")
+        last_price = float(price) if price is not None else 0.0
+        if last_price <= 0:
+            return {"status": "error", "reason": "Yahoo returned no usable price."}
+        return {
+            "status": "ok",
+            "source": "Yahoo Finance chart",
+            "ticker": ticker.upper(),
+            "last_price": last_price,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as exc:

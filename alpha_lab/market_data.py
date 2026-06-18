@@ -9,11 +9,25 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COINGECKO_BTC_MARKETS_URL = (
-    "https://api.coingecko.com/api/v3/coins/markets"
-    "?vs_currency=usd&ids=bitcoin&price_change_percentage=24h,7d,14d"
-)
-COINGECKO_BTC_CHART_URL = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=90"
+# Alpaca-tradeable crypto we generate ideas for. Crypto is long-only on Alpaca
+# (no shorting), so this universe is restricted to coins Alpaca actually lists.
+# Each entry maps the Alpaca ticker to its CoinGecko id + display labels.
+CRYPTO_COINS: dict[str, dict[str, str]] = {
+    "BTC/USD": {"coingecko_id": "bitcoin", "name": "Bitcoin", "symbol": "BTC"},
+    "LINK/USD": {"coingecko_id": "chainlink", "name": "Chainlink", "symbol": "LINK"},
+    "HYPE/USD": {"coingecko_id": "hyperliquid", "name": "Hyperliquid", "symbol": "HYPE"},
+}
+
+
+def _coingecko_markets_url(coingecko_id: str) -> str:
+    return (
+        "https://api.coingecko.com/api/v3/coins/markets"
+        f"?vs_currency=usd&ids={coingecko_id}&price_change_percentage=24h,7d,14d"
+    )
+
+
+def _coingecko_chart_url(coingecko_id: str) -> str:
+    return f"https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=90"
 
 
 CRYPTO_FLOW_IDS = ["bitcoin", "ethereum", "solana", "chainlink", "avalanche-2", "render-token", "near"]
@@ -854,8 +868,19 @@ def build_trending_stock_signals(limit: int = 5) -> list[dict[str, Any]]:
 
 
 def get_bitcoin_market() -> dict[str, Any]:
-    row = _fetch_json(COINGECKO_BTC_MARKETS_URL)[0]
-    closes = _daily_closes(_fetch_json(COINGECKO_BTC_CHART_URL).get("prices", []))
+    return get_crypto_market("BTC/USD")
+
+
+def get_crypto_market(ticker: str = "BTC/USD") -> dict[str, Any]:
+    coin = CRYPTO_COINS.get(ticker)
+    if coin is None:
+        raise ValueError(f"unsupported crypto ticker {ticker!r}; supported: {', '.join(CRYPTO_COINS)}")
+    coingecko_id = coin["coingecko_id"]
+    name = coin["name"]
+    symbol = coin["symbol"]
+
+    row = _fetch_json(_coingecko_markets_url(coingecko_id))[0]
+    closes = _daily_closes(_fetch_json(_coingecko_chart_url(coingecko_id)).get("prices", []))
 
     change_24h = _num(row.get("price_change_percentage_24h_in_currency"))
     change_7d = _num(row.get("price_change_percentage_7d_in_currency"))
@@ -863,12 +888,14 @@ def get_bitcoin_market() -> dict[str, Any]:
     price = _num(row.get("current_price"))
     indicators = _indicator_snapshot(price, closes)
     bias = _bias(change_7d, change_14d, indicators)
-    scenarios = _btc_scenarios(price, bias, indicators)
-    strategy_candidates = _strategy_candidates(price, bias, indicators, change_7d, change_14d)
+    scenarios = _crypto_scenarios(symbol, price, bias, indicators)
+    strategy_candidates = _strategy_candidates(symbol, price, bias, indicators, change_7d, change_14d)
 
     return {
         "status": "ok",
-        "ticker": "BTC/USD",
+        "ticker": ticker,
+        "name": name,
+        "symbol": symbol,
         "price": price,
         "change_24h_pct": change_24h,
         "change_7d_pct": change_7d,
@@ -877,9 +904,9 @@ def get_bitcoin_market() -> dict[str, Any]:
         "volume_24h": _num(row.get("total_volume")),
         "last_updated": row.get("last_updated"),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "source": "CoinGecko /coins/markets + /coins/bitcoin/market_chart",
+        "source": f"CoinGecko /coins/markets + /coins/{coingecko_id}/market_chart",
         "bias": bias,
-        "summary": _summary(bias, change_24h, change_7d, change_14d),
+        "summary": _summary(name, bias, change_24h, change_7d, change_14d),
         "indicators": indicators,
         "scenarios": scenarios,
         "strategy_candidates": strategy_candidates,
@@ -1008,7 +1035,7 @@ def _ema_read(price: float | None, ema20: float | None, ema50: float | None) -> 
     return "EMA structure is mixed."
 
 
-def _btc_scenarios(price: float | None, bias: str, indicators: dict[str, Any]) -> list[dict[str, str]]:
+def _crypto_scenarios(symbol: str, price: float | None, bias: str, indicators: dict[str, Any]) -> list[dict[str, str]]:
     ema20 = indicators.get("ema20")
     ema50 = indicators.get("ema50")
     rsi = indicators.get("rsi14")
@@ -1017,18 +1044,18 @@ def _btc_scenarios(price: float | None, bias: str, indicators: dict[str, Any]) -
     scenarios: list[dict[str, str]] = []
 
     if price is None:
-        return [{"name": "No trade", "setup": "BTC price is unavailable.", "watch": "Wait for current data."}]
+        return [{"name": "No trade", "setup": f"{symbol} price is unavailable.", "watch": "Wait for current data."}]
 
     if ema20 and price < ema20:
         scenarios.append({
             "name": "Bearish continuation",
-            "setup": f"BTC remains below the 20D EMA near {_money(ema20)}.",
+            "setup": f"{symbol} remains below the 20D EMA near {_money(ema20)}.",
             "watch": f"Failure to reclaim the 20D EMA keeps pressure on; a close back above {_money(ema20)} weakens the bear case.",
         })
     elif ema20:
         scenarios.append({
             "name": "20D EMA reclaim watch",
-            "setup": f"BTC is above the 20D EMA near {_money(ema20)}.",
+            "setup": f"{symbol} is above the 20D EMA near {_money(ema20)}.",
             "watch": "Look for follow-through rather than assuming one close means a durable reversal.",
         })
 
@@ -1056,6 +1083,7 @@ def _btc_scenarios(price: float | None, bias: str, indicators: dict[str, Any]) -
 
 
 def _strategy_candidates(
+    symbol: str,
     price: float | None,
     bias: str,
     indicators: dict[str, Any],
@@ -1071,10 +1099,10 @@ def _strategy_candidates(
 
     if bias == "bearish" and ema20 and price < ema20:
         candidates.append({
-            "name": "BTC breakdown continuation dry-run",
+            "name": f"{symbol} breakdown continuation dry-run",
             "direction": "bearish",
-            "why": f"BTC is weak on 7D/14D performance and still below the 20D EMA near {_money(ema20)}.",
-            "trigger": f"Dry-run only if BTC rejects or closes below {_money(ema20)} again.",
+            "why": f"{symbol} is weak on 7D/14D performance and still below the 20D EMA near {_money(ema20)}.",
+            "trigger": f"Dry-run only if {symbol} rejects or closes below {_money(ema20)} again.",
             "invalidation": f"Close and hold above the 20D EMA near {_money(ema20)}; stronger invalidation above 50D EMA near {_money(ema50)}." if ema50 else "Close back above the 20D EMA.",
         })
 
@@ -1091,14 +1119,14 @@ def _strategy_candidates(
         candidates.append({
             "name": "Relief rally into 50D EMA",
             "direction": "neutral-to-bullish tactical",
-            "why": "BTC reclaimed the 20D EMA but remains below the 50D EMA, so the setup is a tactical bounce, not a confirmed trend flip.",
+            "why": f"{symbol} reclaimed the 20D EMA but remains below the 50D EMA, so the setup is a tactical bounce, not a confirmed trend flip.",
             "trigger": f"Hold above 20D EMA near {_money(ema20)} with improving RSI.",
             "invalidation": f"Lose 20D EMA near {_money(ema20)}.",
         })
 
     if not candidates:
         candidates.append({
-            "name": "No clean BTC strategy",
+            "name": f"No clean {symbol} strategy",
             "direction": "wait",
             "why": "Current indicators do not create a clean risk-defined setup.",
             "trigger": "Wait for EMA reclaim/rejection, RSI extreme, or a close-based support/resistance break.",
@@ -1135,7 +1163,7 @@ def _bias(change_7d: float | None, change_14d: float | None, indicators: dict[st
     return "neutral"
 
 
-def _summary(bias: str, change_24h: float | None, change_7d: float | None, change_14d: float | None) -> str:
+def _summary(name: str, bias: str, change_24h: float | None, change_7d: float | None, change_14d: float | None) -> str:
     parts = []
     if change_24h is not None:
         parts.append(f"24h {change_24h:+.2f}%")
@@ -1144,12 +1172,12 @@ def _summary(bias: str, change_24h: float | None, change_7d: float | None, chang
     if change_14d is not None:
         parts.append(f"14d {change_14d:+.2f}%")
     if not parts:
-        return "Bitcoin market data is unavailable; no directional read."
+        return f"{name} market data is unavailable; no directional read."
     if bias == "bearish":
-        return "Bitcoin is under pressure on recent performance: " + ", ".join(parts) + "."
+        return f"{name} is under pressure on recent performance: " + ", ".join(parts) + "."
     if bias == "bullish":
-        return "Bitcoin is showing positive recent momentum: " + ", ".join(parts) + "."
-    return "Bitcoin is mixed or not clearly directional: " + ", ".join(parts) + "."
+        return f"{name} is showing positive recent momentum: " + ", ".join(parts) + "."
+    return f"{name} is mixed or not clearly directional: " + ", ".join(parts) + "."
 
 
 def _money(value: float | None) -> str:

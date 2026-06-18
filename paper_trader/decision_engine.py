@@ -43,6 +43,12 @@ def evaluate_signal(
     # short-selling guard only applies to equity/crypto bearish entries.
     if signal.bias == "bearish" and not config.allow_short and signal.asset_type != "option":
         reasons.append("bearish short entries are disabled by config")
+    # Alpaca does not allow shorting crypto (non-marginable, long-only), so a
+    # bearish crypto entry can never execute. Reject it up front with an honest
+    # reason instead of letting it fail later at short-sizing with a misleading
+    # "latest price required" error.
+    if signal.bias == "bearish" and signal.asset_type == "crypto":
+        reasons.append("Alpaca does not support shorting crypto (crypto is long-only)")
     if signal.ticker not in config.approved_tickers:
         reasons.append("ticker is not in approved watchlist")
     if signal.asset_type != "crypto" and not bool(clock.get("is_open")):

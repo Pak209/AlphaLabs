@@ -74,3 +74,23 @@ def test_feed_miss_falls_back_to_neutral(svc, monkeypatch):
     _patch_snapshot(monkeypatch, {"status": "error", "reason": "boom"})
     inp = svc._price_volume_inputs({"ticker": "AAPL", "asset_type": "equity", "bias": "bullish"})
     assert inp.relative_volume is None and inp.trend_confirms is None
+
+
+def test_yahoo_price_parses_regular_market_price(monkeypatch):
+    sample = {"chart": {"result": [{"meta": {"regularMarketPrice": 42.5}}]}}
+    monkeypatch.setattr(live_sources, "_fetch_json", lambda url, headers=None: sample)
+    out = live_sources.fetch_yahoo_price("PLTR")
+    assert out["status"] == "ok"
+    assert out["last_price"] == 42.5
+
+
+def test_yahoo_price_disabled_via_env(monkeypatch):
+    monkeypatch.setenv("YAHOO_PRICE_ENABLED", "false")
+    assert live_sources.fetch_yahoo_price("PLTR")["status"] == "disabled"
+
+
+def test_validation_price_uses_yahoo_when_polygon_unavailable(svc, monkeypatch):
+    # Polygon returns no key; Yahoo provides the price; Alpaca never consulted.
+    _patch_snapshot(monkeypatch, {"status": "disabled", "reason": "no key"})
+    monkeypatch.setattr(service_mod, "fetch_yahoo_price", lambda ticker: {"status": "ok", "last_price": 88.0})
+    assert svc._validation_price("PLTR") == 88.0

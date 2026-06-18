@@ -301,6 +301,13 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.post("/api/ideas/{idea_id}/explanation/regenerate")
+    def regenerate_explanation(idea_id: int) -> dict[str, Any]:
+        try:
+            return lab.regenerate_trade_explanation(idea_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/api/ideas/{idea_id}/approve")
     def approve_idea(idea_id: int) -> dict[str, Any]:
         return lab.set_idea_status(idea_id, "accepted")

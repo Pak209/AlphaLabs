@@ -20,8 +20,8 @@ from .models import normalize_idea_payload
 from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .daily_brief import build_daily_market_brief
-from .live_sources import fetch_polygon_intraday
-from .market_data import build_trending_stock_signals, get_bitcoin_market, get_business_brief, get_liquidity_flows
+from .live_sources import fetch_polygon_intraday, fetch_yahoo_price
+from .market_data import CRYPTO_COINS, build_trending_stock_signals, get_bitcoin_market, get_crypto_market, get_business_brief, get_liquidity_flows
 from .repository import AlphaLabRepository
 from .performance import build_performance_report
 from .scoring_engine import (
@@ -627,17 +627,30 @@ class AlphaLabService:
         }
 
     def generate_after_hours_btc_idea(self) -> dict[str, Any]:
-        btc = get_bitcoin_market()
-        signal = self._btc_signal_from_market(btc)
+        return self._generate_crypto_idea("BTC/USD")
+
+    def _generate_crypto_idea(self, ticker: str) -> dict[str, Any]:
+        market = get_crypto_market(ticker)
+        signal = self._btc_signal_from_market(market)
         idea = normalize_idea_payload(signal)
         with connect(self.db_path) as conn:
             repo = AlphaLabRepository(conn)
             idea["market_regime"] = self._current_market_regime(repo)
             created = repo.create_idea(idea)
-            explanation = build_trade_explanation({**idea, "id": created["id"]}, {"market_context": btc.get("summary", ""), "source": btc.get("source", "")})
+            explanation = build_trade_explanation({**idea, "id": created["id"]}, {"market_context": market.get("summary", ""), "source": market.get("source", "")})
             explanation["analyst_assisted"] = True
-            repo.create_trade_explanation(created["id"], explanation, {"source_payload": signal, "btc_market": btc})
-            return {"idea": self._with_business_brief(repo.get_idea(created["id"])), "explanation": explanation, "btc": btc}
+            repo.create_trade_explanation(created["id"], explanation, {"source_payload": signal, "btc_market": market})
+            return {"idea": self._with_business_brief(repo.get_idea(created["id"])), "explanation": explanation, "btc": market}
+
+    def generate_after_hours_crypto_ideas(self) -> dict[str, Any]:
+        """Generate one after-hours idea per Alpaca-tradeable coin (BTC/LINK/HYPE)."""
+        results: list[dict[str, Any]] = []
+        for ticker in CRYPTO_COINS:
+            try:
+                results.append({"ticker": ticker, **self._generate_crypto_idea(ticker)})
+            except Exception as exc:  # one coin's data failure must not block the rest
+                results.append({"ticker": ticker, "status": "error", "error": str(exc)})
+        return {"status": "ok", "asset_type": "crypto", "results": results}
 
     def generate_and_save_market_briefing(self, live_catalysts: bool = True) -> dict[str, Any]:
         base_brief = self.build_daily_brief(live_catalysts=live_catalysts)
@@ -697,54 +710,52 @@ class AlphaLabService:
         """
         if not dry_run and os.getenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "").lower() != "true":
             raise ValueError("automation paper trading is disabled; set ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES=true to enable")
-        btc = self._safe_market_payload(get_bitcoin_market)
-        if btc.get("status") not in {None, "ok"}:
+        recent = self._recent_crypto_theses()
+        signals: list[dict[str, Any]] = []
+        unavailable = 0
+        duplicates = 0
+        for ticker in CRYPTO_COINS:
+            market = self._safe_market_payload(lambda t=ticker: get_crypto_market(t))
+            if market.get("status") not in {None, "ok"}:
+                unavailable += 1
+                continue
+            signal = self._btc_signal_from_market(market)
+            if signal.get("thesis") in recent:
+                duplicates += 1
+                continue
+            signals.append(signal)
+        if not signals:
+            note = "no new crypto signal" if (duplicates or not unavailable) else "crypto market data unavailable"
+            status = "unavailable" if unavailable and not duplicates else "ok"
             self._record_scanner_run(
                 "after_hours_btc",
                 "weekend_crypto",
                 self._scanner_summary(
-                    candidates_found=0,
+                    candidates_found=len(CRYPTO_COINS) - unavailable,
                     ideas_persisted=0,
-                    rejected=1,
-                    skipped=0,
-                    reasons={"BTC market data unavailable": 1},
+                    rejected=unavailable,
+                    skipped=duplicates,
+                    reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
                     dry_run=dry_run,
-                    note="BTC market data unavailable",
+                    note=note,
                 ),
             )
-            return {"status": "unavailable", "asset_type": "crypto", "signals": [],
-                    "test_result": {"dry_run": dry_run, "results": [], "note": "BTC market data unavailable"}}
-        signal = self._btc_signal_from_market(btc)
-        if signal.get("thesis") in self._recent_crypto_theses():
-            self._record_scanner_run(
-                "after_hours_btc",
-                "weekend_crypto",
-                self._scanner_summary(
-                    candidates_found=1,
-                    ideas_persisted=0,
-                    rejected=1,
-                    skipped=1,
-                    reasons={"duplicate thesis": 1},
-                    dry_run=dry_run,
-                    note="no new crypto signal",
-                ),
-            )
-            return {"status": "ok", "asset_type": "crypto", "signals": [],
-                    "test_result": {"dry_run": dry_run, "results": [], "note": "no new crypto signal"}}
-        result = self.import_and_test({"signals": [signal], "execution_mode": "dry_run" if dry_run else "paper"})
+            return {"status": status, "asset_type": "crypto", "signals": [],
+                    "test_result": {"dry_run": dry_run, "results": [], "note": note}}
+        result = self.import_and_test({"signals": signals, "execution_mode": "dry_run" if dry_run else "paper"})
         self._record_scanner_run(
             "after_hours_btc",
             "weekend_crypto",
             self._scanner_summary(
-                candidates_found=1,
+                candidates_found=len(signals),
                 ideas_persisted=len(result.get("results") or []),
-                rejected=0,
-                skipped=0,
-                reasons={},
+                rejected=unavailable,
+                skipped=duplicates,
+                reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
                 dry_run=dry_run,
             ),
         )
-        return {"status": "ok", "asset_type": "crypto", "signals": [signal], "test_result": result}
+        return {"status": "ok", "asset_type": "crypto", "signals": signals, "test_result": result}
 
     def analyst_chat(self, message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
         """Advisory markets chat grounded in current AlphaLab data (read-only).
@@ -1039,6 +1050,23 @@ class AlphaLabService:
         if explanation is None:
             raise KeyError(f"trade explanation not found for idea {idea_id}")
         return explanation
+
+    def regenerate_trade_explanation(self, idea_id: int) -> dict[str, Any]:
+        """Rebuild and persist an idea's analyst explanation against a fresh price.
+
+        Used to backfill numeric entry/stop/take-profit levels onto ideas whose
+        stored explanation predates live-price grounding, without recreating the
+        idea. Inserts a new explanation row, which supersedes the prior one.
+        """
+        with connect(self.db_path) as conn:
+            repo = AlphaLabRepository(conn)
+            idea = repo.get_idea(idea_id)
+            if idea is None:
+                raise KeyError(f"idea {idea_id} not found")
+            validation_price = self._validation_price(idea["ticker"])
+            analyst_context = {**self._latest_briefing_context(conn), "reference_price": validation_price}
+            explanation = build_trade_explanation({**idea, "id": idea_id}, analyst_context)
+            return repo.create_trade_explanation(idea_id, explanation, {"regenerated": True})
 
     def sync_alpaca(self, dry_run: bool = True) -> dict[str, Any]:
         broker = self._broker(dry_run=dry_run)
@@ -1461,10 +1489,21 @@ class AlphaLabService:
         return None
 
     def _validation_price(self, ticker: str) -> float | None:
-        """Best-effort live quote for signal validation; never uses simulated prices."""
+        """Best-effort live quote for signal validation; never uses simulated prices.
+
+        Tries Polygon (needs a key), then Yahoo Finance (keyless, works on
+        networks that block the broker API), then Alpaca. The Yahoo fallback
+        means trade levels still populate when Polygon is unconfigured and Alpaca
+        is unreachable (e.g. restrictive school/campus Wi-Fi).
+        """
         snap = fetch_polygon_intraday(ticker)
         if snap.get("status") == "ok":
             price = snap.get("last_price")
+            if isinstance(price, (int, float)) and price > 0:
+                return float(price)
+        yahoo = fetch_yahoo_price(ticker)
+        if yahoo.get("status") == "ok":
+            price = yahoo.get("last_price")
             if isinstance(price, (int, float)) and price > 0:
                 return float(price)
         try:
@@ -1550,6 +1589,9 @@ class AlphaLabService:
             return {"status": "unavailable", "error": str(exc)}
 
     def _btc_signal_from_market(self, btc: dict[str, Any]) -> dict[str, Any]:
+        ticker = btc.get("ticker") or "BTC/USD"
+        symbol = btc.get("symbol") or ticker.split("/")[0]
+        name = btc.get("name") or symbol
         indicators = btc.get("indicators", {}) or {}
         price = float(btc.get("price") or 0)
         ema20 = indicators.get("ema20")
@@ -1567,10 +1609,10 @@ class AlphaLabService:
             if bias == "bullish"
             else f"Invalidate bearish thesis above {self._fmt_price(stop)}."
             if bias == "bearish"
-            else "Invalidate if BTC fails to create a directional reclaim/rejection setup."
+            else f"Invalidate if {symbol} fails to create a directional reclaim/rejection setup."
         )
         thesis = (
-            f"BTC after-hours {bias} setup: {btc.get('summary', 'BTC market context unavailable')} "
+            f"{symbol} after-hours {bias} setup: {btc.get('summary', f'{symbol} market context unavailable')} "
             f"{indicators.get('ema_read', '')} Entry {entry}; stop {self._fmt_price(stop)}; target {self._fmt_price(target)}; {invalidation}"
         )
         catalyst = (
@@ -1578,7 +1620,7 @@ class AlphaLabService:
             f"support {self._fmt_price(support)}, resistance {self._fmt_price(resistance)}."
         )
         return {
-            "ticker": "BTC/USD",
+            "ticker": ticker,
             "asset_type": "crypto",
             "bias": bias,
             "confidence": confidence,
@@ -1588,8 +1630,8 @@ class AlphaLabService:
             "catalyst": catalyst,
             "source": "after_hours_btc",
             "timestamp": btc.get("fetched_at") or btc.get("last_updated"),
-            "strategy_tags": ["crypto momentum", "Bitcoin breakout", "after-hours BTC"],
-            "theme": "After-Hours BTC",
+            "strategy_tags": ["crypto momentum", f"{symbol} breakout", "after-hours crypto"],
+            "theme": f"After-Hours {symbol}",
             "source_refs": [{"label": btc.get("source", "CoinGecko"), "url": "", "timestamp": btc.get("last_updated", "")}],
         }
 

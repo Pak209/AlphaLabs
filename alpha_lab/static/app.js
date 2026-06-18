@@ -868,6 +868,7 @@ function approvalCard(item) {
 
       <div class="approval-actions actions">
         <button class="paper" onclick="approveAndPaperTrade(${item.idea_id}, '${item.ticker}')">Approve + Paper Trade</button>
+        <button class="secondary" onclick="refreshTradeLevels(${item.idea_id}, '${item.ticker}')">Refresh Levels</button>
         <button onclick="approvalAction(${item.idea_id}, 'approve')">Approve only</button>
         <button class="danger" onclick="approvalAction(${item.idea_id}, 'reject')">Reject</button>
         <button class="secondary" onclick="approvalAction(${item.idea_id}, 'expire')">Expire</button>
@@ -909,6 +910,20 @@ async function refreshApprovalQueue() {
   state.approvalsLoading = false;
   renderApprovalQueue();
   renderOverview();
+}
+
+async function refreshTradeLevels(ideaId, ticker) {
+  // Regenerate the stored analyst explanation against a fresh live price so
+  // entry/stop/take-profit show real numbers. Used for ideas created before
+  // price-grounding (or before a price source was reachable).
+  showToast(`Refreshing trade levels for ${ticker}...`);
+  try {
+    await api(`/api/ideas/${ideaId}/explanation/regenerate`, { method: "POST" });
+    await refreshApprovalQueue();
+    showToast(`Trade levels refreshed for ${ticker}. If still no numbers, no live price was available.`);
+  } catch (err) {
+    showToast(`Could not refresh levels for ${ticker}: ${cleanErrorMessage(err.message || String(err))}`);
+  }
 }
 
 async function approvalAction(ideaId, action) {
