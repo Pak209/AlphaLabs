@@ -24,4 +24,12 @@ reports/source_coverage/
 reports/production_audit/
 logs/
 scripts/server.conf
+# CodexPro / ngrok tooling — never commit tokens or local tool state if they
+# ever land inside the repo (the real token lives in ~/.codexpro, outside it).
+.codexpro/
+*.token
+*mcp*.token
+*codexpro*token*
+.ngrok2/
+ngrok.yml
 .DS_Store
