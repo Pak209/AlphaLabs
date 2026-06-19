@@ -1,6 +1,6 @@
 ---
 name: alphalabs-handoff-update
-description: Maintain AlphaLabs' append-only `.ai/LEX_REVIEW_HANDOFF.md` as the cross-agent source of truth. Use at the end of every meaningful task, audit, investigation, implementation, bug fix, deployment, or review in this repository, including useful read-only work, so Codex records who acted, what changed or was inspected, validation performed, results, risks, git state, and the highest-leverage next step without exposing secrets.
+description: Maintain AlphaLabs' two-part `.ai/LEX_REVIEW_HANDOFF.md` as the cross-agent source of truth. The top `## Current State Summary` may be refreshed/replaced when project state materially changes; the lower `## Agent Activity Log` is append-only. This skill appends one entry to the Agent Activity Log at the end of every meaningful task, audit, investigation, implementation, bug fix, deployment, or review (including useful read-only work), recording who acted, what changed or was inspected, validation performed, results, risks, git state, and the highest-leverage next step without exposing secrets.
 ---
 
 # AlphaLabs Handoff Update
@@ -83,7 +83,7 @@ Working Tree: clean
 ...
 ```
 
-The helper inserts this block under `## Agent Activity Log` (the section runs to end of file), preserving every prior entry. It errors if that heading is missing rather than appending blindly.
+The helper inserts this block under `## Agent Activity Log` (the section runs to end of file), preserving every prior entry. It requires exactly one such heading and errors if the heading is missing or duplicated, rather than appending blindly.
 
 For audits and read-only investigations, summarize what was inspected and verified, put `- None (audit only).` under files, and record the findings and recommended action. Facts belong in the handoff; speculation does not.
 

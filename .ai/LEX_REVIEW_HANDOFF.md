@@ -16,28 +16,30 @@ _Last updated: 2026-06-18_
 > Concise current snapshot — read first; may be refreshed when state materially changes.
 
 ## Current Branch
-`tooling/codexpro-devspace` (9 commits ahead of `main`, 0 behind).
+`tooling/codexpro-devspace` (10 commits ahead of `main`, 0 behind).
 
 ## Git Status Summary
-- Working tree: clean except this handoff edit. Validation docs + reconciliation handoff are
-  committed (`a8cb5a6`, `7a0d9f4`, `7418a73`); **nothing pushed**.
-- HEAD: `7418a73` — docs: update Lex handoff for reconciliation plan.
+- Committed baseline is **clean** at HEAD `1d329d2`; this protocol/handoff cleanup currently
+  has **uncommitted** docs/tooling edits in flight (the handoff + shared skill files).
+- HEAD: `1d329d2` — docs: add cross-agent handoff contract.
 - `main` / `origin/main`: `366597b` — feat: classify SEC offering filings as bearish catalysts.
-- **Not pushed.** No upstream tracking configured; the 9 ahead commits are local only.
-- Old-Mac runner: last known on `main` @ `366597b` (= `origin/main`), clean.
+- **Not pushed.** No upstream tracking configured; the 10 ahead commits are local only.
+- Old-Mac runner: last known on `main` @ `366597b` (= `origin/main`), clean — **last-known, not
+  re-verified this pass.**
 
 ## First-Validation Readiness — NOT READY (2026-06-18, code GREEN / ops BLOCKED)
 Audited whether AlphaLabs can run the first manual paper validation. **Code paths are sound**
 (manual endpoint, approval gate, Alpaca paper-only enforcement all verified). **Operationally
 NOT READY** on two blockers:
-1. **Old Mac UNREACHABLE.** SSH over Tailscale `danielkimoto@100.91.41.60` timed out (port 22,
-   twice) this pass — cannot verify the runner is still `dry_run`/disarmed, that the dashboard/
-   scheduler are healthy, same-DB proof holds, or that Alpaca paper is reachable. The validation
-   runs against the runner, so it cannot start until the old Mac is reachable and re-verified.
-   Last confirmed-safe state was `2026-06-18T18:25 PT`.
-2. **Approval flag not yet set.** Runner had `ALPHALAB_REQUIRE_PAPER_APPROVAL=false` at last
-   audit; the checklist requires `true` so the analyst-assisted approval gate actually engages.
-   Changing it is intentionally deferred (out of scope here) — must be set before the test.
+1. **Old Mac UNREACHABLE this pass.** SSH over Tailscale timed out (twice) — could NOT
+   re-verify the runner's scheduler mode, dashboard/scheduler health, same-DB proof, or Alpaca
+   paper reachability. The validation runs against the runner, so it cannot start until the old
+   Mac is reachable and re-verified. Last-known-safe state was `2026-06-18T18:25 PT`; treat as
+   last-known, not current.
+2. **Approval requirement not yet enabled.** At last audit the paper-execution approval
+   requirement was **last known disabled** on the runner; the checklist requires it **enabled**
+   so the analyst-assisted approval gate actually engages. Changing it is intentionally deferred
+   (out of scope here) — it must be enabled before the test.
 Also gating: the test must run during equity market hours. No env/launchd/old-Mac change was
 made this pass.
 
@@ -57,37 +59,43 @@ made this pass.
   Safety now depends on the *other* gates, not the position-count cap (see below).
 - **Dev-Mac scheduler health is ambiguous.** Do not treat the dev Mac as an
   authoritative runtime; do not reload it blindly. The old Mac is the only trusted runner.
-- **Branch reconciliation pending.** 8 local commits (incl. `dacdca2`) are unpushed and
+- **Branch reconciliation pending.** 10 local commits (incl. `dacdca2`) are unpushed and
   unmerged into `main`; `./ops deploy` only pulls `main` ff-only, so this work cannot reach
   the runner until reconciled. See Reconciliation Plan below.
 
 ## Stabilization Priorities (current status)
 
-### 1. Working tree — CLEAN
-- All feature/doc work is committed across 8 commits on `tooling/codexpro-devspace`
-  (see Reconciliation Plan). Tree clean apart from in-flight handoff edits.
+### 1. Working tree — committed baseline CLEAN; cleanup edits in flight
+- All feature/doc work is committed across 10 commits on `tooling/codexpro-devspace`
+  (see Reconciliation Plan). The committed baseline at HEAD `1d329d2` is clean, but this
+  protocol/handoff cleanup currently has **uncommitted** docs/tooling edits (the handoff +
+  shared skill files).
 
 ### 2. Dev Mac ↔ Old Mac drift — PRESENT (expected, gated)
-- Old-Mac runner is on `main` @ `366597b` (= `origin/main`), clean. Dev is 8 commits ahead
-  on the feature branch, unpushed. `./ops deploy` pulls `main` ff-only, so nothing reaches
-  the runner until the 8 commits are merged into `origin/main`. No deploy performed.
+- Old-Mac runner is last known on `main` @ `366597b` (= `origin/main`), clean. Dev is 10
+  commits ahead on the feature branch, unpushed. `./ops deploy` pulls `main` ff-only, so
+  nothing reaches the runner until the 10 commits are merged into `origin/main`. No deploy
+  performed.
 
-### 3. Scheduler paper-mode — SAFE (disarmed)
-- The runner was found paper-armed on 2026-06-18 and disarmed the same day: gates flipped to
-  `ALPHALAB_SCHEDULER_MODE=dry_run` + `ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES=false`, scheduler
-  reloaded. Re-verified read-only this pass: `safe_stabilization_mode: true`,
-  `paper_trades_can_be_triggered_by_scheduler: false`, fresh heartbeat `2026-06-18T18:25 PT`.
-- Keep dry_run + disarmed until a paper window is intentionally opened.
-- `ALPHALAB_REQUIRE_PAPER_APPROVAL=false` still on the runner — flagged for change before any re-arm.
+### 3. Scheduler paper-mode — last-known SAFE (disarmed); NOT re-verified this pass
+- The runner was found paper-armed on 2026-06-18 and disarmed the same day: scheduler mode set
+  to dry-run and the automation paper-trade guard disabled, scheduler reloaded. **Last-known-safe
+  read (2026-06-18T18:25 PT):** safe-stabilization mode true, scheduler could not trigger paper
+  trades, fresh heartbeat at that time. The old Mac was **not reachable/re-verified in this pass**
+  — treat as last-known, not current.
+- Keep scheduler dry-run + disarmed until a paper window is intentionally opened; re-verify
+  before relying on it.
+- The paper-execution approval requirement was **last known disabled** — it must be enabled
+  before any re-arm/validation.
 
 ---
 
 ## Reconciliation Plan (prepared — NOT executed)
 
-`./ops deploy` pulls `origin/main` ff-only on the old Mac, so the 8 feature-branch commits must
-land in `main` before any deploy. No merge/rebase/push was performed; this is the plan only.
+`./ops deploy` pulls `origin/main` ff-only on the old Mac, so the 10 feature-branch commits
+must land in `main` before any deploy. No merge/rebase/push was performed; this is the plan only.
 
-**The 8 commits ahead of `main` (oldest → newest), classified:**
+**The 10 commits ahead of `main` (oldest → newest), classified:**
 | Commit | Type | Summary |
 |---|---|---|
 | `bf7f64d` | tooling/docs | CodexPro tooling templates (`.ai/*`, `TOOLING_HANDOFF.md`) |
@@ -98,8 +106,10 @@ land in `main` before any deploy. No merge/rebase/push was performed; this is th
 | `be3757c` | docs | Lex review handoff |
 | `a8cb5a6` | docs | define manual paper validation gate |
 | `7a0d9f4` | docs | require analyst-assisted idea for paper validation |
+| `7418a73` | docs | update Lex handoff for reconciliation plan |
+| `1d329d2` | docs | add cross-agent handoff contract |
 
-- **Commits that should NOT go to `main`:** none identified — all 8 are intended. The only
+- **Commits that should NOT go to `main`:** none identified — all 10 are intended. The only
   runtime-behavior changers are `6227f46` (tested) and `dacdca2` (config). Tooling/docs commits
   are inert at runtime.
 - **`dacdca2` widening:** re-confirmed INTENTIONAL for paper-test capacity (keep equity=20,
@@ -113,7 +123,7 @@ land in `main` before any deploy. No merge/rebase/push was performed; this is th
   `test_decision_engine`) per its commit; re-run before deploy as a gate.
 
 **Recommendation: regular merge `tooling/codexpro-devspace` into LOCAL `main` (no squash).**
-Rationale: the 8 commits are already logically separated by concern (tooling/docs/runtime/
+Rationale: the 10 commits are already logically separated by concern (tooling/docs/runtime/
 config), so preserving them keeps `dacdca2`'s isolated 1-file config change individually
 revertible and keeps the runtime feature (`6227f46`) auditable apart from docs. Squash would
 bury the deliberate `dacdca2` isolation. Cherry-pick is unnecessary since none are excluded.
@@ -125,64 +135,73 @@ Do this only AFTER manual paper validation passes; then push `main` and `./ops d
 
 ### Task Summary
 Reconciliation-prep pass: cleaned stale commit counts/sections in this handoff (now
-consistently 8 commits @ HEAD `7a0d9f4`), ran a read-only validation of the `main..HEAD` range
+consistently 10 commits @ HEAD `1d329d2`), ran a read-only validation of the `main..HEAD` range
 (status/log/diff/secret scan), and produced a branch Reconciliation Plan (above). No merge,
 rebase, push, deploy, re-arm, or old-Mac change. The manual-validation and approval-policy
 findings from prior passes are retained below for Lex.
 
 ### Carried forward — Manual paper validation (DEFINED)
 - Full checklist: `docs/MANUAL_PAPER_VALIDATION.md`. First test: ONE human-selected
-  **analyst-assisted** equity idea, manual paper path, scheduler `dry_run`, automation flag off,
-  human approval required, paper endpoint only. Pass = single attributable equity paper order
-  (idea→approval→trade→audit→Performance) with the scheduler proven idle/`dry_run` and same-DB
-  proof intact; any live-endpoint contact, scheduler order, missing approval, blank price, or
-  missing record = fail → stop, stay `dry_run`/disarmed.
+  **analyst-assisted** equity idea, manual paper path, scheduler in safe dry-run mode, automation
+  guard off, human approval required, paper endpoint only. Pass = single attributable equity paper
+  order (idea→approval→trade→audit→Performance) with the scheduler proven idle/safe-mode and
+  same-DB proof intact; any live-endpoint contact, scheduler order, missing approval, blank price,
+  or missing record = fail → stop, stay in scheduler idle/safe mode and disarmed.
 
-### Carried forward — Approval policy (`ALPHALAB_REQUIRE_PAPER_APPROVAL`) RECOMMENDATION
+### Carried forward — Approval policy (paper-execution approval requirement) RECOMMENDATION
 - `_paper_approval_required()` (`service.py:1752`) → `_paper_execution_approval_error()`
   (`service.py:1716`), called by `place_trade()` on EVERY non-dry-run execution
   (`service.py:846`). `place_trade` is the single choke point for BOTH manual and automation
-  paper paths → the flag governs **both**, but the gate only bites on **analyst-assisted OR
-  crypto** ideas (`service.py:1722`); plain non-assisted equity ideas skip it. Rejected/expired
-  ideas always blocked.
-- **Recommendation:** set `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` on the runner **before any
-  paper re-arm** (currently `false`). Safest value for first validation; the validation idea
-  must be analyst-assisted for the gate to apply (now required by the checklist). NOT changed.
+  paper paths → the requirement governs **both**, but the gate only bites on **analyst-assisted
+  OR crypto** ideas (`service.py:1722`); plain non-assisted equity ideas skip it.
+  Rejected/expired ideas always blocked.
+- **Recommendation:** enable the paper-execution approval requirement on the runner **before any
+  paper re-arm** (it was last known disabled). Safest posture for first validation; the
+  validation idea must be analyst-assisted for the gate to apply (now required by the
+  checklist). NOT changed this pass.
 
 ### Carried forward — Deploy-readiness (no deploy)
-- **Dev:** `tooling/codexpro-devspace` @ `7a0d9f4`, 8 ahead / 0 behind `main`, clean, NOT pushed.
-- **Old Mac:** `main` @ `366597b` (= `origin/main`), clean, origin = `Pak209/AlphaLabs.git`.
-- **Delta (dev has, runner lacks), 8 commits:** `bf7f64d`, `2c4c52c`, `6227f46`, `dacdca2`,
-  `e1999c1`, `be3757c`, `a8cb5a6`, `7a0d9f4` (CodexPro tooling/docs, multi-coin crypto + Yahoo
-  fallback, exposure widening, runbook/launcher, Lex handoff, manual-validation docs).
-- **Old-Mac safety (audited read-only over Tailscale):** `safe_stabilization_mode: true`
-  (mode=`dry_run`, automation guard `false`, paper-trigger `false`). Scheduler + dashboard
-  LaunchAgents `running`; fresh heartbeat `2026-06-18T18:25 PT`. `require_approval=false`,
-  `manual_paper=true`, `.env` perms `600`.
-- **DB path correct:** yes — resolver == heartbeat == db_status ==
+- **Dev:** `tooling/codexpro-devspace` @ `1d329d2`, 10 ahead / 0 behind `main`, NOT pushed.
+  Committed baseline at `1d329d2` is clean; the current working tree has **uncommitted**
+  protocol/handoff docs/tooling edits in flight.
+- **Old Mac:** last known on `main` @ `366597b` (= `origin/main`), clean, origin =
+  `Pak209/AlphaLabs.git` (not re-verified this pass).
+- **Delta (dev has, runner lacks), 10 commits:** `bf7f64d`, `2c4c52c`, `6227f46`, `dacdca2`,
+  `e1999c1`, `be3757c`, `a8cb5a6`, `7a0d9f4`, `7418a73`, `1d329d2` (CodexPro tooling/docs,
+  multi-coin crypto + Yahoo fallback, exposure widening, runbook/launcher, Lex handoff,
+  manual-validation docs, cross-agent handoff protocol/contract).
+- **Old-Mac safety — LAST KNOWN (2026-06-18T18:25 PT, not re-verified this pass):**
+  safe-stabilization mode true — scheduler mode last known dry-run, automation paper-trade guard
+  last known disabled, scheduler could not trigger paper trades. Scheduler + dashboard
+  LaunchAgents running; heartbeat at that time. Paper-execution approval requirement last known
+  disabled; manual paper path last known enabled; runner secrets file restricted to
+  owner-only perms. Treat as last-known, not current — re-verify before relying on it.
+- **DB path (last known):** resolver == heartbeat == db_status ==
   `/Users/danielkimoto/AlphaLab/alpha_lab/data/alpha_lab.sqlite3` (no split-brain). ideas=119,
-  trades=32, catalyst_events=213.
+  trades=32, catalyst_events=213 — as of the 2026-06-18 audit; not re-verified this pass.
 - **KEY DEPLOY MECHANISM / BLOCKER:** `./ops deploy` does `git fetch + pull --ff-only` on the
-  server, which is on **`main`**. The 8 dev commits are on a feature branch that is **unpushed
+  server, which is on **`main`**. The 10 dev commits are on a feature branch that is **unpushed
   and not in `main`**, so an `--ff-only` pull would bring **nothing**. Deploying this work
-  REQUIRES first reconciling the 8 commits into `origin/main` (merge/PR + push). No way around
+  REQUIRES first reconciling the 10 commits into `origin/main` (merge/PR + push). No way around
   this short of changing the server's tracked branch. `./ops deploy` also kickstarts dashboard +
   scheduler after pulling, but preserves `.env`/DB/logs/reports/launchd, and
   `require_safe_service_reload` refuses if paper jobs are armed (they are not — safe).
-- **Before deploying this branch:** (a) pass manual paper validation first; (b) **merge the 8
+- **Before deploying this branch:** (a) pass manual paper validation first; (b) **merge the 10
   commits into `origin/main` and push** (runner only pulls `main` ff-only); (c) re-confirm the
   `dacdca2` widening is intended for the runner (it is — keep equity 20 / crypto 25); (d) keep
-  gates safe and set `REQUIRE_PAPER_APPROVAL=true` if re-arming; (e) back up `.env`; (f) deploy
-  code-only via `./ops deploy` (never overwrite the live `.env`/DB); (g) stop services before
-  any tree move. Read-only `./ops deploy-preflight` checks the commit gap/dirty/safety first.
+  gates safe and enable the paper-execution approval requirement if re-arming; (e) back up the
+  runner secrets file; (f) deploy code-only via `./ops deploy` (never overwrite the live secrets
+  file/DB); (g) stop services before any tree move. Read-only `./ops deploy-preflight` checks the
+  commit gap/dirty/safety first.
 - **Immediately after deploy:** run `scripts/verify_old_mac_runtime.sh` (or
-  `./ops remote-status/safety-status/health`) — confirm commit matches, `safe_stabilization_mode:
-  true`, DB path unchanged + same-DB proof, fresh heartbeat, expected job count, dashboard on
+  `./ops remote-status/safety-status/health`) — confirm commit matches, safe-stabilization mode
+  holds, DB path unchanged + same-DB proof, fresh heartbeat, expected job count, dashboard on
   loopback, paper checks 200.
 
 ### Files Changed
-- `.ai/LEX_REVIEW_HANDOFF.md` only (this cleanup + Reconciliation Plan). **No config/code/env/
-  launchd changes; `dacdca2` kept.**
+- `.ai/LEX_REVIEW_HANDOFF.md` (Current State Summary refresh + Reconciliation Plan) and the
+  shared handoff skill (`.agents/skills/alphalabs-handoff-update/SKILL.md`,
+  `scripts/append_handoff.py`). **No config/code/env/launchd changes; `dacdca2` kept.**
 
 ### Commands Run
 - Local read-only: `git status --short`, `git log --oneline main..HEAD`,
@@ -191,19 +210,21 @@ findings from prior passes are retained below for Lex.
 - No old-Mac commands this pass (state carried from the prior read-only audit). No writes.
 
 ### Git State
-- Branch `tooling/codexpro-devspace`, HEAD `7a0d9f4`, **8 commits ahead of `main`, not pushed**.
-  Working tree: only `.ai/LEX_REVIEW_HANDOFF.md` modified. `docs/MANUAL_PAPER_VALIDATION.md` is
-  COMMITTED (in `a8cb5a6`/`7a0d9f4`), not untracked. Runner unchanged (`main` @ `366597b`).
+- Branch `tooling/codexpro-devspace`, HEAD `1d329d2`, **10 commits ahead of `main`, not pushed**.
+  Committed baseline is clean; in-flight edits to the handoff + shared skill are **uncommitted**
+  this pass. `docs/MANUAL_PAPER_VALIDATION.md` is COMMITTED (in `a8cb5a6`/`7a0d9f4`), not
+  untracked. Runner unchanged (last known `main` @ `366597b`).
 
 ### Safety Notes
-- Read-only + handoff edit only. No merge, rebase, push, deploy, trades, scheduler re-arm,
-  `.env`, launchd, or runtime-code changes. Old Mac left exactly as found: `dry_run`/disarmed.
+- Read-only + handoff/skill edits only. No merge, rebase, push, deploy, trades, scheduler
+  re-arm, runner-secrets, launchd, or runtime-code changes. Old Mac not touched this pass and
+  not re-verified — last known scheduler dry-run / disarmed.
 
 ### What Lex Should Inspect Next
-- Approve the Reconciliation Plan: regular merge of the 8 commits into `main` (no squash), only
+- Approve the Reconciliation Plan: regular merge of the 10 commits into `main` (no squash), only
   after manual paper validation passes.
 - Review `docs/MANUAL_PAPER_VALIDATION.md` pass/fail criteria and the
-  `ALPHALAB_REQUIRE_PAPER_APPROVAL=true`-before-re-arm recommendation.
+  enable-paper-approval-before-re-arm recommendation.
 
 ### Open Questions
 - Confirm regular-merge (vs squash) is the desired reconciliation style into `main`.
@@ -213,8 +234,8 @@ findings from prior passes are retained below for Lex.
 ### Recommended Next Step
 - **First validation = NOT READY.** Before it can run: (a) restore old-Mac reachability over
   Tailscale and re-verify `./ops safety-status` + `./ops health` + `./ops check alpaca`
-  (scheduler `dry_run`/disarmed, same-DB proof, paper 200); (b) set
-  `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` on the runner; (c) run during equity market hours.
+  (scheduler last known dry-run/disarmed — confirm, plus same-DB proof, paper 200); (b) enable
+  the paper-execution approval requirement on the runner; (c) run during equity market hours.
 - Then follow `docs/MANUAL_PAPER_VALIDATION.md` exactly (one analyst-assisted equity idea →
   approve → `POST /api/ideas/{id}/paper-trade`).
 - Branch reconciliation and re-arm remain gated behind a clean validation PASS. No merge/push/

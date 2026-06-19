@@ -81,12 +81,18 @@ def main() -> None:
 
     # The handoff is two-part: a refreshable "Current State Summary" on top and an
     # append-only "Agent Activity Log" below. New entries belong ONLY in the log, so
-    # require its heading and append within that section (it runs to end of file).
+    # require exactly one such heading and append within that section (it runs to EOF).
     existing = handoff.read_text(encoding="utf-8")
-    if LOG_HEADING not in existing:
+    heading_count = len(re.findall(rf"(?m)^{re.escape(LOG_HEADING)}\s*$", existing))
+    if heading_count == 0:
         raise SystemExit(
             f"Missing '{LOG_HEADING}' heading in {handoff}. Add the Agent Activity Log "
             "section before appending entries."
+        )
+    if heading_count > 1:
+        raise SystemExit(
+            f"Found {heading_count} '{LOG_HEADING}' headings in {handoff}; expected exactly "
+            "one so entries append to a single, well-defined log section."
         )
 
     all_text = [
