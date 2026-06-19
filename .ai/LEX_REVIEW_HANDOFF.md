@@ -9,7 +9,7 @@ This file has **two parts**, used by all agents (Claude, Codex, Lex, Human):
    (`.agents/skills/alphalabs-handoff-update/scripts/append_handoff.py`), which appends
    under the `## Agent Activity Log` heading only.
 
-_Last updated: 2026-06-18_
+_Last updated: 2026-06-19_
 
 ## Current State Summary
 
@@ -24,24 +24,22 @@ _Last updated: 2026-06-18_
 - HEAD: `1d329d2` — docs: add cross-agent handoff contract.
 - `main` / `origin/main`: `366597b` — feat: classify SEC offering filings as bearish catalysts.
 - **Not pushed.** No upstream tracking configured; the 10 ahead commits are local only.
-- Old-Mac runner: last known on `main` @ `366597b` (= `origin/main`), clean — **last-known, not
-  re-verified this pass.**
+- Old-Mac runner: on `main` @ `366597b` (= `origin/main`), clean — **verified reachable
+  2026-06-19 00:54 PT** (re-verify immediately before validation/deploy).
 
-## First-Validation Readiness — NOT READY (2026-06-18, code GREEN / ops BLOCKED)
+## First-Validation Readiness — NOT READY (2026-06-19, code GREEN / one ops blocker)
 Audited whether AlphaLabs can run the first manual paper validation. **Code paths are sound**
-(manual endpoint, approval gate, Alpaca paper-only enforcement all verified). **Operationally
-NOT READY** on two blockers:
-1. **Old Mac UNREACHABLE this pass.** SSH over Tailscale timed out (twice) — could NOT
-   re-verify the runner's scheduler mode, dashboard/scheduler health, same-DB proof, or Alpaca
-   paper reachability. The validation runs against the runner, so it cannot start until the old
-   Mac is reachable and re-verified. Last-known-safe state was `2026-06-18T18:25 PT`; treat as
-   last-known, not current.
-2. **Approval requirement not yet enabled.** At last audit the paper-execution approval
+(manual endpoint, approval gate, Alpaca paper-only enforcement all verified). The old Mac is now
+**verified reachable and safe (2026-06-19 00:54 PT):** safe-stabilization mode true, scheduler in
+safe dry-run mode, automation paper-trading not armed, `main` @ `366597b` clean, dashboard +
+scheduler launchd running, DB path consistent — no old-Mac changes made. **Operationally NOT
+READY** on one primary blocker:
+1. **Approval requirement not yet enabled.** At last check the paper-execution approval
    requirement was **last known disabled** on the runner; the checklist requires it **enabled**
    so the analyst-assisted approval gate actually engages. Changing it is intentionally deferred
    (out of scope here) — it must be enabled before the test.
-Also gating: the test must run during equity market hours. No env/launchd/old-Mac change was
-made this pass.
+Also gating: the test must run during equity market hours, and old-Mac safety should be
+re-verified immediately before validation. No env/launchd/old-Mac change was made this pass.
 
 ## Known Risks
 - **Exposure-limit widening is INTENTIONAL (paper-test capacity) — file is RUNTIME-ACTIVE.**
@@ -72,19 +70,18 @@ made this pass.
   shared skill files).
 
 ### 2. Dev Mac ↔ Old Mac drift — PRESENT (expected, gated)
-- Old-Mac runner is last known on `main` @ `366597b` (= `origin/main`), clean. Dev is 10
-  commits ahead on the feature branch, unpushed. `./ops deploy` pulls `main` ff-only, so
+- Old-Mac runner is on `main` @ `366597b` (= `origin/main`), clean (verified 2026-06-19 00:54 PT).
+  Dev is 10 commits ahead on the feature branch, unpushed. `./ops deploy` pulls `main` ff-only, so
   nothing reaches the runner until the 10 commits are merged into `origin/main`. No deploy
-  performed.
+  performed; branch reconciliation/deploy remains gated behind a manual paper validation PASS.
 
-### 3. Scheduler paper-mode — last-known SAFE (disarmed); NOT re-verified this pass
+### 3. Scheduler paper-mode — SAFE (disarmed), verified 2026-06-19 00:54 PT
 - The runner was found paper-armed on 2026-06-18 and disarmed the same day: scheduler mode set
-  to dry-run and the automation paper-trade guard disabled, scheduler reloaded. **Last-known-safe
-  read (2026-06-18T18:25 PT):** safe-stabilization mode true, scheduler could not trigger paper
-  trades, fresh heartbeat at that time. The old Mac was **not reachable/re-verified in this pass**
-  — treat as last-known, not current.
-- Keep scheduler dry-run + disarmed until a paper window is intentionally opened; re-verify
-  before relying on it.
+  to dry-run and the automation paper-trade guard disabled, scheduler reloaded. **Verified
+  2026-06-19 00:54 PT (read-only):** safe-stabilization mode true, scheduler in safe dry-run mode,
+  could not trigger paper trades; scheduler + dashboard launchd running. Re-verify immediately
+  before validation/deploy.
+- Keep scheduler dry-run + disarmed until a paper window is intentionally opened.
 - The paper-execution approval requirement was **last known disabled** — it must be enabled
   before any re-arm/validation.
 
