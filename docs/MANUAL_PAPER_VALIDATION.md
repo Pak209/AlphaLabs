@@ -6,8 +6,11 @@ pass first; until it does, the old-Mac scheduler stays `dry_run`/disarmed and no
 automation paper flag is set. No real-money trading at any point.
 
 The first validation is deliberately conservative: **one** human-selected
-**equity** idea, placed manually against the Alpaca **paper** endpoint, with the
-scheduler still in `dry_run` and automation paper trades off.
+**analyst-assisted equity** idea, placed manually against the Alpaca **paper**
+endpoint, with the scheduler still in `dry_run` and automation paper trades off.
+The idea **must** be analyst-assisted so that the approval gate is actually
+exercised — the gate only applies to analyst-assisted (or crypto) ideas, and the
+whole point of this validation is to prove that gate works end-to-end.
 
 ## Pre-Conditions (must all hold before the test)
 
@@ -48,7 +51,13 @@ scheduler still in `dry_run` and automation paper trades off.
   must never execute.
 
 ### Allowed asset class for first test
-- **Equity only.** No crypto, no options for the first validation.
+- **Analyst-assisted equity only.** No crypto, no options for the first
+  validation.
+- The idea **must be analyst-assisted** (its stored explanation has
+  `analyst_assisted = true`, i.e. built via `build_trade_explanation`). A plain
+  non-assisted equity idea bypasses the approval gate entirely
+  (`service.py:1722`), so it would NOT test the thing this validation exists to
+  prove. Confirm `analyst_assisted = true` before placing the order.
 
 ### Allowed order size / risk (per current `config.example.json`)
 - Single order, equity: `max_position_size_usd ≤ 1900` and
@@ -61,8 +70,10 @@ scheduler still in `dry_run` and automation paper trades off.
 
 ## Execution (the single manual test)
 1. Confirm all pre-conditions above (`./ops safety-status` + `./ops health`).
-2. Manually select ONE equity idea on the approved watchlist; confirm its
-   entry/stop/target are populated from a live price.
+2. Manually select ONE **analyst-assisted** equity idea on the approved
+   watchlist; confirm `analyst_assisted = true` and that its entry/stop/target
+   are populated from a live price. Confirm it shows up in the Approvals queue
+   as `needs_review` (proof the gate is engaged before approval).
 3. Approve the idea in the Approvals page (human gate).
 4. Place the paper order manually (manual paper path), market hours only.
 5. Observe the order on the Alpaca **paper** account and in the dashboard.
@@ -86,15 +97,19 @@ scheduler still in `dry_run` and automation paper trades off.
 ## Pass / fail criteria
 
 **PASS** (all must be true):
-- Exactly one equity paper order placed, via the manual path, on the Alpaca
-  paper endpoint.
+- Exactly one **analyst-assisted** equity paper order placed, via the manual
+  path, on the Alpaca paper endpoint.
 - The scheduler placed nothing and stayed `dry_run`/disarmed throughout.
-- Human approval was required and recorded before execution.
+- The approval gate was actually engaged: the idea was `needs_review`, blocked
+  from execution until approved, then executed only after explicit approval was
+  recorded.
 - Entry/stop/target were populated from a live price (not blank).
 - Audit log + `trades` row + Performance linkage all present and consistent.
 - Same-DB proof intact; no errors, no live-endpoint contact.
 
 **FAIL** (any one):
+- The test idea was not analyst-assisted (gate never engaged), or it executed
+  without ever sitting in `needs_review`.
 - Order routed to (or attempted against) a live endpoint, or
   `ALPACA_PAPER_BASE_URL` not paper.
 - The scheduler placed any order, or `safe_stabilization_mode` was not `true`.
