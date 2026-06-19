@@ -1,26 +1,45 @@
 # Lex Review Handoff — AlphaLabs
 
-Living handoff for review (Lex). Updated before the completion of every task.
-Keep this current and concise: replace stale information instead of appending history.
+This file has **two parts**, used by all agents (Claude, Codex, Lex, Human):
+
+1. **Current State Summary** (top) — the concise, current snapshot. Read this first.
+   It MAY be refreshed/replaced when project state materially changes; keep it current.
+2. **Agent Activity Log** (bottom) — **append-only**. Never delete, rewrite, or reorder
+   prior entries. New entries are agent-labeled and written via the shared helper
+   (`.agents/skills/alphalabs-handoff-update/scripts/append_handoff.py`), which appends
+   under the `## Agent Activity Log` heading only.
 
 _Last updated: 2026-06-18_
 
+## Current State Summary
+
+> Concise current snapshot — read first; may be refreshed when state materially changes.
+
 ## Current Branch
-`tooling/codexpro-devspace` (8 commits ahead of `main`, 0 behind).
+`tooling/codexpro-devspace` (9 commits ahead of `main`, 0 behind).
 
 ## Git Status Summary
-- Working tree: clean except this handoff edit. The two validation docs are committed
-  (`a8cb5a6`, `7a0d9f4`); **nothing pushed**.
-- HEAD: `7a0d9f4` — docs: require analyst-assisted idea for paper validation.
+- Working tree: clean except this handoff edit. Validation docs + reconciliation handoff are
+  committed (`a8cb5a6`, `7a0d9f4`, `7418a73`); **nothing pushed**.
+- HEAD: `7418a73` — docs: update Lex handoff for reconciliation plan.
 - `main` / `origin/main`: `366597b` — feat: classify SEC offering filings as bearish catalysts.
-- **Not pushed.** No upstream tracking configured; the 8 ahead commits are local only.
-- Old-Mac runner: on `main` @ `366597b` (= `origin/main`), working tree clean.
+- **Not pushed.** No upstream tracking configured; the 9 ahead commits are local only.
+- Old-Mac runner: last known on `main` @ `366597b` (= `origin/main`), clean.
 
-## This Pass Was Read-Only (deploy-readiness audit)
-No trades, no scheduler/automation re-arm, no `.env`/launchd/deploy/push changes. This pass
-re-audited dev↔old-Mac state read-only and confirmed deploy-readiness blockers (see
-Deploy-Readiness below). The disarm/cleanup notes below are from earlier passes (retained for
-context).
+## First-Validation Readiness — NOT READY (2026-06-18, code GREEN / ops BLOCKED)
+Audited whether AlphaLabs can run the first manual paper validation. **Code paths are sound**
+(manual endpoint, approval gate, Alpaca paper-only enforcement all verified). **Operationally
+NOT READY** on two blockers:
+1. **Old Mac UNREACHABLE.** SSH over Tailscale `danielkimoto@100.91.41.60` timed out (port 22,
+   twice) this pass — cannot verify the runner is still `dry_run`/disarmed, that the dashboard/
+   scheduler are healthy, same-DB proof holds, or that Alpaca paper is reachable. The validation
+   runs against the runner, so it cannot start until the old Mac is reachable and re-verified.
+   Last confirmed-safe state was `2026-06-18T18:25 PT`.
+2. **Approval flag not yet set.** Runner had `ALPHALAB_REQUIRE_PAPER_APPROVAL=false` at last
+   audit; the checklist requires `true` so the analyst-assisted approval gate actually engages.
+   Changing it is intentionally deferred (out of scope here) — must be set before the test.
+Also gating: the test must run during equity market hours. No env/launchd/old-Mac change was
+made this pass.
 
 ## Known Risks
 - **Exposure-limit widening is INTENTIONAL (paper-test capacity) — file is RUNTIME-ACTIVE.**
@@ -192,6 +211,76 @@ findings from prior passes are retained below for Lex.
   (current recommendation: hold until validation passes).
 
 ### Recommended Next Step
-- Get sign-off on the Reconciliation Plan. Keep scheduler `dry_run`/disarmed; do not merge/push/
-  deploy/re-arm until manual paper validation passes. Set `REQUIRE_PAPER_APPROVAL=true` only as
-  part of an intentional re-arm decision.
+- **First validation = NOT READY.** Before it can run: (a) restore old-Mac reachability over
+  Tailscale and re-verify `./ops safety-status` + `./ops health` + `./ops check alpaca`
+  (scheduler `dry_run`/disarmed, same-DB proof, paper 200); (b) set
+  `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` on the runner; (c) run during equity market hours.
+- Then follow `docs/MANUAL_PAPER_VALIDATION.md` exactly (one analyst-assisted equity idea →
+  approve → `POST /api/ideas/{id}/paper-trade`).
+- Branch reconciliation and re-arm remain gated behind a clean validation PASS. No merge/push/
+  deploy/re-arm now.
+
+---
+
+## Agent Activity Log
+
+> Append-only. Never delete, rewrite, or reorder entries below. New entries are added by the
+> shared helper under this heading and must be agent-labeled (`Claude`/`Codex`/`Lex`/`Human`).
+
+## 2026-06-18 22:34 PT — Codex
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Created the repo-scoped AlphaLabs Handoff Update skill and aligned the handoff header with its append-only policy.
+
+### Files Modified
+- .agents/skills/alphalabs-handoff-update/SKILL.md
+- .agents/skills/alphalabs-handoff-update/agents/openai.yaml
+- .agents/skills/alphalabs-handoff-update/scripts/append_handoff.py
+- .ai/LEX_REVIEW_HANDOFF.md
+
+### Commands / Tests Run
+- python3 skill-creator/scripts/quick_validate.py .agents/skills/alphalabs-handoff-update
+- python3 .agents/skills/alphalabs-handoff-update/scripts/append_handoff.py --help
+- Secret-pattern rejection fixture
+- git diff --check
+
+### Results
+- Skill structure passed validation.
+- The helper parsed successfully and rejected credential-like input without changing the handoff.
+- A Codex-labeled append-only entry was written with branch, commit, and working-tree state.
+
+### Risks / Blockers
+- The skill records handoffs when Codex invokes it; other agents must adopt the same file contract independently.
+
+### Next Recommended Task
+Have Claude and Lex adopt the append-only entry contract for their completed tasks.
+
+
+## 2026-06-18 22:36 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Made .ai/LEX_REVIEW_HANDOFF.md the mandatory append-only project handoff log for Claude by adding a project CLAUDE.md that binds Claude to the same cross-agent contract already implemented by the Codex skill (.agents/skills/alphalabs-handoff-update). Reused the existing append_handoff.py helper instead of duplicating it.
+
+### Files Modified
+- CLAUDE.md (new)
+
+### Commands / Tests Run
+- git status / read existing .ai/* and .agents/skills/alphalabs-handoff-update skill
+- python3 .agents/skills/alphalabs-handoff-update/scripts/append_handoff.py --agent Claude (this entry)
+
+### Results
+- CLAUDE.md now mandates appending an entry after every meaningful task and operational event (deploys, scheduler/launchd/dashboard/old-Mac/env/DB changes), defines audit entries, append-only + agent-label + security rules, and points to the shared helper. Verified the helper appends a Claude-labeled entry and rejects credential-like text.
+
+### Risks / Blockers
+- Lex and human operators must also adopt the same append contract; only Claude (CLAUDE.md) and Codex (skill) are codified so far.
+
+### Next Recommended Task
+Have Lex adopt the same append-only contract; consider a short note in .ai/project-context.md so the mandate is discoverable by all readers.

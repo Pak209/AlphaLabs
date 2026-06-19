@@ -1,0 +1,4 @@
+interface:
+  display_name: "AlphaLabs Handoff Update"
+  short_description: "Append concise, secure AlphaLabs handoffs"
+  default_prompt: "Use $alphalabs-handoff-update to record this completed task in the repository handoff."
