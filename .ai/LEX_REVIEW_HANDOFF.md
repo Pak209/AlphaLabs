@@ -305,3 +305,33 @@ Made .ai/LEX_REVIEW_HANDOFF.md the mandatory append-only project handoff log for
 
 ### Next Recommended Task
 Have Lex adopt the same append-only contract; consider a short note in .ai/project-context.md so the mandate is discoverable by all readers.
+
+
+## 2026-06-19 00:54 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: clean
+
+### Summary
+Old Mac runner reachable again over Tailscale; the 2026-06-18/19 'unreachable' scare was wrong-IP confusion, not runner downtime. Ran read-only safety verification; made NO changes to the old Mac.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ssh danielkimoto@100.91.41.60 (read-only): scheduler_safety_status via .venv, git branch/status, launchctl list, scheduler.log tail, DB path discovery
+
+### Results
+- Reachable: yes (old Mac local time Fri Jun 19 00:54 PDT).
+- Corrected IP mapping: old Mac/runner = 100.91.41.60 (Tailscale name daniels-macbook-pro-2, hostname daniels-MacBook-Pro-3.local); dev Mac = 100.114.195.7 (daniels-macbook-pro). Prior failed attempts hit the dev Mac IP.
+- Safety: safe_stabilization_mode=True (scheduler_mode=dry_run, automation_paper_trading_armed=False, paper_trades_can_be_triggered_by_scheduler=False).
+- Old Mac git: branch main @ 366597b, working tree clean.
+- Processes: launchd com.alphalab.scheduler (PID 81021) and com.alphalab.dashboard (PID 59834) loaded/running; com.alphalab.options-validation idle between scheduled runs.
+- DB consistency: configured ALPHA_LAB_DB_PATH, scheduler.log db path, and on-disk file all = alpha_lab/data/alpha_lab.sqlite3; latest scheduler.log line is mode=dry_run (NO orders placed).
+
+### Risks / Blockers
+- scheduler.log last written 2026-06-18 15:41 PT (~9h quiet at check time); expected for dry_run outside market hours since scheduler PID is alive, but log heartbeat freshness is worth a glance during market hours to confirm cron activity.
+
+### Next Recommended Task
+During next market-hours window, confirm scheduler.log shows fresh dry_run cron activity (poll_live_catalysts) to validate heartbeat; keep runner in safe_stabilization_mode until manual paper validation is approved.
