@@ -1,137 +1,103 @@
-# Manual Paper Validation Checklist
+# Market-Hours Manual Paper Validation Runbook
 
-Defines what "manual paper validation passed" means before AlphaLabs may move
-from `dry_run` toward any automated paper trading. This is the gate that must
-pass first; until it does, the old-Mac scheduler stays `dry_run`/disarmed and no
-automation paper flag is set. No real-money trading at any point.
+Use this once, during regular equity market hours, to validate one
+human-approved, analyst-assisted equity idea against Alpaca **paper**. This is a
+manual validation only: do not enable automation, deploy code, change scheduler
+mode, or contact a live-trading endpoint.
 
-The first validation is deliberately conservative: **one** human-selected
-**analyst-assisted equity** idea, placed manually against the Alpaca **paper**
-endpoint, with the scheduler still in `dry_run` and automation paper trades off.
-The idea **must** be analyst-assisted so that the approval gate is actually
-exercised — the gate only applies to analyst-assisted (or crypto) ideas, and the
-whole point of this validation is to prove that gate works end-to-end.
+## 1. Pre-market readiness
 
-## Pre-Conditions (must all hold before the test)
+From the AlphaLabs checkout, before the market opens:
 
-### Required environment state
-- `ALPHALAB_SCHEDULER_MODE=dry_run` (scheduler places nothing on its own).
-- `ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES` unset or not `true` (automation guard
-  disarmed — confirms the scheduler cannot place this or any order).
-- `ALPHALAB_ALLOW_MANUAL_PAPER_TRADES=true` (manual path is the only enabled
-  execution route).
-- `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` (human approval enforced for
-  analyst-assisted / crypto ideas; see Phase 2 recommendation).
-- `ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets` (paper-only; the code
-  asserts this and refuses live endpoints).
-- `.env` permissions `600`, present, not modified for the test beyond the gates
-  above.
-- `safe_stabilization_mode: true` from `scheduler_safety_status` /
-  `./ops safety-status` at the moment of the test.
+```bash
+./ops paper-validation-status
+```
 
-### Required API auth state
-- Alpaca **paper** credentials present and reachable (`./ops check alpaca` →
-  HTTP 200). No live Alpaca key in use.
-- Price source reachable for the chosen ticker: Polygon (if `POLYGON_API_KEY`
-  set) or the Yahoo keyless fallback (`YAHOO_PRICE_ENABLED=true`) returns a
-  non-null validation price, so entry/stop/target are populated (not blank).
-- SEC EDGAR reachable if the idea's catalyst depends on it (`./ops check sec`).
+Proceed only when every row is `PASS` and the final line is:
 
-### Scheduler state
-- Old-Mac scheduler + dashboard LaunchAgents `running`, fresh heartbeat, single
-  shared DB (resolver == heartbeat == API db_path — the `./ops health` same-DB
-  proof passes).
-- Scheduler remains `dry_run` for the entire test. The manual order is placed by
-  a human via the manual path, **not** by any scheduler job.
+```text
+ready_for_manual_validation=true
+```
 
-### Approval policy
-- `ALPHALAB_REQUIRE_PAPER_APPROVAL=true`. The idea must be explicitly
-  **approved** in the Approvals page before the manual paper order is allowed to
-  reach Alpaca (for analyst-assisted or crypto ideas). Rejected/expired ideas
-  must never execute.
+This proves the scheduler is still `dry_run`, automation paper trading is
+disarmed, approval is required, manual paper trading is enabled, Alpaca is
+paper-only and reachable, the dashboard is healthy, the runtime uses one DB,
+and the scheduler heartbeat is fresh. A failure is a stop condition; diagnose
+it without deploying or changing scheduler mode.
 
-### Allowed asset class for first test
-- **Analyst-assisted equity only.** No crypto, no options for the first
-  validation.
-- The idea **must be analyst-assisted** (its stored explanation has
-  `analyst_assisted = true`, i.e. built via `build_trade_explanation`). A plain
-  non-assisted equity idea bypasses the approval gate entirely
-  (`service.py:1722`), so it would NOT test the thing this validation exists to
-  prove. Confirm `analyst_assisted = true` before placing the order.
+## 2. Select exactly one idea
 
-### Allowed order size / risk (per current `config.example.json`)
-- Single order, equity: `max_position_size_usd ≤ 1900` and
-  `max_equity_pct_per_trade ≤ 0.02`.
-- `min_confidence ≥ 0.75`, ticker on the equity `approved_tickers` watchlist.
-- One trade only; well within `max_trades_per_day=10` and
-  `max_open_positions=20`. Prefer the smallest meaningful size for the first run.
-- Standard guardrails must still apply: market-open, watchlist, confidence,
-  duplicate-position, max-trades/day, max-open-positions, drawdown.
+After the regular equity session opens:
 
-## Execution (the single manual test)
-1. Confirm all pre-conditions above (`./ops safety-status` + `./ops health`).
-2. Manually select ONE **analyst-assisted** equity idea on the approved
-   watchlist; confirm `analyst_assisted = true` and that its entry/stop/target
-   are populated from a live price. Confirm it shows up in the Approvals queue
-   as `needs_review` (proof the gate is engaged before approval).
-3. Approve the idea in the Approvals page (human gate).
-4. Place the paper order manually (manual paper path), market hours only.
-5. Observe the order on the Alpaca **paper** account and in the dashboard.
+1. Open the dashboard **Approvals** page.
+2. Select one card whose asset class is **equity**. Do not use crypto or options
+   for the first validation.
+3. Confirm the card has a `needs_review` badge. Its presence in this queue and
+   its analyst explanation show that it is analyst-assisted and that the human
+   approval gate is engaged.
+4. Confirm the ticker, thesis, source references, confidence, entry zone, stop
+   loss, take profit, and invalidation are sensible and populated. Use **Refresh
+   Levels** once if price levels are missing; stop if they remain missing.
+5. Do not select or act on a second idea during this run.
 
-## Required records after the test
+## 3. Approve, then place one paper trade
 
-### Logs / audit records
-- An execution-audit entry in the Paper / Dry-Run Log showing the submitted
-  Alpaca **paper** order (action = submitted), the resolved order payload, and
-  that it passed every risk/approval check (no approval-block, no risk-block).
-- `alpha_lab/data/audit.jsonl` reflects the attempt.
-- launchd scheduler logs show it stayed `dry_run` and did not place the order.
+Keep approval and execution as two explicit human actions:
 
-### Database records
-- A `trades` row linked to the originating idea id.
-- The idea's `approval_status = approved` and status transitioned to executed.
-- The order is attributable end-to-end: idea → explanation → approval → trade →
-  performance linkage on the Performance page (entry price, qty, P/L tracking).
-- Heartbeat + same-DB proof still consistent after the test (no split-brain).
+1. On the selected card, click **Approve only**. Do not click **Approve + Paper
+   Trade** for this validation.
+2. Record the `idea_id` shown in the approval toast (`Idea <id> approved`).
+3. Open the dashboard idea table, find the same ticker and thesis, and click its
+   **Paper** button exactly once.
+4. Read the confirmation carefully and confirm only the Alpaca **PAPER** trade.
+   Do not click again while waiting for a response.
+5. A successful response displays the Alpaca paper order ID. Record it, then
+   open **Paper / Dry-Run Log** and confirm one `paper` / submitted entry for the
+   same `idea_id`. Any rejection, timeout, duplicate, or ambiguous response is a
+   stop condition—do not retry in this run.
 
-## Pass / fail criteria
+## 4. Capture IDs and check evidence
 
-**PASS** (all must be true):
-- Exactly one **analyst-assisted** equity paper order placed, via the manual
-  path, on the Alpaca paper endpoint.
-- The scheduler placed nothing and stayed `dry_run`/disarmed throughout.
-- The approval gate was actually engaged: the idea was `needs_review`, blocked
-  from execution until approved, then executed only after explicit approval was
-  recorded.
-- Entry/stop/target were populated from a live price (not blank).
-- Audit log + `trades` row + Performance linkage all present and consistent.
-- Same-DB proof intact; no errors, no live-endpoint contact.
+Run the read-only evidence check with the recorded idea ID:
 
-**FAIL** (any one):
-- The test idea was not analyst-assisted (gate never engaged), or it executed
-  without ever sitting in `needs_review`.
-- Order routed to (or attempted against) a live endpoint, or
-  `ALPACA_PAPER_BASE_URL` not paper.
-- The scheduler placed any order, or `safe_stabilization_mode` was not `true`.
-- Order placed without the required approval, or a rejected/expired idea
-  executed.
-- Blank/None validation price, or risk-guard bypass.
-- DB split-brain / heartbeat-path mismatch, or missing audit/trade records.
+```bash
+python -m alpha_lab.paper_validation_evidence --idea <IDEA_ID>
+```
 
-## Rollback / stop conditions
-- Stop immediately and do not retry if any FAIL condition appears.
-- Do not flip `ALPHALAB_SCHEDULER_MODE=paper` or arm
-  `ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES` to "fix" a failed manual test.
-- If a bad order lands on the paper account, cancel/flatten it on the paper
-  account only; investigate via the audit log before any further attempt.
-- Leave the runner in `dry_run`/disarmed after the test regardless of outcome;
-  automation may only be considered after a clean PASS and explicit human
-  decision.
+The header reports the linked `trade id` and Alpaca order ID. Record the
+`trade_id`, then verify the same chain from that ID:
 
-## Why one clean PASS is the gate
-The position-concurrency caps were intentionally widened (equity 20 / crypto 25)
-for paper-test capacity, so exposure is now bounded by the *other* gates
-(scheduler mode, automation flag, per-day count, position size, approval). A
-single, fully-attributable manual paper trade proves the entry→approval→
-execution→audit→performance chain end-to-end before any of those gates are
-loosened toward automation.
+```bash
+python -m alpha_lab.paper_validation_evidence --trade <TRADE_ID>
+```
+
+Both commands must identify the same idea, trade, and Alpaca order. They read
+the resolved SQLite DB without writing to it or contacting Alpaca.
+
+## 5. Pass / fail
+
+**PASS** only when all of the following are true:
+
+- Pre-market readiness ended with `ready_for_manual_validation=true`.
+- Exactly one analyst-assisted equity idea was observed in `needs_review`, then
+  manually approved before execution.
+- Exactly one manual, non-dry-run order was submitted to Alpaca paper during
+  market hours; no retry or second idea was used.
+- Both evidence commands show all checks as `PASS` and end with
+  `db_evidence_passed=true` for the same idea/trade/order chain.
+- The scheduler remained `dry_run`, automation remained disarmed, and the
+  paper-only/same-DB/heartbeat conditions did not change during the run.
+
+**FAIL** on any readiness or evidence `FAIL`/`SCHEMA_INCOMPATIBLE`, missing or
+blank trade levels, execution before approval, more than one paper trade/order
+or submitted audit, mismatched IDs, missing performance linkage, any scheduler
+order, or any possible live-endpoint contact. Stop and preserve the evidence;
+do not retry, deploy, or loosen a safety gate.
+
+## Prohibited actions
+
+- No automated paper trading and no scheduler-triggered order.
+- No deploy, restart-for-deploy, or code/trading-logic change.
+- No scheduler-mode change; it stays `dry_run` throughout.
+- No live trading, live credentials, or live Alpaca endpoint.
+- No second order, second idea, or retry in the same validation run.

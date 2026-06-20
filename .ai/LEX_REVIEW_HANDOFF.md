@@ -713,3 +713,30 @@ Fixed the final Codex blocker: the accepted Alpaca paper base URL was not normal
 
 ### Next Recommended Task
 Request the final Codex read-only PASS/FAIL review of ops + the two test files; if PASS, commit as one unit excluding .ai-bridge/ (no deploy, no scheduler/.env change).
+
+
+## 2026-06-19 22:58 PT — Codex
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Replaced the manual paper validation checklist with a concise market-hours runbook covering readiness, one analyst-assisted equity selection, needs_review confirmation, separate manual approval and paper execution, ID capture, evidence checks, pass/fail criteria, and explicit no-automation/no-deploy/no-live-trading guardrails.
+
+### Files Modified
+- docs/MANUAL_PAPER_VALIDATION.md
+- .ai/LEX_REVIEW_HANDOFF.md
+
+### Commands / Tests Run
+- git diff --check -- docs/MANUAL_PAPER_VALIDATION.md
+- .venv/bin/python -m pytest alpha_lab/tests/test_paper_validation_status.py alpha_lab/tests/test_paper_validation_evidence.py -q
+
+### Results
+- Documentation now uses ./ops paper-validation-status and both paper_validation_evidence ID paths; targeted suite passed 100 tests.
+
+### Risks / Blockers
+- The live readiness command and manual order flow were intentionally not executed; the operator must run them during the actual market-hours validation.
+
+### Next Recommended Task
+During regular market hours, follow docs/MANUAL_PAPER_VALIDATION.md and stop on any failed or ambiguous readiness, order, or evidence result.
