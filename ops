@@ -770,15 +770,23 @@ cmd_check() {
         echo "www.sec.gov -> HTTP $code (200 = reachable)"'
       ;;
     alpaca)
-      inproj 'set -a; [ -f .env ] && source .env; set +a
+      inproj "$_ALPACA_PAPER_GUARD_SH"'
+        set -a; [ -f .env ] && source .env; set +a
         [ -n "${ALPACA_API_KEY:-}" ] && echo "ALPACA_API_KEY: present (hidden)" || echo "ALPACA_API_KEY: MISSING"
         [ -n "${ALPACA_SECRET_KEY:-}" ] && echo "ALPACA_SECRET_KEY: present (hidden)" || echo "ALPACA_SECRET_KEY: MISSING"
         base="${ALPACA_PAPER_BASE_URL:-https://paper-api.alpaca.markets}"
         echo "base URL: $base"
-        code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
-          -H "APCA-API-KEY-ID: ${ALPACA_API_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET_KEY}" \
-          "$base/v2/account" 2>/dev/null || echo 000)
-        echo "$base/v2/account -> HTTP $code (200 = authed paper account, 401/403 = reachable but check keys)"'
+        # Validate AND normalize the base BEFORE any credentialed request, so a
+        # live/look-alike/arbitrary-path base never receives keys and the composed
+        # account URL is always exactly <canonical>/v2/account (no double slash).
+        if canon="$(_alpaca_paper_base_canonical "$base")"; then
+          code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
+            -H "APCA-API-KEY-ID: ${ALPACA_API_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET_KEY}" \
+            "$canon/v2/account" 2>/dev/null || echo 000)
+          echo "$canon/v2/account -> HTTP $code (200 = authed paper account, 401/403 = reachable but check keys)"
+        else
+          echo "$base/v2/account -> SKIPPED (base URL is not the canonical Alpaca paper endpoint; refusing credentialed request, fail closed). Set ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets"
+        fi'
       inproj 'set -a; [ -f .env ] && source .env; set +a
         data_code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
           -H "APCA-API-KEY-ID: ${ALPACA_API_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET_KEY}" \
@@ -796,6 +804,206 @@ cmd_provider_status() {
   cmd_check sec
   print ""
   cmd_check alpaca
+}
+
+# --- manual paper validation readiness -------------------------------------
+# SINGLE SOURCE OF TRUTH for "is this the canonical Alpaca paper base URL?".
+# Returns 0 (paper) / 1 (not paper). Accept ONLY the canonical paper host with an
+# optional trailing slash; reject arbitrary paths (e.g. .../v2/account),
+# look-alike hosts (paper-api.alpaca.markets.evil), the live endpoint
+# (api.alpaca.markets), non-https schemes, and empty/malformed strings.
+#
+# `_alpaca_paper_base_canonical` validates AND normalizes in one place: on an
+# accepted base it strips a single optional trailing slash and prints the canonical
+# `https://paper-api.alpaca.markets` (no trailing slash) so callers compose exactly
+# `<canonical>/v2/account` — never `...markets//v2/account`. It returns non-zero and
+# prints nothing for any rejected base, so callers fail closed.
+#
+# This definition is held as a string so the EXACT same policy can be (a) eval'd
+# locally for the evaluator + the __alpaca-base-paper-check / __alpaca-account-url
+# test hooks, and (b) injected verbatim into every remote `inproj` block that
+# issues a credentialed Alpaca curl. There is exactly one policy; no caller may
+# roll its own validation or URL composition.
+_ALPACA_PAPER_GUARD_SH='_alpaca_base_is_paper() {
+  case "$1" in
+    https://paper-api.alpaca.markets|https://paper-api.alpaca.markets/) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+_alpaca_paper_base_canonical() {
+  _alpaca_base_is_paper "$1" || return 1
+  printf "%s" "${1%/}"
+}'
+eval "$_ALPACA_PAPER_GUARD_SH"
+
+# Print one PASS/FAIL row and tally failures into the caller's PV_FAILS
+# (zsh dynamic scoping makes the caller's local visible here).
+_pv_row() {
+  local label="$1" pass="$2" detail="$3" res
+  if [ "$pass" = "true" ]; then res="PASS"; else res="FAIL"; PV_FAILS=$((PV_FAILS + 1)); fi
+  printf "  %-46s %-6s %s\n" "$label" "$res" "$detail"
+}
+
+# Pure evaluator: reads a key=value blob on stdin and renders the readiness
+# table + a final ready_for_manual_validation boolean. No SSH, no writes — so it
+# is unit-testable in isolation (see tests/test_paper_validation_status.py).
+_paper_validation_eval() {
+  local BLOB; BLOB="$(cat)"
+  local mode armed approval manual base paper_only acct health
+  local rdb adb hdb hbat hage hmax
+  mode="$(_kv_get "$BLOB" scheduler_mode)"
+  armed="$(_kv_get "$BLOB" automation_paper_trading_armed)"
+  approval="$(_kv_get "$BLOB" approval_required)"
+  manual="$(_kv_get "$BLOB" manual_paper_trading_enabled)"
+  base="$(_kv_get "$BLOB" alpaca_base)"
+  # Derive paper-only from the base URL itself (fail closed) rather than trusting a
+  # precomputed flag: an empty/live/invalid/look-alike/arbitrary-path base must
+  # never read as paper. Uses the single shared guard (canonical host + optional
+  # trailing slash only).
+  paper_only=false
+  _alpaca_base_is_paper "$base" && paper_only=true
+  acct="$(_kv_get "$BLOB" alpaca_account_code)"
+  health="$(_kv_get "$BLOB" dashboard_health_code)"
+  rdb="$(_kv_get "$BLOB" resolver_db_path)"
+  adb="$(_kv_get "$BLOB" api_db_path)"
+  hdb="$(_kv_get "$BLOB" heartbeat_db_path)"
+  hbat="$(_kv_get "$BLOB" heartbeat_at)"
+  hage="$(_kv_get "$BLOB" heartbeat_age_seconds)"
+  hmax="$(_kv_get "$BLOB" heartbeat_max_age)"; [ -n "$hmax" ] || hmax=900
+  # An invalid (non-numeric) threshold must fail closed, not silently widen the
+  # freshness window; flag it so the heartbeat check below can never pass.
+  local hmax_ok=true
+  case "$hmax" in ''|*[!0-9]*) hmax_ok=false ;; esac
+
+  local PV_FAILS=0
+  print -P "%F{cyan}== Manual paper validation readiness (read-only) ==%f"
+  print ""
+  printf "  %-46s %-6s %s\n" "Check" "Result" "Detail"
+  printf "  %-46s %-6s %s\n" "----------------------------------------------" "------" "------------"
+
+  local p
+  p=$([ "$mode" = "dry_run" ] && echo true || echo false)
+  _pv_row "scheduler mode is dry_run" "$p" "mode=${mode:-?}"
+  p=$([ "$armed" = "false" ] && echo true || echo false)
+  _pv_row "automation paper trading NOT armed" "$p" "armed=${armed:-?}"
+  p=$([ "$approval" = "true" ] && echo true || echo false)
+  _pv_row "paper approval requirement enabled" "$p" "approval_required=${approval:-?}"
+  p=$([ "$manual" = "true" ] && echo true || echo false)
+  _pv_row "manual paper trading enabled" "$p" "manual_enabled=${manual:-?}"
+  p=$([ "$paper_only" = "true" ] && echo true || echo false)
+  _pv_row "Alpaca base URL is paper-only" "$p" "${base:-?}"
+  p=$([ "$acct" = "200" ] && echo true || echo false)
+  _pv_row "Alpaca paper account check passes" "$p" "/v2/account HTTP ${acct:-000}"
+  p=$([ "$health" = "200" ] && echo true || echo false)
+  _pv_row "dashboard health passes" "$p" "/api/health HTTP ${health:-000}"
+
+  # same-DB proof: all three of resolver, api, and the scheduler heartbeat DB path
+  # must be present AND equal. A missing/unknown heartbeat path now FAILS closed
+  # (it can no longer be waved through) — an unverifiable heartbeat DB is a real
+  # split-brain risk, not a pass.
+  local sdb=false
+  if [ -n "$rdb" ] && [ -n "$adb" ] && [ -n "$hdb" ] && [ "$adb" = "$rdb" ] && [ "$hdb" = "$rdb" ]; then
+    sdb=true
+  fi
+  _pv_row "same-DB proof (resolver=api=heartbeat)" "$sdb" "resolver=${rdb:-?} api=${adb:-?} hb=${hdb:-?}"
+
+  # heartbeat freshness: numeric age within a valid, numeric window. A missing or
+  # malformed age OR an invalid threshold fails closed.
+  local fresh=false
+  if [ "$hmax_ok" = "true" ]; then
+    case "$hage" in
+      ''|*[!0-9]*) fresh=false ;;
+      *) [ "$hage" -le "$hmax" ] && fresh=true ;;
+    esac
+  fi
+  _pv_row "scheduler heartbeat is fresh (<= ${hmax}s)" "$fresh" \
+    "age=${hage:-?}s at ${hbat:-none} max=${hmax:-?}$([ "$hmax_ok" = "true" ] || echo " (invalid)")"
+
+  print ""
+  if [ "$PV_FAILS" -eq 0 ]; then
+    ok "ready_for_manual_validation=true"
+    return 0
+  fi
+  err "ready_for_manual_validation=false (${PV_FAILS} check(s) failed)"
+  return 1
+}
+
+cmd_paper_validation_status() {
+  load_conf; require_reachable
+  step "Manual paper validation readiness (read-only; no trades, no DB writes)"
+  local HMAX="${ALPHALAB_HEARTBEAT_MAX_AGE:-900}"
+  local REMOTE
+  REMOTE="$(inproj "$_ALPACA_PAPER_GUARD_SH"'
+    set -a; [ -f .env ] && source .env; set +a
+    mode="$(printf "%s" "${ALPHALAB_SCHEDULER_MODE:-dry_run}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    [ "$mode" = "paper" ] || mode="dry_run"
+    armed="$(printf "%s" "${ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES:-}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    paper_guard_armed=false; [ "$armed" = "true" ] && paper_guard_armed=true
+    appr="$(printf "%s" "${ALPHALAB_REQUIRE_PAPER_APPROVAL:-true}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    approval_required=true; case "$appr" in 0|false|no|off) approval_required=false;; esac
+    man="$(printf "%s" "${ALPHALAB_ALLOW_MANUAL_PAPER_TRADES:-true}" | tr "[:upper:]" "[:lower:]" | xargs)"
+    manual_enabled=false; [ "$man" = "true" ] && manual_enabled=true
+    base="${ALPACA_PAPER_BASE_URL:-https://paper-api.alpaca.markets}"
+    # Validate AND normalize the base BEFORE any network call, so a
+    # live/empty/look-alike/arbitrary-path base never receives a credentialed
+    # request. Uses the single shared guard; the composed account URL is always
+    # exactly <canonical>/v2/account (no double slash). Fail closed (no curl,
+    # acct=000) when the base is not accepted.
+    paper_only=false
+    if canon="$(_alpaca_paper_base_canonical "$base")"; then
+      paper_only=true
+      acct=$(curl -sS --max-time 12 -o /dev/null -w "%{http_code}" \
+        -H "APCA-API-KEY-ID: ${ALPACA_API_KEY}" -H "APCA-API-SECRET-KEY: ${ALPACA_SECRET_KEY}" \
+        "$canon/v2/account" 2>/dev/null || echo 000)
+    else
+      acct=000
+    fi
+    # Capture the dashboard health body + HTTP code together IN MEMORY (no temp
+    # file) using a sentinel, then parse db_path structurally from the body.
+    health_resp=$(curl -sS --max-time 12 -w "HTTPSTATUS:%{http_code}" http://127.0.0.1:'"$PORT"'/api/health 2>/dev/null || printf "HTTPSTATUS:000")
+    health="${health_resp##*HTTPSTATUS:}"
+    health_body="${health_resp%HTTPSTATUS:*}"
+    api_db_path=$(printf "%s" "$health_body" | sed -n "s/.*\"db_path\": *\"\([^\"]*\)\".*/\1/p" | head -n1)
+    dbjson="$(.venv/bin/python -m alpha_lab.db_status --json 2>/dev/null)"
+    resolver_db_path=$(printf "%s" "$dbjson" | sed -n "s/.*\"db_path\": *\"\([^\"]*\)\".*/\1/p" | head -n1)
+    heartbeat_db_path=$(printf "%s" "$dbjson" | sed -n "s/.*\"scheduler_heartbeat_db_path\": *\"\{0,1\}\([^\",]*\).*/\1/p" | head -n1)
+    heartbeat_at=$(printf "%s" "$dbjson" | sed -n "s/.*\"scheduler_heartbeat_at\": *\"\{0,1\}\([^\",]*\).*/\1/p" | head -n1)
+    echo "scheduler_mode=$mode"
+    echo "automation_paper_trading_armed=$paper_guard_armed"
+    echo "approval_required=$approval_required"
+    echo "manual_paper_trading_enabled=$manual_enabled"
+    echo "alpaca_base=$base"
+    echo "alpaca_paper_only=$paper_only"
+    echo "alpaca_account_code=$acct"
+    echo "dashboard_health_code=$health"
+    echo "api_db_path=$api_db_path"
+    echo "resolver_db_path=$resolver_db_path"
+    echo "heartbeat_db_path=$heartbeat_db_path"
+    echo "heartbeat_at=$heartbeat_at"
+    true')" || die "could not gather validation readiness from $TARGET"
+
+  # Compute heartbeat age locally from the tz-aware ISO-8601 timestamp so the
+  # remote block stays dependency-free; missing/unparseable -> empty (fails fresh).
+  local HBAT HAGE
+  HBAT="$(_kv_get "$REMOTE" heartbeat_at)"
+  HAGE=""
+  if [ -n "$HBAT" ] && [ "$HBAT" != "null" ]; then
+    HAGE="$(python3 - "$HBAT" <<'PY' 2>/dev/null
+import sys
+from datetime import datetime
+try:
+    dt = datetime.fromisoformat(sys.argv[1])
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    print(int((now - dt).total_seconds()))
+except Exception:
+    print("")
+PY
+)"
+  fi
+
+  print -r -- "$REMOTE
+heartbeat_age_seconds=$HAGE
+heartbeat_max_age=$HMAX" | _paper_validation_eval
 }
 
 # --- launchd service management --------------------------------------------
@@ -885,6 +1093,14 @@ Focused reads:
   ./ops production-audit  Daily GREEN/YELLOW/RED audit (ingestion, trades, automation)
                           saved to reports/production_audit/YYYY-MM-DD.md
 
+Manual paper validation:
+  ./ops paper-validation-status
+                          Read-only PASS/FAIL readiness for the first manual paper
+                          validation (scheduler dry_run, automation disarmed, approval
+                          required, manual trading enabled, Alpaca paper-only + account,
+                          dashboard health, same-DB proof, fresh heartbeat) + a final
+                          ready_for_manual_validation boolean. Places no trades.
+
 Runtime provider checks (secrets never printed):
   ./ops provider-status
   ./ops check polygon
@@ -931,6 +1147,10 @@ main() {
     strategy-audit)    cmd_strategy_audit "$@" ;;
     production-audit)  cmd_production_audit "$@" ;;
     provider-status)   cmd_provider_status "$@" ;;
+    paper-validation-status) cmd_paper_validation_status "$@" ;;
+    __paper-validation-eval) _paper_validation_eval ;;  # internal: stdin kv -> table (tests)
+    __alpaca-base-paper-check) _alpaca_base_is_paper "$1" && print paper || print not-paper ;;  # internal: pure base-url decision (tests)
+    __alpaca-account-url) if canon="$(_alpaca_paper_base_canonical "$1")"; then print -r -- "$canon/v2/account"; else print SKIPPED; fi ;;  # internal: composed account URL (tests)
     check)             cmd_check "$@" ;;
     status)            cmd_status "$@" ;;
     start)             cmd_start "$@" ;;

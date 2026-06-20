@@ -498,3 +498,218 @@ Final preflight for the first manual analyst-assisted paper validation (read-onl
 
 ### Next Recommended Task
 During Monday equity market hours, execute the first manual analyst-assisted paper validation through the approval gate; keep scheduler dry_run/disarmed.
+
+
+## 2026-06-19 18:40 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Added a read-only './ops paper-validation-status' command that renders a PASS/FAIL readiness table for the first manual paper validation and a final ready_for_manual_validation boolean. Checks: scheduler dry_run, automation guard disarmed, approval requirement enabled, manual paper trading enabled, Alpaca base URL paper-only, Alpaca paper account 200, dashboard /api/health 200, same-DB proof (resolver=api=heartbeat), fresh scheduler heartbeat. Logic split into a pure stdin-driven evaluator (_paper_validation_eval) for unit testing; places no trades and writes nothing.
+
+### Files Modified
+- ops (new cmd_paper_validation_status + _paper_validation_eval/_pv_row, dispatch, usage)
+- alpha_lab/tests/test_paper_validation_status.py (new)
+
+### Commands / Tests Run
+- zsh -n ops
+- .venv/bin/python -m pytest alpha_lab/tests/test_paper_validation_status.py -q
+- ./ops paper-validation-status (live, read-only)
+
+### Results
+- zsh syntax OK; 14 tests passed (ready case, 10 single-failure cases, missing-resolver, wiring, syntax).
+- Live run against runner: all 9 checks PASS, ready_for_manual_validation=true, exit 0; no trades placed, nothing written.
+
+### Risks / Blockers
+- Heartbeat freshness threshold defaults to 900s (3x the 5-min cadence); override via ALPHALAB_HEARTBEAT_MAX_AGE if cadence changes. Command depends on dev-Mac SSH reachability to the runner.
+
+### Next Recommended Task
+During Monday equity market hours, run ./ops paper-validation-status, then execute the first manual analyst-assisted paper validation through the approval gate.
+
+
+## 2026-06-19 19:53 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Added a read-only manual paper validation EVIDENCE command that proves the full chain idea -> approval -> Alpaca paper order -> trade row -> execution audit -> performance linkage for a single manual paper trade, accepting --idea or --trade. It opens the SQLite DB read-only, places/cancels/modifies nothing, makes missing data explicit, and emits a PASS/FAIL table (or JSON) plus a validation_passed boolean evaluated against docs/MANUAL_PAPER_VALIDATION.md.
+
+### Files Modified
+- alpha_lab/paper_validation_evidence.py
+- alpha_lab/tests/test_paper_validation_evidence.py
+
+### Commands / Tests Run
+- python3 -m pytest alpha_lab/tests/test_paper_validation_evidence.py -q
+- python3 -m alpha_lab.paper_validation_evidence --idea 1 --db <temp seeded db>
+
+### Results
+- 14 evidence tests passed (full-PASS chain, trade->idea resolution, order-id audit fallback, and FAIL cases: missing idea, not analyst_assisted, missing/unreviewed approval, dry_run trade, missing order id, dry_run audit not counted, blank entry_price, missing DB).
+- Live render on a seeded full-pass temp DB printed all nine checks PASS and validation_passed=true, exit 0; read-only, no trades placed.
+
+### Risks / Blockers
+- Command is read-only and not yet wired into ./ops; the prior paper-validation-status work (ops, its test file, earlier handoff entries) remains uncommitted alongside these two new files.
+
+### Next Recommended Task
+Run the first manual analyst-assisted paper trade, then run this evidence command against its idea/trade id; optionally wire ./ops paper-validation-evidence and commit the uncommitted paper-validation files.
+
+
+## 2026-06-19 20:24 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Correction + hardening after a Codex read-only review returned FAIL/not-safe-to-commit on the paper-validation readiness/evidence work. CORRECTION: a prior Claude handoff entry overstated the evidence command as proving the 'full chain' and 'writes nothing'. Accurate current guarantee: paper_validation_evidence opens the SQLite DB read-only (mode=ro) and performs no DB writes and places/cancels/modifies no trades, but it verifies only the MACHINE-CHECKABLE, DB-resident portion of the chain. Environmental criteria (Alpaca paper-vs-live endpoint, scheduler stayed dry_run/placed nothing, same-DB + heartbeat proof, stop/target populated) are NOT verified by it and are now listed under 'not machine-checked here', to be confirmed via ./ops paper-validation-status / safety-status / health. A green evidence table is necessary, not sufficient. Hardening: schema OperationalErrors (no such table/column/view) are recorded and surfaced as SCHEMA_INCOMPATIBLE and fail validation closed instead of being treated as absent data; added explicit checks for equity-only asset class, exactly-one-paper-order, and orders-vs-submitted-audit order-id consistency; order id now only counts from a real submitted (non-dry_run) audit so a rejected/dry-run id cannot satisfy the chain. ops readiness evaluator now derives paper-only from the exact https paper host (rejecting live/empty/look-alike bases) and fails closed on an invalid/non-numeric heartbeat threshold.
+
+### Files Modified
+- alpha_lab/paper_validation_evidence.py
+- ops
+- alpha_lab/tests/test_paper_validation_evidence.py
+- alpha_lab/tests/test_paper_validation_status.py
+
+### Commands / Tests Run
+- zsh -n ops
+- python3 -m pytest alpha_lab/tests/test_paper_validation_status.py alpha_lab/tests/test_paper_validation_evidence.py -q
+- python3 -m pytest alpha_lab/tests/test_production_audit.py -q
+
+### Results
+- Passed (syntax clean).
+- 57 passed (24 evidence + 33 readiness): schema-incompatible, equity-only, multiple-order, order-id mismatch, non-submitted-audit, incomplete-chain, live/look-alike base URL, absent/mismatched heartbeat DB path, malformed parse values, invalid heartbeat threshold.
+- 8 passed (regression spot-check).
+
+### Risks / Blockers
+- Read-only and not wired into ./ops (intentional, per plan). test_alpha_lab.py cannot be collected in the bare interpreter (pydantic not installed); unrelated to these changes — run under .venv. All paper-validation work remains uncommitted pending a second Codex review.
+
+### Next Recommended Task
+Request a second Codex read-only review of the four files; if clean, commit as one unit (do not deploy, do not change scheduler/.env).
+
+
+## 2026-06-19 21:55 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Applied the one legible required fix from a Codex P1/P2 plan (the plan file .ai-bridge/current-plan.md was truncated mid-sentence; only fix #1 was readable, the rest were not present, so only #1 was executed and no P2 items were invented). Fix #1: in ops cmd_paper_validation_status, the remote collector now validates the Alpaca base is the exact https paper host before issuing the credentialed /v2/account curl. A live, empty, or look-alike base now receives no network call and acct=000 (fail closed), so credentials are never sent to a non-paper endpoint. This also replaces the prior loose substring match, aligning the collector with the evaluator's strict host match.
+
+### Files Modified
+- ops
+
+### Commands / Tests Run
+- zsh -n ops
+- python3 -m pytest alpha_lab/tests/test_paper_validation_status.py alpha_lab/tests/test_paper_validation_evidence.py -q
+
+### Results
+- Passed (syntax clean).
+- 57 passed; evaluator strict-host tests still green and unchanged.
+
+### Risks / Blockers
+- Plan file was truncated; remaining P2 blockers (if any) were not visible and were NOT implemented — needs the full plan text. Remote collector path is not unit-tested (requires SSH); change reuses the evaluator's already-tested strict pattern. Work remains uncommitted.
+
+### Next Recommended Task
+Obtain the complete P1/P2 plan text (current-plan.md is cut off) and address any remaining P2 items; then request a read-only Codex review and commit as one unit excluding .ai-bridge/.
+
+
+## 2026-06-19 22:13 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Completed the full Codex P1/P2 plan for manual paper validation (prior pass had only fix #1 because the plan file was truncated). CORRECTION to earlier handoff entries: the strict-URL and heartbeat hardening claims previously described the pure EVALUATOR/helper tests more than live COLLECTOR behavior. The P1 live-Alpaca-contact risk is now fixed IN THE COLLECTOR: cmd_paper_validation_status validates the exact https paper host before any credentialed /v2/account curl, and the same strict decision is factored into a pure _alpaca_base_is_paper helper (hidden __alpaca-base-paper-check subcommand) so 'no credentialed curl to a non-paper base' is unit-testable without SSH. Evidence module: renamed final boolean validation_passed -> db_evidence_passed (text + JSON); db_evidence_passed=true means ONLY the machine-checkable DB-resident chain passed, NOT full validation. A real orders row is now REQUIRED (no audit-id substitution); requires exactly one qualifying non-dry_run order, exactly one submitted non-dry_run audit, both order ids present and equal (orders == submitted audit). Added explicit up-front schema validation of required tables/views/columns -> SCHEMA_INCOMPATIBLE and db_evidence_passed=false instead of swallowed errors. Approval check renamed to 'approval reviewed_at present (human reviewed)' and the summary no longer claims a proven needs_review->approved transition. Added idea-status==executed and trade quantity/entry_price sanity checks; training_rows does not expose quantity so quantity is asserted on the trades row (limitation listed under not-machine-checked). ops same-DB proof now requires resolver/api/heartbeat DB paths all present AND equal (absent heartbeat path fails closed); readiness command captures dashboard health in memory (no persistent /tmp file) and wording changed to 'no trades, no DB writes'.
+
+### Files Modified
+- alpha_lab/paper_validation_evidence.py
+- ops
+- alpha_lab/tests/test_paper_validation_status.py
+- alpha_lab/tests/test_paper_validation_evidence.py
+
+### Commands / Tests Run
+- python3 -m pytest alpha_lab/tests/test_paper_validation_evidence.py -q
+- zsh -n ops
+- python3 -m pytest alpha_lab/tests/test_paper_validation_status.py -q
+- python3 -m pytest alpha_lab/tests/test_production_audit.py -q
+
+### Results
+- evidence suite green; db_evidence_passed semantics, required orders row, schema-incompatible, approval wording all covered
+- syntax clean; same-DB-all-three, in-memory health, pure base-url helper + hidden subcommand wired
+- status suite green; absent-heartbeat-path now FAILS; base-url helper proves no curl for live/empty/look-alike bases
+- 74 paper-validation + 8 production-audit tests pass
+
+### Risks / Blockers
+- Read-only/test-only plus this append-only handoff note; evidence module still python -m only, NOT wired into ./ops (intentional). Remaining evidence output is db_evidence_passed, NOT full validation. All work uncommitted pending a second Codex read-only review.
+
+### Next Recommended Task
+Request a second Codex read-only review of the four files; if clean, commit as one unit excluding .ai-bridge/ (no deploy, no scheduler/.env change).
+
+
+## 2026-06-19 22:23 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Fixed the final Codex review blockers for manual paper validation. CORRECTION: an earlier handoff said the live-Alpaca-contact risk was fully fixed, but ./ops check alpaca (a separate code path from cmd_paper_validation_status) could still send a credentialed /v2/account curl to whatever ALPACA_PAPER_BASE_URL pointed at, and the prior strict match permitted arbitrary trailing paths. Both are now fixed. P1: ./ops check alpaca now validates the base BEFORE any credentialed curl and fails closed (prints SKIPPED, no request) when it is not the canonical paper endpoint. P2 (policy): there is now ONE shared guard (_ALPACA_PAPER_GUARD_SH, a single _alpaca_base_is_paper definition) injected verbatim into BOTH remote credentialed-curl paths (the collector and check alpaca) and eval'd locally for the evaluator and the __alpaca-base-paper-check test hook. The policy accepts ONLY https://paper-api.alpaca.markets with an optional single trailing slash and rejects arbitrary paths (.../v2/account), look-alikes, the live host, non-https, and empty/malformed strings. P2 (evidence): paper_validation_evidence now also requires the single non-dry_run orders row to carry a submitted-style status (submitted/accepted/filled/partially_filled); canceled/rejected/expired/failed/error/blank fail db_evidence_passed. Note: the hardcoded market-data quote curl to the fixed https://data.alpaca.markets host (non-trading, not user-controlled) is unchanged. .ai-bridge/ remains untracked transient agent state and must be excluded from any commit.
+
+### Files Modified
+- ops
+- alpha_lab/paper_validation_evidence.py
+- alpha_lab/tests/test_paper_validation_status.py
+- alpha_lab/tests/test_paper_validation_evidence.py
+
+### Commands / Tests Run
+- zsh -n ops
+- python3 -m pytest alpha_lab/tests/test_paper_validation_evidence.py -q
+- python3 -m pytest alpha_lab/tests/test_paper_validation_status.py -q
+- python3 -m pytest alpha_lab/tests/test_production_audit.py -q
+
+### Results
+- syntax clean; one shared guard injected into collector + check-alpaca; canonical-only policy (optional trailing slash) verified via __alpaca-base-paper-check
+- orders.status now required to be a submitted-style status; rejected/canceled/blank fail db_evidence_passed
+- added check-alpaca gating + canonical-URL policy (arbitrary path rejected, trailing slash allowed) tests; no network
+- 90 paper-validation + 8 production-audit tests pass
+
+### Risks / Blockers
+- Read-only/test-only plus this append-only handoff note. ./ops check alpaca remote path itself needs SSH so it is asserted via the pure guard + source wiring, not a live call. Evidence module stays python -m only (not wired into ./ops). Output remains db_evidence_passed, not full validation. All work uncommitted; .ai-bridge/ must be excluded from any commit.
+
+### Next Recommended Task
+Request a second Codex read-only review of the four files; if clean, commit as one unit excluding .ai-bridge/ (no deploy, no scheduler/.env change).
+
+
+## 2026-06-19 22:36 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Fixed the final Codex blocker: the accepted Alpaca paper base URL was not normalized, so an accepted trailing-slash form (https://paper-api.alpaca.markets/) composed https://paper-api.alpaca.markets//v2/account. Added a shared validate-and-normalize function _alpaca_paper_base_canonical inside the single _ALPACA_PAPER_GUARD_SH source-of-truth: on an accepted base it strips one optional trailing slash (POSIX ${1%/}) and prints the canonical https://paper-api.alpaca.markets; on any rejected base it returns non-zero and prints nothing (callers fail closed). Both credentialed-curl paths (./ops check alpaca and the cmd_paper_validation_status collector) now compose from the normalized canonical value as $canon/v2/account; no path composes $base/v2/account anymore. Accepted policy is unchanged (bare host or single trailing slash only; reject paths/live/http/look-alikes/empty). Added composed-URL tests via a new __alpaca-account-url hook proving both accepted inputs compose exactly https://paper-api.alpaca.markets/v2/account, that no composed URL contains //v2/account, and that rejected bases compose nothing (SKIPPED).
+
+### Files Modified
+- ops
+- alpha_lab/tests/test_paper_validation_status.py
+- alpha_lab/tests/test_paper_validation_evidence.py
+
+### Commands / Tests Run
+- zsh -n ops
+- python3 -m pytest alpha_lab/tests/test_paper_validation_status.py -q
+- python3 -m pytest alpha_lab/tests/test_paper_validation_evidence.py -q
+
+### Results
+- syntax clean; both accepted forms compose canonical /v2/account with no double slash; rejected bases fail closed
+- added composed-URL + normalization tests; status suite green
+- 100 paper-validation tests pass (status+evidence)
+
+### Risks / Blockers
+- Read-only/test-only plus this append-only note. ./ops check alpaca remote path needs SSH so normalization is proven via the pure __alpaca-account-url hook + source wiring. Evidence module unchanged this pass and stays python -m only. Work uncommitted; .ai-bridge/ remains untracked transient agent state and must be excluded from any commit.
+
+### Next Recommended Task
+Request the final Codex read-only PASS/FAIL review of ops + the two test files; if PASS, commit as one unit excluding .ai-bridge/ (no deploy, no scheduler/.env change).
