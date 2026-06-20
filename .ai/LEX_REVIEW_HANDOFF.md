@@ -25,21 +25,47 @@ _Last updated: 2026-06-19_
 - `main` / `origin/main`: `366597b` — feat: classify SEC offering filings as bearish catalysts.
 - **Not pushed.** No upstream tracking configured; the 10 ahead commits are local only.
 - Old-Mac runner: on `main` @ `366597b` (= `origin/main`), clean — **verified reachable
-  2026-06-19 00:54 PT** (re-verify immediately before validation/deploy).
+  2026-06-19 00:54 PT**, safety re-verified on-runner later 2026-06-19 (see Runner Access note;
+  re-verify immediately before validation/deploy).
 
-## First-Validation Readiness — NOT READY (2026-06-19, code GREEN / one ops blocker)
+## First-Validation Readiness — code GREEN, approval gate ENABLED (2026-06-19)
 Audited whether AlphaLabs can run the first manual paper validation. **Code paths are sound**
-(manual endpoint, approval gate, Alpaca paper-only enforcement all verified). The old Mac is now
+(manual endpoint, approval gate, Alpaca paper-only enforcement all verified). The old Mac was
 **verified reachable and safe (2026-06-19 00:54 PT):** safe-stabilization mode true, scheduler in
 safe dry-run mode, automation paper-trading not armed, `main` @ `366597b` clean, dashboard +
-scheduler launchd running, DB path consistent — no old-Mac changes made. **Operationally NOT
-READY** on one primary blocker:
-1. **Approval requirement not yet enabled.** At last check the paper-execution approval
-   requirement was **last known disabled** on the runner; the checklist requires it **enabled**
-   so the analyst-assisted approval gate actually engages. Changing it is intentionally deferred
-   (out of scope here) — it must be enabled before the test.
-Also gating: the test must run during equity market hours, and old-Mac safety should be
-re-verified immediately before validation. No env/launchd/old-Mac change was made this pass.
+scheduler launchd running, DB path consistent.
+1. **Approval requirement now ENABLED.** `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` was set on the
+   runner (`.env` line 15, flipped `false`→`true`, backed up first, only that line changed), and
+   **only `com.alphalab.dashboard` was restarted** — scheduler untouched. Read at `service.py:1753`
+   (`os.getenv`, fail-safe default = required) inside the `place_trade` choke point
+   (`service.py:844`→`1716`). Post-restart verification on the runner: `/api/health` → `ok`,
+   `safe_stabilization_mode: true` still holds, `ALPHALAB_SCHEDULER_MODE=dry_run` and
+   `ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES=false` unchanged. The analyst-assisted approval gate
+   now engages.
+Remaining gates before the first validation: the test must run during equity market hours, and
+old-Mac safety should be re-verified immediately before validation. The dashboard `.env` approval
+change was applied this pass; scheduler mode, automation guard, and launchd were not changed.
+
+## Runner Access — dev-Mac `./ops` RESTORED (2026-06-19 17:05 PT)
+`./ops` drives the runner from the dev Mac over SSH (target from git-ignored
+`scripts/server.conf`, default tailnet host `100.91.41.60`). **Working again from the dev Mac:**
+ping 0% loss, SSH `ok`, `./ops safety-status` and `./ops health` both pass (18 jobs, dashboard on
+`127.0.0.1:8787`, /api/health+db-status+intelligence 200, same-DB proof passes, fresh scheduler
+heartbeat `2026-06-19T17:05 dry_run`). Earlier this pass the dev Mac could NOT reach the runner
+(runner had dropped off the tailnet / `tailscale not installed on this Mac` WARN, ping+SSH timed
+out); it came back after Tailscale was brought back up on the old Mac. If it breaks again, the
+on-runner read-only fallback below works without the dev→runner SSH path.
+- On the runner, `./ops` itself fails (`missing scripts/server.conf`) because it is built for the
+  dev→runner SSH path, not self-management. Do NOT point it at itself.
+- **On-runner read-only safety check (no SSH, no secrets printed)** — mirrors `ops`'s
+  `remote_safety_kv` (`ops:90-108`) plus the approval-flag logic (`service.py:1753`). Run from
+  `~/AlphaLab` on the runner: source `.env`, then derive and echo only the booleans
+  `scheduler_mode`, `automation_paper_trading_armed`, `safe_stabilization_mode`,
+  `approval_required`. Last on-runner result (2026-06-19): `dry_run` / `false` / `true` / `true`
+  — safe-stabilization holds and the approval gate is active.
+- Health, read-only on the runner: `curl -s -o /dev/null -w '%{http_code}'`
+  `http://127.0.0.1:8787/api/{health,db-status,catalysts/intelligence}`; processes via
+  `launchctl list | grep -i alphalab`.
 
 ## Known Risks
 - **Exposure-limit widening is INTENTIONAL (paper-test capacity) — file is RUNTIME-ACTIVE.**
@@ -332,3 +358,110 @@ Old Mac runner reachable again over Tailscale; the 2026-06-18/19 'unreachable' s
 
 ### Next Recommended Task
 During next market-hours window, confirm scheduler.log shows fresh dry_run cron activity (poll_live_catalysts) to validate heartbeat; keep runner in safe_stabilization_mode until manual paper validation is approved.
+
+
+## 2026-06-19 16:51 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Enabled the paper-execution approval requirement on the old-Mac runner. Operator applied ALPHALAB_REQUIRE_PAPER_APPROVAL=true (.env line 15, false->true, backup taken, only that line changed) and restarted only com.alphalab.dashboard; scheduler untouched.
+
+### Files Modified
+- .ai/LEX_REVIEW_HANDOFF.md (Current State Summary readiness refreshed)
+
+### Commands / Tests Run
+- grep FALSE_ENV_VALUES alpha_lab/service.py (parsing confirmation)
+- operator ran: dashboard kickstart + /api/health on runner
+
+### Results
+- Approval requirement enabled: value parsed true=required (not in FALSE_ENV_VALUES {0,false,no,off}).
+- Runner post-restart: /api/health ok; safe_stabilization_mode true; ALPHALAB_SCHEDULER_MODE=dry_run and ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES=false unchanged.
+
+### Risks / Blockers
+- Dev-Mac ./ops safety-status SSH check failed this pass (runner unreachable from dev Mac); verification was done directly on the runner instead.
+
+### Next Recommended Task
+During equity market hours, re-verify old-Mac safety, then run the first manual analyst-assisted paper validation through the approval gate.
+
+
+## 2026-06-19 17:01 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Pre-validation safety re-verification on the old-Mac runner (read-only). Dev-Mac ./ops could not reach the runner (Tailscale not installed on dev Mac), so the ops safety logic was run locally on the runner, mirroring remote_safety_kv plus the approval-flag derivation.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- on-runner local equivalent of ./ops safety-status (sources .env, echoes derived booleans only)
+
+### Results
+- scheduler_mode=dry_run; automation_paper_trading_armed=false; safe_stabilization_mode=true; approval_required=true.
+- Approval gate enabled earlier this pass holds; scheduler remains safe dry-run with automation guard not armed.
+
+### Risks / Blockers
+- Dev-Mac ./ops unusable until Tailscale is installed/signed-in on the dev Mac; runner is currently verifiable only on-box. /api/health 200 lines and launchctl list not captured this pass (dashboard previously returned /api/health ok post-restart).
+
+### Next Recommended Task
+During equity market hours, run the first manual analyst-assisted paper validation through the now-active approval gate; optionally install Tailscale on the dev Mac to restore ./ops remote management.
+
+
+## 2026-06-19 17:04 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Refreshed the Current State Summary to durably capture this pass: approval gate ENABLED on the runner, and a new 'Runner Access' note documenting that dev-Mac ./ops is blocked (Tailscale not installed on dev Mac) plus the on-runner read-only safety/health verification workaround.
+
+### Files Modified
+- .ai/LEX_REVIEW_HANDOFF.md (Current State Summary: runner status line + new Runner Access note)
+
+### Commands / Tests Run
+- git diff --check -- .ai/LEX_REVIEW_HANDOFF.md
+
+### Results
+- Whitespace clean; all edits remain above the ## Agent Activity Log heading (line 267).
+
+### Risks / Blockers
+- Edits uncommitted (readiness refresh + Runner Access note + prior audit entries). Dev-Mac ./ops still blocked until Tailscale installed on the dev Mac.
+
+### Next Recommended Task
+During equity market hours, run the first manual analyst-assisted paper validation; optionally install Tailscale on the dev Mac to restore ./ops; consider committing the handoff edits.
+
+
+## 2026-06-19 17:06 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Verified dev-Mac ./ops remote management is restored after the old Mac rejoined the tailnet. Earlier this pass the runner was unreachable from the dev Mac; it now responds.
+
+### Files Modified
+- .ai/LEX_REVIEW_HANDOFF.md (Runner Access note updated: BLOCKED -> RESTORED)
+
+### Commands / Tests Run
+- ping + ssh reachability test to runner from dev Mac
+- ./ops safety-status
+- ./ops health
+
+### Results
+- Runner reachable: ping 0% loss, SSH ok.
+- safety-status: scheduler dry_run, automation guard not armed, safe_stabilization_mode true.
+- health: all hard checks passed; 18 jobs; dashboard 127.0.0.1:8787; /api/health, db-status, intelligence all 200; same-DB proof passes; fresh scheduler heartbeat 2026-06-19T17:05 dry_run.
+
+### Risks / Blockers
+- None new; runner remains in safe-stabilization with approval gate enabled.
+
+### Next Recommended Task
+During equity market hours, run the first manual analyst-assisted paper validation through the approval gate.
