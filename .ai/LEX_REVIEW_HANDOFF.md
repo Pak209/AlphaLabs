@@ -465,3 +465,36 @@ Verified dev-Mac ./ops remote management is restored after the old Mac rejoined 
 
 ### Next Recommended Task
 During equity market hours, run the first manual analyst-assisted paper validation through the approval gate.
+
+
+## 2026-06-19 17:24 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: clean
+
+### Summary
+Final preflight for the first manual analyst-assisted paper validation (read-only; no trade, no deploy, no scheduler/env/launchd change). All safety, health, approval, and Alpaca-endpoint checks pass from the dev Mac.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ping + ssh reachability to 100.91.41.60
+- ./ops safety-status
+- ./ops health
+- ./ops check alpaca
+- read-only on-runner derivation of approval_required (no secrets printed)
+
+### Results
+- Runner reachable: ping 0% loss, SSH ok.
+- Safety: scheduler dry_run, automation paper trading not armed, safe_stabilization_mode true.
+- Health: all hard checks passed; both launchd agents running; 18 jobs; dashboard 127.0.0.1:8787; /api/health+db-status+intelligence 200; same-DB proof passes; DB path consistent (/Users/danielkimoto/AlphaLab/alpha_lab/data/alpha_lab.sqlite3); heartbeat fresh 2026-06-19T17:15 dry_run.
+- approval_required=true (paper-execution approval gate enabled).
+- Alpaca paper-only: base URL paper-api.alpaca.markets, /v2/account HTTP 200; keys present (hidden).
+
+### Risks / Blockers
+- Equity markets closed at preflight time (Fri 17:21 PT); the validation trade must run during equity market hours (next session Mon 2026-06-22 06:30-13:00 PT). Re-verify safety immediately before the trade.
+
+### Next Recommended Task
+During Monday equity market hours, execute the first manual analyst-assisted paper validation through the approval gate; keep scheduler dry_run/disarmed.
