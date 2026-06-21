@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 .claude/
+.ai-bridge/
 .venv/
 .env
 .env.*
