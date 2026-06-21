@@ -145,10 +145,12 @@ def test_trending_scanner_switches_to_btc_when_market_closed(tmp_path: Path, mon
     client = TestClient(create_app(lab))
     monkeypatch.setattr(lab, "_broker", lambda dry_run=True: SimulatedPaperBroker(market_open=False))
     monkeypatch.setattr(
-        "alpha_lab.service.get_bitcoin_market",
-        lambda: {
+        "alpha_lab.service.get_crypto_market",
+        lambda ticker="BTC/USD": {
             "status": "ok",
             "ticker": "BTC/USD",
+            "name": "Bitcoin",
+            "symbol": "BTC",
             "price": 65000,
             "change_24h_pct": 1.2,
             "change_7d_pct": 3.4,
@@ -580,6 +582,8 @@ def test_after_hours_btc_generates_crypto_approval_idea(tmp_path: Path, monkeypa
     btc_payload = {
         "status": "ok",
         "ticker": "BTC/USD",
+        "name": "Bitcoin",
+        "symbol": "BTC",
         "price": 65000,
         "change_24h_pct": 2.1,
         "change_7d_pct": 4.2,
@@ -601,6 +605,7 @@ def test_after_hours_btc_generates_crypto_approval_idea(tmp_path: Path, monkeypa
         "scenarios": [],
     }
     monkeypatch.setattr("alpha_lab.service.get_bitcoin_market", lambda: btc_payload)
+    monkeypatch.setattr("alpha_lab.service.get_crypto_market", lambda ticker="BTC/USD": btc_payload)
     monkeypatch.setattr("alpha_lab.service.get_liquidity_flows", lambda: {"groups": [{"name": "Crypto Majors", "status": "ok", "volume_read": "risk-on", "source": "unit_test"}]})
 
     panel = client.get("/api/after-hours/btc")

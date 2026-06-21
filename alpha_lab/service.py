@@ -17,11 +17,12 @@ from paper_trader.simulated_broker import SimulatedPaperBroker
 from .analyst import build_market_briefing, build_trade_explanation, chat_reply
 from .database import connect, init_db, resolve_db_path
 from .models import normalize_idea_payload
+from .notifications import NotificationCenter, live_execution_enabled
 from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .daily_brief import build_daily_market_brief
-from .live_sources import fetch_polygon_intraday
-from .market_data import build_trending_stock_signals, get_bitcoin_market, get_business_brief, get_liquidity_flows
+from .live_sources import fetch_polygon_intraday, fetch_yahoo_price
+from .market_data import CRYPTO_COINS, build_trending_stock_signals, get_bitcoin_market, get_crypto_market, get_business_brief, get_liquidity_flows
 from .repository import AlphaLabRepository
 from .performance import build_performance_report
 from .scoring_engine import (
@@ -72,9 +73,18 @@ class AlphaLabService:
         # Futures Pulse reads from Polygon/Massive Futures v1 when POLYGON_API_KEY
         # is set; otherwise the live provider returns no data (neutral) per call.
         self.futures_data_provider = futures_data_provider or PolygonFuturesProvider()
+        # Notification center is lazily built (shares this service's DB path) so
+        # event-driven alerts can be fired without constructing one per call.
+        self._notifications: NotificationCenter | None = None
         init_db(self.db_path)
         with connect(self.db_path) as conn:
             AlphaLabRepository(conn).seed_defaults()
+
+    @property
+    def notifications(self) -> NotificationCenter:
+        if self._notifications is None:
+            self._notifications = NotificationCenter(db_path=self.db_path)
+        return self._notifications
 
     # ----------------------------------------------------------------------- #
     # DB identity, heartbeat, and status — used by /api/health, the status
@@ -627,17 +637,30 @@ class AlphaLabService:
         }
 
     def generate_after_hours_btc_idea(self) -> dict[str, Any]:
-        btc = get_bitcoin_market()
-        signal = self._btc_signal_from_market(btc)
+        return self._generate_crypto_idea("BTC/USD")
+
+    def _generate_crypto_idea(self, ticker: str) -> dict[str, Any]:
+        market = get_crypto_market(ticker)
+        signal = self._btc_signal_from_market(market)
         idea = normalize_idea_payload(signal)
         with connect(self.db_path) as conn:
             repo = AlphaLabRepository(conn)
             idea["market_regime"] = self._current_market_regime(repo)
             created = repo.create_idea(idea)
-            explanation = build_trade_explanation({**idea, "id": created["id"]}, {"market_context": btc.get("summary", ""), "source": btc.get("source", "")})
+            explanation = build_trade_explanation({**idea, "id": created["id"]}, {"market_context": market.get("summary", ""), "source": market.get("source", "")})
             explanation["analyst_assisted"] = True
-            repo.create_trade_explanation(created["id"], explanation, {"source_payload": signal, "btc_market": btc})
-            return {"idea": self._with_business_brief(repo.get_idea(created["id"])), "explanation": explanation, "btc": btc}
+            repo.create_trade_explanation(created["id"], explanation, {"source_payload": signal, "btc_market": market})
+            return {"idea": self._with_business_brief(repo.get_idea(created["id"])), "explanation": explanation, "btc": market}
+
+    def generate_after_hours_crypto_ideas(self) -> dict[str, Any]:
+        """Generate one after-hours idea per Alpaca-tradeable coin (BTC/LINK/HYPE)."""
+        results: list[dict[str, Any]] = []
+        for ticker in CRYPTO_COINS:
+            try:
+                results.append({"ticker": ticker, **self._generate_crypto_idea(ticker)})
+            except Exception as exc:  # one coin's data failure must not block the rest
+                results.append({"ticker": ticker, "status": "error", "error": str(exc)})
+        return {"status": "ok", "asset_type": "crypto", "results": results}
 
     def generate_and_save_market_briefing(self, live_catalysts: bool = True) -> dict[str, Any]:
         base_brief = self.build_daily_brief(live_catalysts=live_catalysts)
@@ -697,54 +720,52 @@ class AlphaLabService:
         """
         if not dry_run and os.getenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "").lower() != "true":
             raise ValueError("automation paper trading is disabled; set ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES=true to enable")
-        btc = self._safe_market_payload(get_bitcoin_market)
-        if btc.get("status") not in {None, "ok"}:
+        recent = self._recent_crypto_theses()
+        signals: list[dict[str, Any]] = []
+        unavailable = 0
+        duplicates = 0
+        for ticker in CRYPTO_COINS:
+            market = self._safe_market_payload(lambda t=ticker: get_crypto_market(t))
+            if market.get("status") not in {None, "ok"}:
+                unavailable += 1
+                continue
+            signal = self._btc_signal_from_market(market)
+            if signal.get("thesis") in recent:
+                duplicates += 1
+                continue
+            signals.append(signal)
+        if not signals:
+            note = "no new crypto signal" if (duplicates or not unavailable) else "crypto market data unavailable"
+            status = "unavailable" if unavailable and not duplicates else "ok"
             self._record_scanner_run(
                 "after_hours_btc",
                 "weekend_crypto",
                 self._scanner_summary(
-                    candidates_found=0,
+                    candidates_found=len(CRYPTO_COINS) - unavailable,
                     ideas_persisted=0,
-                    rejected=1,
-                    skipped=0,
-                    reasons={"BTC market data unavailable": 1},
+                    rejected=unavailable,
+                    skipped=duplicates,
+                    reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
                     dry_run=dry_run,
-                    note="BTC market data unavailable",
+                    note=note,
                 ),
             )
-            return {"status": "unavailable", "asset_type": "crypto", "signals": [],
-                    "test_result": {"dry_run": dry_run, "results": [], "note": "BTC market data unavailable"}}
-        signal = self._btc_signal_from_market(btc)
-        if signal.get("thesis") in self._recent_crypto_theses():
-            self._record_scanner_run(
-                "after_hours_btc",
-                "weekend_crypto",
-                self._scanner_summary(
-                    candidates_found=1,
-                    ideas_persisted=0,
-                    rejected=1,
-                    skipped=1,
-                    reasons={"duplicate thesis": 1},
-                    dry_run=dry_run,
-                    note="no new crypto signal",
-                ),
-            )
-            return {"status": "ok", "asset_type": "crypto", "signals": [],
-                    "test_result": {"dry_run": dry_run, "results": [], "note": "no new crypto signal"}}
-        result = self.import_and_test({"signals": [signal], "execution_mode": "dry_run" if dry_run else "paper"})
+            return {"status": status, "asset_type": "crypto", "signals": [],
+                    "test_result": {"dry_run": dry_run, "results": [], "note": note}}
+        result = self.import_and_test({"signals": signals, "execution_mode": "dry_run" if dry_run else "paper"})
         self._record_scanner_run(
             "after_hours_btc",
             "weekend_crypto",
             self._scanner_summary(
-                candidates_found=1,
+                candidates_found=len(signals),
                 ideas_persisted=len(result.get("results") or []),
-                rejected=0,
-                skipped=0,
-                reasons={},
+                rejected=unavailable,
+                skipped=duplicates,
+                reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
                 dry_run=dry_run,
             ),
         )
-        return {"status": "ok", "asset_type": "crypto", "signals": [signal], "test_result": result}
+        return {"status": "ok", "asset_type": "crypto", "signals": signals, "test_result": result}
 
     def analyst_chat(self, message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
         """Advisory markets chat grounded in current AlphaLab data (read-only).
@@ -835,6 +856,8 @@ class AlphaLabService:
             approval_error = self._paper_execution_approval_error(idea_id)
             if approval_error:
                 self._log_execution_attempt(idea_id, approval_error, dry_run=dry_run)
+                if approval_error.get("action") == "needs_human_approval":
+                    self._notify_approval_required(idea_id, approval_error)
                 return approval_error
         try:
             decision = self.run_decision(idea_id, dry_run=dry_run, as_option=as_option)
@@ -1022,16 +1045,47 @@ class AlphaLabService:
             return AlphaLabRepository(conn).list_pending_approvals(limit)
 
     def approve_idea_for_execution(self, idea_id: int, note: str = "") -> dict[str, Any]:
-        with connect(self.db_path) as conn:
-            return self._with_business_brief(AlphaLabRepository(conn).set_approval_status(idea_id, "approved", note))
+        return self._decide_approval(idea_id, "approved", note)
 
     def reject_idea_for_execution(self, idea_id: int, note: str = "rejected by reviewer") -> dict[str, Any]:
-        with connect(self.db_path) as conn:
-            return self._with_business_brief(AlphaLabRepository(conn).set_approval_status(idea_id, "rejected", note))
+        return self._decide_approval(idea_id, "rejected", note)
 
     def expire_idea(self, idea_id: int, note: str = "expired before review") -> dict[str, Any]:
+        return self._decide_approval(idea_id, "expired", note)
+
+    def _decide_approval(self, idea_id: int, decision: str, note: str) -> dict[str, Any]:
+        """Apply an approval decision AND its audit row in ONE transaction.
+
+        The audit INSERT is staged first (no commit), then set_approval_status
+        performs its writes and issues the single commit that flushes BOTH. If
+        either step raises, the connect() context manager rolls the whole
+        transaction back, so we can never end up with a committed approval whose
+        audit row was lost — and an audit failure is surfaced, not swallowed.
+        """
         with connect(self.db_path) as conn:
-            return self._with_business_brief(AlphaLabRepository(conn).set_approval_status(idea_id, "expired", note))
+            self._record_approval_decision(conn, idea_id, decision, note)
+            return self._with_business_brief(
+                AlphaLabRepository(conn).set_approval_status(idea_id, decision, note)
+            )
+
+    def _record_approval_decision(self, conn, idea_id: int, decision: str, note: str = "") -> None:
+        """Stage the approval audit INSERT (no commit) within the caller's
+        transaction.
+
+        Stamps whether live execution was enabled at decision time so the record
+        proves under which posture (paper vs. live) sign-off occurred. NOTE:
+        ``live_mode`` is audit metadata only — it does not gate execution (live
+        trading is blocked at the broker layer). This does NOT commit and does NOT
+        swallow errors: the caller's single commit flushes it atomically with the
+        approval, and any failure propagates so it is never lost silently.
+        """
+        conn.execute(
+            """
+            INSERT INTO approval_decisions (idea_id, decision, decided_by, note, live_mode)
+            VALUES (?, ?, 'human', ?, ?)
+            """,
+            (idea_id, decision, str(note or "")[:500], 1 if live_execution_enabled() else 0),
+        )
 
     def get_trade_explanation(self, idea_id: int) -> dict[str, Any]:
         with connect(self.db_path) as conn:
@@ -1039,6 +1093,23 @@ class AlphaLabService:
         if explanation is None:
             raise KeyError(f"trade explanation not found for idea {idea_id}")
         return explanation
+
+    def regenerate_trade_explanation(self, idea_id: int) -> dict[str, Any]:
+        """Rebuild and persist an idea's analyst explanation against a fresh price.
+
+        Used to backfill numeric entry/stop/take-profit levels onto ideas whose
+        stored explanation predates live-price grounding, without recreating the
+        idea. Inserts a new explanation row, which supersedes the prior one.
+        """
+        with connect(self.db_path) as conn:
+            repo = AlphaLabRepository(conn)
+            idea = repo.get_idea(idea_id)
+            if idea is None:
+                raise KeyError(f"idea {idea_id} not found")
+            validation_price = self._validation_price(idea["ticker"])
+            analyst_context = {**self._latest_briefing_context(conn), "reference_price": validation_price}
+            explanation = build_trade_explanation({**idea, "id": idea_id}, analyst_context)
+            return repo.create_trade_explanation(idea_id, explanation, {"regenerated": True})
 
     def sync_alpaca(self, dry_run: bool = True) -> dict[str, Any]:
         broker = self._broker(dry_run=dry_run)
@@ -1461,10 +1532,21 @@ class AlphaLabService:
         return None
 
     def _validation_price(self, ticker: str) -> float | None:
-        """Best-effort live quote for signal validation; never uses simulated prices."""
+        """Best-effort live quote for signal validation; never uses simulated prices.
+
+        Tries Polygon (needs a key), then Yahoo Finance (keyless, works on
+        networks that block the broker API), then Alpaca. The Yahoo fallback
+        means trade levels still populate when Polygon is unconfigured and Alpaca
+        is unreachable (e.g. restrictive school/campus Wi-Fi).
+        """
         snap = fetch_polygon_intraday(ticker)
         if snap.get("status") == "ok":
             price = snap.get("last_price")
+            if isinstance(price, (int, float)) and price > 0:
+                return float(price)
+        yahoo = fetch_yahoo_price(ticker)
+        if yahoo.get("status") == "ok":
+            price = yahoo.get("last_price")
             if isinstance(price, (int, float)) and price > 0:
                 return float(price)
         try:
@@ -1550,6 +1632,9 @@ class AlphaLabService:
             return {"status": "unavailable", "error": str(exc)}
 
     def _btc_signal_from_market(self, btc: dict[str, Any]) -> dict[str, Any]:
+        ticker = btc.get("ticker") or "BTC/USD"
+        symbol = btc.get("symbol") or ticker.split("/")[0]
+        name = btc.get("name") or symbol
         indicators = btc.get("indicators", {}) or {}
         price = float(btc.get("price") or 0)
         ema20 = indicators.get("ema20")
@@ -1567,10 +1652,10 @@ class AlphaLabService:
             if bias == "bullish"
             else f"Invalidate bearish thesis above {self._fmt_price(stop)}."
             if bias == "bearish"
-            else "Invalidate if BTC fails to create a directional reclaim/rejection setup."
+            else f"Invalidate if {symbol} fails to create a directional reclaim/rejection setup."
         )
         thesis = (
-            f"BTC after-hours {bias} setup: {btc.get('summary', 'BTC market context unavailable')} "
+            f"{symbol} after-hours {bias} setup: {btc.get('summary', f'{symbol} market context unavailable')} "
             f"{indicators.get('ema_read', '')} Entry {entry}; stop {self._fmt_price(stop)}; target {self._fmt_price(target)}; {invalidation}"
         )
         catalyst = (
@@ -1578,7 +1663,7 @@ class AlphaLabService:
             f"support {self._fmt_price(support)}, resistance {self._fmt_price(resistance)}."
         )
         return {
-            "ticker": "BTC/USD",
+            "ticker": ticker,
             "asset_type": "crypto",
             "bias": bias,
             "confidence": confidence,
@@ -1588,8 +1673,8 @@ class AlphaLabService:
             "catalyst": catalyst,
             "source": "after_hours_btc",
             "timestamp": btc.get("fetched_at") or btc.get("last_updated"),
-            "strategy_tags": ["crypto momentum", "Bitcoin breakout", "after-hours BTC"],
-            "theme": "After-Hours BTC",
+            "strategy_tags": ["crypto momentum", f"{symbol} breakout", "after-hours crypto"],
+            "theme": f"After-Hours {symbol}",
             "source_refs": [{"label": btc.get("source", "CoinGecko"), "url": "", "timestamp": btc.get("last_updated", "")}],
         }
 
@@ -1706,6 +1791,29 @@ class AlphaLabService:
                 "order_payload": None,
                 "order_response": {"submitted": False, "message": "No Alpaca paper order was placed."},
             }
+
+    def _notify_approval_required(self, idea_id: int, approval_error: dict[str, Any]) -> None:
+        """Fire an informational APPROVAL_REQUIRED alert routing to the sign-off UI.
+
+        Deduped by idea so repeated paper-trade attempts on the same idea never
+        spam push/SMS. This is purely a notification side-channel: it does NOT
+        approve, reject, or place anything, and it must never break the (already
+        blocked) trade flow, so any failure is contained.
+        """
+        ticker = str(approval_error.get("ticker") or "idea")
+        try:
+            self.notifications.notify_event(
+                "APPROVAL_REQUIRED",
+                f"Approval needed: {ticker}",
+                "An LLM-assisted signal is awaiting human sign-off before any Alpaca paper order. "
+                "Open Approvals to review or reject it.",
+                source="paper-execution",
+                dedup_key=f"approval:{idea_id}",
+                related_trade_id=None,
+            )
+        except Exception:
+            # Notification delivery is best-effort and must not affect trade safety.
+            pass
 
     def _paper_approval_required(self) -> bool:
         return os.getenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "true").strip().lower() not in FALSE_ENV_VALUES

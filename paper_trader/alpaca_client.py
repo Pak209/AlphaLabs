@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -86,11 +86,43 @@ class AlpacaClient:
         return self._request("GET", "/v2/clock")
 
     def get_latest_trade_price(self, symbol: str) -> float | None:
+        # Crypto pairs (e.g. "BTC/USD") live on the market-data host under the
+        # v1beta3 crypto API, not the equities /v2/stocks endpoint. Route by the
+        # slash convention so a crypto symbol gets a real quote instead of None.
+        if "/" in symbol:
+            return self._latest_crypto_trade_price(symbol)
         try:
             response = self._request("GET", f"/v2/stocks/{symbol}/trades/latest")
         except AlpacaAPIError:
             return None
         price = response.get("trade", {}).get("p")
+        return float(price) if price is not None else None
+
+    def _latest_crypto_trade_price(self, symbol: str) -> float | None:
+        # GET https://data.alpaca.markets/v1beta3/crypto/us/latest/trades?symbols=BTC/USD
+        # Response shape: {"trades": {"BTC/USD": [{"p": <price>, ...}]}} — note the
+        # symbol maps to a LIST of trades, unlike the stocks endpoint's single object.
+        url = (
+            "https://data.alpaca.markets/v1beta3/crypto/us/latest/trades?"
+            + urlencode({"symbols": symbol})
+        )
+        headers = {
+            "APCA-API-KEY-ID": self.credentials.api_key,
+            "APCA-API-SECRET-KEY": self.credentials.secret_key,
+            "Accept": "application/json",
+        }
+        try:
+            request = Request(url, headers=headers, method="GET")
+            with urlopen(request, timeout=20) as response:
+                body = response.read().decode("utf-8")
+        except (HTTPError, OSError):
+            return None
+        if not body:
+            return None
+        trades = (json.loads(body).get("trades") or {}).get(symbol)
+        if isinstance(trades, list):
+            trades = trades[0] if trades else None
+        price = trades.get("p") if isinstance(trades, dict) else None
         return float(price) if price is not None else None
 
     def get_order(self, order_id: str) -> dict[str, Any]:

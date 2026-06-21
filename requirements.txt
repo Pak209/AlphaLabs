@@ -3,3 +3,7 @@ uvicorn>=0.29
 apscheduler>=3.10
 pytest>=8.0
 httpx>=0.27
+# Web Push (VAPID) sender for PWA notifications. Optional at runtime: the push
+# client imports it lazily and reports "not configured" (no crash) when absent,
+# so push stays disabled until keys + this package are present.
+pywebpush>=1.14

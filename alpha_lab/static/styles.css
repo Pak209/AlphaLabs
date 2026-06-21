@@ -436,6 +436,9 @@ td .business-brief .driver-list span { font-size: 11px; }
 }
 
 .settings-block { display: grid; gap: 10px; max-width: 560px; }
+/* Separate each settings group (e.g. API token vs. Notifications) with a subtle
+   divider + breathing room, keeping the dark theme's line color. */
+.settings-block + .settings-block { margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); }
 .settings-block h3 { margin: 0; }
 .settings-block code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
 .token-status { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel-2); }
@@ -662,3 +665,23 @@ td .business-brief .driver-list span { font-size: 11px; }
   .iq-gauge { height: 116px; }
   .status-pill { flex: 1 1 132px; }
 }
+
+/* Alerts page + notification settings */
+.alerts-list { display: grid; gap: 10px; }
+.alert-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel-2); border-left-width: 3px; }
+.alert-card.unread { background: var(--panel); border-left-color: var(--blue); }
+.alert-card.tone-bad { border-left-color: var(--red); }
+.alert-card.tone-good { border-left-color: var(--green); }
+.alert-card.tone-mid { border-left-color: var(--amber); }
+.alert-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.alert-head strong { font-size: 14px; }
+.alert-head .muted { margin-left: auto; font-size: 12px; }
+.alert-body { margin: 8px 0 4px; font-size: 13px; color: var(--text); }
+.alert-meta { font-size: 12px; }
+.alert-actions { display: flex; gap: 14px; margin-top: 8px; }
+
+.notif-form { display: grid; gap: 12px; max-width: 460px; }
+.notif-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.notif-field { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
+.notif-field input, .notif-field select { padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
+.notif-field-group { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
