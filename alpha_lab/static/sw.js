@@ -6,13 +6,13 @@
  * Tailscale. Only same-origin GET requests are cached; POSTs and cross-origin
  * requests pass straight through untouched.
  */
-const CACHE = "alphalab-v8";
+const CACHE = "alphalab-v11";
 
 // App shell precached on install so the very first offline open works.
 const SHELL = [
   "/",
-  "/static/styles.css?v=43",
-  "/static/app.js?v=43",
+  "/static/styles.css?v=45",
+  "/static/app.js?v=45",
   "/static/manifest.webmanifest",
   "/static/icon-192.png",
   "/static/icon-512.png",
@@ -42,11 +42,18 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Never cache API responses. These carry private operator data — notification
+  // preferences, phone numbers, push subscriptions, alerts, and approval state —
+  // that must not be persisted to the on-disk cache or served stale. Only the
+  // static app shell is cached for offline open; /api/* always hits the network.
+  const isApi = new URL(req.url).pathname.startsWith("/api/");
+
   event.respondWith(
     fetch(req)
       .then((res) => {
-        // Cache a copy of successful basic responses for offline fallback.
-        if (res && res.status === 200 && res.type === "basic") {
+        // Cache a copy of successful basic responses for offline fallback, but
+        // only for static assets — API responses are never written to the cache.
+        if (!isApi && res && res.status === 200 && res.type === "basic") {
           const copy = res.clone();
           caches.open(CACHE).then((cache) => cache.put(req, copy));
         }
@@ -59,5 +66,48 @@ self.addEventListener("fetch", (event) => {
         if (req.mode === "navigate") return caches.match("/");
         return Response.error();
       })
+  );
+});
+
+// --- Web Push -------------------------------------------------------------- //
+// An incoming push carries a JSON payload built by the server (title, body,
+// url, level). Show it as a system notification. Defensive: a malformed or
+// empty payload still produces a generic AlphaLab notification rather than
+// throwing inside the SW.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (err) {
+    data = { title: "AlphaLab", body: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "AlphaLab alert";
+  const options = {
+    body: data.body || "",
+    tag: data.alert_id ? `alert-${data.alert_id}` : undefined,
+    data: { url: data.url || "/", alert_id: data.alert_id || null },
+    icon: "/static/icon-192.png",
+    badge: "/static/icon-192.png",
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Clicking a notification focuses an existing tab (navigating it to the alert's
+// url) or opens a new one. url is the in-app hash route the server chose:
+// /#approvals for sign-off-class alerts, otherwise /#alerts/<id>.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          if ("navigate" in client) client.navigate(url).catch(() => {});
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url);
+      return undefined;
+    })
   );
 });

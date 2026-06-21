@@ -126,6 +126,51 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         if name not in trade_columns:
             conn.execute(f"ALTER TABLE trades ADD COLUMN {name} {ddl}")
 
+    # Idempotency key for event-driven alerts. Older alerts tables predate this
+    # column; add it (NULL default) so the notifier's dedup query has a column.
+    alert_columns = {row["name"] for row in conn.execute("PRAGMA table_info(alerts)").fetchall()}
+    if "dedup_key" not in alert_columns:
+        conn.execute("ALTER TABLE alerts ADD COLUMN dedup_key TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_dedup ON alerts(dedup_key)")
+    # Reconcile any pre-fix duplicate LIVE dedup keys BEFORE creating the unique
+    # index, so its creation can never raise IntegrityError on an older DB. For each
+    # dedup_key with >1 live (unread/read) row, the NEWEST row (max id) stays the
+    # canonical live dedupe row; older duplicates have their dedup_key cleared to
+    # NULL, retiring them from the partial unique index. Alert history is preserved
+    # (rows are kept, only the key is nulled). Deterministic (max id wins) and
+    # idempotent: once reconciled there are no duplicate live groups, so re-running
+    # init matches nothing — safe for fresh DBs, existing DBs, and repeated runs.
+    conn.execute(
+        """
+        UPDATE alerts
+           SET dedup_key = NULL
+         WHERE dedup_key IS NOT NULL
+           AND status IN ('unread', 'read')
+           AND id NOT IN (
+               SELECT MAX(id) FROM alerts
+                WHERE dedup_key IS NOT NULL AND status IN ('unread', 'read')
+                GROUP BY dedup_key
+           )
+        """
+    )
+    # Atomic dedupe guarantee: a PARTIAL UNIQUE index that constrains only LIVE
+    # alerts (unread/read) with a non-NULL dedup_key. This lets notify_event use
+    # INSERT OR IGNORE as the single arbiter so concurrent triggers can never both
+    # insert+dispatch the same event, while still allowing a NEW alert for the same
+    # key once the prior one is dismissed/actioned (it drops out of the index).
+    # IF NOT EXISTS keeps init idempotent; the reconcile step above guarantees no
+    # live duplicates remain to violate the constraint on creation.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_dedup_live "
+        "ON alerts(dedup_key) WHERE dedup_key IS NOT NULL AND status IN ('unread', 'read')"
+    )
+
+    # Guarantee the single notification-preferences row exists with safe defaults
+    # (push + SMS OFF). INSERT OR IGNORE keeps an operator's saved prefs intact.
+    conn.execute(
+        "INSERT OR IGNORE INTO notification_preferences (id) VALUES (1)"
+    )
+
     # (Re)create the training-row view after the columns exist. Dropping first keeps
     # it in sync if the column set changes between releases.
     conn.execute("DROP VIEW IF EXISTS training_rows")
@@ -500,6 +545,86 @@ CREATE TABLE IF NOT EXISTS catalyst_futures_reactions (
   net_move_pct REAL NOT NULL DEFAULT 0,
   catalyst_move_pct REAL,
   regime TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Notifications & alerting. One alert row per noteworthy event (INFO ... RISK_KILL).
+-- channels_sent records which channels actually delivered; error captures the last
+-- delivery problem. Bodies are sanitized before storage (no secrets/account numbers).
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  level TEXT NOT NULL DEFAULT 'INFO',
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT '',
+  related_trade_id INTEGER REFERENCES trades(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'unread',
+  channels_sent TEXT NOT NULL DEFAULT '[]',
+  error TEXT,
+  -- Idempotency key for event-driven alerts (e.g. "approval:<idea_id>"). Lets the
+  -- notifier skip re-creating/re-sending an alert that is still live, preventing
+  -- push/SMS spam from repeated triggers. NULL for ad-hoc/manual alerts.
+  dedup_key TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+-- idx_alerts_dedup is created in _ensure_columns() AFTER the dedup_key column is
+-- guaranteed (added by ALTER on DBs that predate it), so it is omitted here.
+
+-- Single-row (id=1) notification preferences. Push/SMS both default OFF so nothing
+-- leaves the box until the operator explicitly opts in and configures a channel.
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  pwa_push_enabled INTEGER NOT NULL DEFAULT 0,
+  push_min_level TEXT NOT NULL DEFAULT 'INFO',
+  sms_enabled INTEGER NOT NULL DEFAULT 0,
+  sms_phone_number TEXT NOT NULL DEFAULT '',
+  sms_min_level TEXT NOT NULL DEFAULT 'APPROVAL_REQUIRED',
+  quiet_hours_start TEXT,
+  quiet_hours_end TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Stored Web Push subscriptions (one per browser/device). endpoint is unique; the
+-- p256dh/auth keys are the standard PushSubscription material needed to encrypt a
+-- push. These are not account secrets, but are scoped to this DB and never logged.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at TEXT
+);
+
+-- Append-only audit of every notification delivery attempt (one row per channel
+-- per alert), including dry-run no-sends, so there is always a record of what was
+-- (or would have been) sent and why.
+CREATE TABLE IF NOT EXISTS notification_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alert_id INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
+  channel TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  dry_run INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Append-only audit of every human approve/deny decision on a trade approval.
+-- This table is an AUDIT RECORD ONLY; it does not gate execution. live_mode merely
+-- stamps the ALPHALAB_ALLOW_LIVE_EXECUTION posture at decision time. Live (non-paper)
+-- execution is not implemented and is blocked at the broker (paper-api endpoint only).
+CREATE TABLE IF NOT EXISTS approval_decisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  idea_id INTEGER REFERENCES alpha_ideas(id) ON DELETE SET NULL,
+  related_trade_id INTEGER REFERENCES trades(id) ON DELETE SET NULL,
+  decision TEXT NOT NULL,
+  decided_by TEXT NOT NULL DEFAULT 'human',
+  note TEXT NOT NULL DEFAULT '',
+  live_mode INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

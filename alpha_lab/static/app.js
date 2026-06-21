@@ -19,6 +19,11 @@ let state = {
   approvalQueue: [],
   approvalsLoading: false,
   approvalsError: "",
+  alerts: [],
+  alertsUnread: 0,
+  alertsError: "",
+  notifPrefs: null,
+  alertLevels: ["INFO", "WATCH", "URGENT_IDEA", "APPROVAL_REQUIRED", "RISK_KILL"],
 };
 let activeRoute = "overview";
 
@@ -98,7 +103,7 @@ function cleanErrorMessage(message) {
 async function load() {
   const refresh = document.querySelector("#refresh");
   if (refresh) refresh.textContent = "Refreshing...";
-  const [dashboard, ideas, trades, stats, bitcoin, afterHoursBtc, liquidity, trendingStocks, oil, futuresPulse, businessProfiles, catalysts, catalystIntelligence, dailyBrief, briefings, executionAudit, performanceReport, approvalResult] = await Promise.all([
+  const [dashboard, ideas, trades, stats, bitcoin, afterHoursBtc, liquidity, trendingStocks, oil, futuresPulse, businessProfiles, catalysts, catalystIntelligence, dailyBrief, briefings, executionAudit, performanceReport, approvalResult, alertsResult] = await Promise.all([
     api("/api/dashboard"),
     api("/api/ideas"),
     api("/api/trades"),
@@ -117,8 +122,10 @@ async function load() {
     api("/api/execution-audit"),
     api("/api/performance/report"),
     loadApprovalQueueResult(),
+    loadAlertsResult(),
   ]);
   state = {
+    ...state,
     dashboard,
     ideas,
     trades,
@@ -139,6 +146,9 @@ async function load() {
     approvalQueue: approvalResult.data,
     approvalsLoading: false,
     approvalsError: approvalResult.error,
+    alerts: alertsResult.alerts,
+    alertsUnread: alertsResult.unread,
+    alertsError: alertsResult.error,
   };
   render();
   if (refresh) refresh.textContent = `Refreshed ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
@@ -149,6 +159,15 @@ async function loadApprovalQueueResult() {
     return { data: await api("/api/ideas/pending-approval"), error: "" };
   } catch (err) {
     return { data: [], error: cleanErrorMessage(err.message || err) };
+  }
+}
+
+async function loadAlertsResult() {
+  try {
+    const res = await api("/api/alerts");
+    return { alerts: res.alerts || [], unread: res.unread || 0, error: "" };
+  } catch (err) {
+    return { alerts: [], unread: 0, error: cleanErrorMessage(err.message || err) };
   }
 }
 
@@ -169,6 +188,7 @@ function render() {
   renderCatalystRadar();
   renderDailyBrief();
   renderApprovalQueue();
+  renderAlerts();
   renderExecutionAudit();
   renderPerformance();
   renderSavedBriefings();
@@ -654,6 +674,7 @@ const PAGE_META = {
   business: ["Business/Fundamentals", "What each company or ETF does, what drives it, and what fundamental metrics matter."],
   strategies: ["Strategies", "Hypotheses, indicator scenarios, and paper-trade performance tracking."],
   approvals: ["Approvals", "Human review queue for LLM-assisted ideas before Alpaca paper execution."],
+  alerts: ["Alerts", "System alerts and notification history. Push/SMS delivery is opt-in and configured in Settings."],
   performance: ["Performance", "Alpha Report Card: signal quality, source effectiveness, and regime performance — paper-trading research only."],
   briefings: ["Briefings", "Saved daily market research briefings and generated context."],
   paper: ["Paper / Dry-Run Log", "Dry-run tests, Alpaca paper actions, rejections, and blocked moves."],
@@ -662,8 +683,16 @@ const PAGE_META = {
   settings: ["Settings", "Configure this device for remote actions over Tailscale."],
 };
 
+function routeBase(route) {
+  // A hash may carry a sub-path (e.g. a push notification deep-links to
+  // "alerts/42"). Only the leading segment selects the page; the remainder is
+  // ignored by the page router. Unknown bases fall back to the overview.
+  const base = String(route || "").split("/")[0];
+  return PAGE_META[base] ? base : "overview";
+}
+
 function setRoute(route, updateHash = true) {
-  activeRoute = PAGE_META[route] ? route : "overview";
+  activeRoute = routeBase(route);
   if (updateHash && window.location.hash !== `#${activeRoute}`) {
     history.replaceState(null, "", `#${activeRoute}`);
   }
@@ -680,9 +709,11 @@ const NAV_SECTIONS = [
     id: "research",
     title: "Research",
     defaultCollapsed: false,
+    badge: "alerts",
     items: [
       { route: "overview", label: "Overview" },
       { route: "inbox", label: "Scanner Inbox" },
+      { route: "alerts", label: "Alerts" },
       { route: "chat", label: "Analyst Chat" },
     ],
   },
@@ -770,9 +801,13 @@ function renderNav() {
     const items = section.items.filter((item) => item.conditional !== "approvals" || pending > 0);
     if (!items.length) return "";
     const isCollapsed = isSectionCollapsed(section, collapsed);
-    const badge = section.badge === "approvals" && pending > 0
-      ? `<span class="nav-group-badge">${pending}</span>`
-      : "";
+    const unread = Number(state.alertsUnread) || 0;
+    let badge = "";
+    if (section.badge === "approvals" && pending > 0) {
+      badge = `<span class="nav-group-badge">${pending}</span>`;
+    } else if (section.badge === "alerts" && unread > 0) {
+      badge = `<span class="nav-group-badge">${unread}</span>`;
+    }
     const links = items.map((item) => {
       const itemBadge = item.conditional === "approvals" && pending > 0
         ? `<span class="nav-link-badge">${pending}</span>`
@@ -977,6 +1012,232 @@ async function approveAndPaperTrade(ideaId, ticker) {
   renderOverview();
   renderIdeas();
   renderInboxSnapshot();
+}
+
+// ---- Alerts & notifications --------------------------------------------------
+const ALERT_TONE = {
+  INFO: "tone-none",
+  WATCH: "tone-mid",
+  URGENT_IDEA: "tone-good",
+  APPROVAL_REQUIRED: "tone-mid",
+  RISK_KILL: "tone-bad",
+};
+
+function renderAlerts() {
+  const target = document.querySelector("#alerts-list");
+  if (!target) return;
+  if (state.alertsError) {
+    target.innerHTML = `<div class="row error-state"><strong>Alerts unavailable</strong><br>${state.alertsError}</div>`;
+    return;
+  }
+  if (!state.alerts.length) {
+    target.innerHTML = `<div class="row">No alerts yet.</div>`;
+    return;
+  }
+  target.innerHTML = state.alerts.map((alert) => {
+    const tone = ALERT_TONE[alert.level] || "tone-none";
+    const channels = Array.isArray(alert.channels_sent) ? alert.channels_sent : [];
+    const channelText = channels.length ? `sent via ${channels.join(", ")}` : "no channels";
+    const unread = alert.status === "unread";
+    return `
+      <article class="alert-card ${tone}${unread ? " unread" : ""}" data-alert-id="${alert.id}">
+        <div class="alert-head">
+          <span class="badge ${tone}">${alert.level}</span>
+          <strong>${escapeHtml(alert.title)}</strong>
+          <span class="muted">${formatTime(alert.created_at)}</span>
+        </div>
+        ${alert.body ? `<p class="alert-body">${escapeHtml(alert.body)}</p>` : ""}
+        <div class="alert-meta muted">${alert.status} · ${channelText}${alert.source ? ` · ${escapeHtml(alert.source)}` : ""}</div>
+        <div class="alert-actions">
+          ${unread ? `<button class="link-btn" data-alert-action="read" data-alert-id="${alert.id}">Mark read</button>` : ""}
+          <button class="link-btn" data-alert-action="dismissed" data-alert-id="${alert.id}">Dismiss</button>
+        </div>
+      </article>`;
+  }).join("");
+}
+
+async function refreshAlerts() {
+  const result = await loadAlertsResult();
+  state.alerts = result.alerts;
+  state.alertsUnread = result.unread;
+  state.alertsError = result.error;
+  renderAlerts();
+  renderNav();
+}
+
+async function setAlertStatus(alertId, status) {
+  try {
+    await api(`/api/alerts/${alertId}/status`, { method: "POST", body: JSON.stringify({ status }) });
+    await refreshAlerts();
+  } catch (err) {
+    showToast(`Could not update alert: ${cleanErrorMessage(err.message || String(err))}`);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// ---- Notification preferences (Settings page) -------------------------------
+function levelOptions(selected) {
+  return state.alertLevels.map((lvl) =>
+    `<option value="${lvl}"${lvl === selected ? " selected" : ""}>${lvl}</option>`).join("");
+}
+
+async function renderNotificationSettings() {
+  const form = document.querySelector("#notif-form");
+  if (!form) return;
+  if (!state.notifPrefs) {
+    try {
+      state.notifPrefs = await api("/api/notifications/preferences");
+    } catch (err) {
+      const status = document.querySelector("#notif-status");
+      if (status) status.innerHTML = `<strong>Preferences unavailable.</strong> <span class="muted">${cleanErrorMessage(err.message || err)}</span>`;
+      return;
+    }
+  }
+  const prefs = state.notifPrefs;
+  document.querySelector("#notif-push-enabled").checked = Boolean(prefs.pwa_push_enabled);
+  document.querySelector("#notif-sms-enabled").checked = Boolean(prefs.sms_enabled);
+  // The server only returns a MASKED number (e.g. ***-***-1234). Never load that
+  // into the editable value (it would fail validation on save). Show it as a
+  // placeholder hint instead; leaving the field blank keeps the stored number.
+  const smsInput = document.querySelector("#notif-sms-number");
+  smsInput.value = "";
+  smsInput.placeholder = prefs.sms_phone_configured
+    ? `${prefs.sms_phone_number} — leave blank to keep`
+    : "+15555550123";
+  document.querySelector("#notif-push-min").innerHTML = levelOptions(prefs.push_min_level || "INFO");
+  document.querySelector("#notif-sms-min").innerHTML = levelOptions(prefs.sms_min_level || "APPROVAL_REQUIRED");
+  document.querySelector("#notif-quiet-start").value = prefs.quiet_hours_start || "";
+  document.querySelector("#notif-quiet-end").value = prefs.quiet_hours_end || "";
+
+  const status = document.querySelector("#notif-status");
+  if (status) {
+    const pushState = "Notification" in window
+      ? `browser push ${Notification.permission}`
+      : "browser push unsupported";
+    status.className = "token-status";
+    status.innerHTML = `<span class="muted">Server controls actual delivery (dry-run by default). This device: ${pushState}.</span>`;
+  }
+}
+
+async function saveNotificationPreferences(event) {
+  event.preventDefault();
+  const wantsPush = document.querySelector("#notif-push-enabled").checked;
+  // If enabling push, register the browser subscription first so a real
+  // subscription exists before preferences say push is on.
+  if (wantsPush) {
+    const ok = await subscribePush();
+    if (!ok) {
+      document.querySelector("#notif-push-enabled").checked = false;
+      return;
+    }
+  } else {
+    await unsubscribePush();
+  }
+  const updates = {
+    pwa_push_enabled: wantsPush,
+    push_min_level: document.querySelector("#notif-push-min").value,
+    sms_enabled: document.querySelector("#notif-sms-enabled").checked,
+    sms_min_level: document.querySelector("#notif-sms-min").value,
+    quiet_hours_start: document.querySelector("#notif-quiet-start").value,
+    quiet_hours_end: document.querySelector("#notif-quiet-end").value,
+  };
+  // Only send the SMS number when the operator typed a new one. A blank field
+  // means "keep the existing number" (the field shows a masked placeholder, never
+  // the real value), so we omit the key rather than overwrite the stored number.
+  const smsValue = document.querySelector("#notif-sms-number").value.trim();
+  if (smsValue) {
+    updates.sms_phone_number = smsValue;
+  }
+  try {
+    state.notifPrefs = await api("/api/notifications/preferences", { method: "POST", body: JSON.stringify(updates) });
+    showToast("Notification preferences saved.");
+    renderNotificationSettings();
+  } catch (err) {
+    showToast(`Could not save preferences: ${cleanErrorMessage(err.message || String(err))}`);
+  }
+}
+
+// Standard VAPID public-key (base64url) -> Uint8Array for PushManager.subscribe.
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+  return output;
+}
+
+async function subscribePush() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    showToast("This browser does not support push notifications.");
+    return false;
+  }
+  let vapid;
+  try {
+    vapid = await api("/api/notifications/vapid-public-key");
+  } catch (err) {
+    showToast(`Could not fetch push key: ${cleanErrorMessage(err.message || err)}`);
+    return false;
+  }
+  if (!vapid.public_key) {
+    showToast("Server has no VAPID public key configured; push cannot be enabled yet.");
+    return false;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      showToast("Push permission was not granted.");
+      return false;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapid.public_key),
+    });
+    const json = sub.toJSON();
+    await api("/api/notifications/subscribe", {
+      method: "POST",
+      body: JSON.stringify({
+        endpoint: sub.endpoint,
+        keys: json.keys || {},
+        user_agent: navigator.userAgent,
+      }),
+    });
+    return true;
+  } catch (err) {
+    showToast(`Push subscribe failed: ${cleanErrorMessage(err.message || String(err))}`);
+    return false;
+  }
+}
+
+async function unsubscribePush() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await api("/api/notifications/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint: sub.endpoint }) });
+      await sub.unsubscribe().catch(() => {});
+    }
+  } catch (_) {
+    // Best-effort: a failed unsubscribe should not block preference saves.
+  }
+}
+
+async function sendTestAlert() {
+  try {
+    const res = await api("/api/notifications/test", { method: "POST", body: JSON.stringify({ level: "WATCH" }) });
+    const mode = res.dry_run ? "dry-run (logged, not sent)" : "sent";
+    showToast(`Test alert created — delivery ${mode}.`);
+    await refreshAlerts();
+  } catch (err) {
+    showToast(`Test alert failed: ${cleanErrorMessage(err.message || String(err))}`);
+  }
 }
 
 function renderExecutionAudit() {
@@ -1282,7 +1543,10 @@ function renderPage() {
   document.querySelector("#page-subtitle").textContent = subtitle;
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.dataset.page === activeRoute));
   renderNav();
-  if (activeRoute === "settings") renderTokenStatus();
+  if (activeRoute === "settings") {
+    renderTokenStatus();
+    renderNotificationSettings();
+  }
   closeMenu();
 }
 
@@ -2102,6 +2366,13 @@ document.querySelector("#test-catalysts-dry").addEventListener("click", () => te
 document.querySelector("#refresh-catalysts").addEventListener("click", () => refreshCatalysts().catch(showError));
 bind("#refresh-brief", "click", () => refreshDailyBrief().catch(showError));
 document.querySelector("#refresh-approvals").addEventListener("click", () => refreshApprovalQueue().catch(showError));
+bind("#refresh-alerts", "click", () => refreshAlerts().catch(showError));
+bind("#alerts-list", "click", (event) => {
+  const btn = event.target.closest("[data-alert-action]");
+  if (btn) setAlertStatus(btn.dataset.alertId, btn.dataset.alertAction).catch(showError);
+});
+bind("#notif-form", "submit", (event) => saveNotificationPreferences(event).catch(showError));
+bind("#notif-test", "click", () => sendTestAlert().catch(showError));
 bind("#refresh-futures-pulse", "click", function () { refreshFuturesPulse(this).catch(showError); });
 bind("#refresh-futures-detail", "click", function () { refreshFuturesPulse(this).catch(showError); });
 bind("#feed-brief", "click", () => feedDailyBrief().catch(showError));
@@ -2196,7 +2467,7 @@ function showError(err) {
   document.body.insertAdjacentHTML("afterbegin", `<pre class="panel runtime-error">${message}</pre>`);
 }
 
-activeRoute = window.location.hash.replace("#", "") || "overview";
+activeRoute = routeBase(window.location.hash.replace("#", ""));
 renderNav();
 renderPage();
 load().catch(showError);

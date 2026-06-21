@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .agent_status import build_agent_status
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .market_data import get_bitcoin_market, get_business_profiles, get_liquidity_flows, get_oil_market, get_trending_stocks
+from .notifications import ALERT_LEVELS, NotificationCenter, clamp_limit
 from .scheduler import scheduler_safety_status
 from .service import AlphaLabService
 
@@ -37,6 +38,7 @@ def _bool_param(value: Any, default: bool = True) -> bool:
 def create_app(service: AlphaLabService | None = None) -> FastAPI:
     app = FastAPI(title="Alpha Lab", version="0.1.0")
     lab = service or AlphaLabService()
+    notifications = NotificationCenter(db_path=lab.db_path)
     static_dir = Path(__file__).parent / "static"
 
     @app.middleware("http")
@@ -419,6 +421,111 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="message is required")
         history = payload.get("history") if isinstance(payload.get("history"), list) else []
         return lab.analyst_chat(message, history=history)
+
+    # --- notifications: alerts, preferences, push, test-mode ----------------- #
+    @app.get("/api/alerts")
+    def list_alerts(limit: int = 100, status: Optional[str] = None) -> dict[str, Any]:
+        try:
+            return notifications.list_alerts(limit=limit, status=status)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/alerts/levels")
+    def alert_levels() -> dict[str, Any]:
+        return {"levels": ALERT_LEVELS}
+
+    @app.get("/api/alerts/{alert_id}")
+    def get_alert(alert_id: int) -> dict[str, Any]:
+        try:
+            return notifications.get_alert(alert_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/alerts/{alert_id}/status")
+    def set_alert_status(alert_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return notifications.set_alert_status(alert_id, str(payload.get("status", "")))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/notifications/audit")
+    def notification_audit(limit: int = 100) -> list[dict[str, Any]]:
+        return notifications.list_audit(clamp_limit(limit))
+
+    @app.get("/api/notifications/preferences")
+    def get_notification_preferences() -> dict[str, Any]:
+        return notifications.get_preferences()
+
+    @app.post("/api/notifications/preferences")
+    def update_notification_preferences(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return notifications.update_preferences(payload or {})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/notifications/vapid-public-key")
+    def vapid_public_key() -> dict[str, Any]:
+        # Public key only; the private key never leaves the server.
+        return {"public_key": os.getenv("VAPID_PUBLIC_KEY", "").strip()}
+
+    @app.post("/api/notifications/subscribe")
+    def subscribe_push(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return notifications.save_subscription(payload or {})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/notifications/unsubscribe")
+    def unsubscribe_push(payload: dict[str, Any]) -> dict[str, Any]:
+        return notifications.remove_subscription(str((payload or {}).get("endpoint", "")))
+
+    @app.post("/api/notifications/test")
+    def create_test_alert(payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        # Test-mode: create one alert at the requested level and run dispatch.
+        #
+        # SAFE BY DEFAULT: this endpoint always runs in dry-run (audited, nothing
+        # sent). A REAL send (force_dry_run=false) is refused unless the operator has
+        # set ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true on the server — so the normal
+        # API can never push an arbitrary real SMS/push. Inputs are strictly validated
+        # and bounded; unknown payload fields are rejected.
+        body = payload or {}
+        allowed_fields = {"level", "title", "body", "source", "force_dry_run"}
+        unknown = set(body) - allowed_fields
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"unknown fields: {sorted(unknown)}")
+
+        level = str(body.get("level", "WATCH")).strip().upper()
+        if level not in ALERT_LEVELS:
+            raise HTTPException(status_code=400, detail=f"level must be one of {ALERT_LEVELS}")
+
+        title = str(body.get("title") or f"Test {level} alert")[:140]
+        body_text = str(body.get("body") or "Synthetic alert from /api/notifications/test")[:600]
+        source = str(body.get("source") or "test-mode")[:80]
+
+        allow_real = os.getenv("ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS", "").strip().lower() in TRUE_VALUES
+        raw_force = body.get("force_dry_run")
+        if raw_force is None:
+            force = True  # default: dry-run only
+        elif _bool_param(raw_force, default=True):
+            force = True  # explicit dry-run
+        else:
+            # Caller asked for a real send; gate it behind the explicit env opt-in.
+            if not allow_real:
+                raise HTTPException(
+                    status_code=403,
+                    detail="real test sends are disabled; set ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true to enable",
+                )
+            force = False
+
+        return notifications.create_and_dispatch(
+            level=level,
+            title=title,
+            body=body_text,
+            source=source,
+            force_dry_run=force,
+        )
 
     @app.get("/")
     def index() -> FileResponse:

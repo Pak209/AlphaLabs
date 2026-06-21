@@ -17,6 +17,7 @@ from paper_trader.simulated_broker import SimulatedPaperBroker
 from .analyst import build_market_briefing, build_trade_explanation, chat_reply
 from .database import connect, init_db, resolve_db_path
 from .models import normalize_idea_payload
+from .notifications import NotificationCenter, live_execution_enabled
 from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .daily_brief import build_daily_market_brief
@@ -72,9 +73,18 @@ class AlphaLabService:
         # Futures Pulse reads from Polygon/Massive Futures v1 when POLYGON_API_KEY
         # is set; otherwise the live provider returns no data (neutral) per call.
         self.futures_data_provider = futures_data_provider or PolygonFuturesProvider()
+        # Notification center is lazily built (shares this service's DB path) so
+        # event-driven alerts can be fired without constructing one per call.
+        self._notifications: NotificationCenter | None = None
         init_db(self.db_path)
         with connect(self.db_path) as conn:
             AlphaLabRepository(conn).seed_defaults()
+
+    @property
+    def notifications(self) -> NotificationCenter:
+        if self._notifications is None:
+            self._notifications = NotificationCenter(db_path=self.db_path)
+        return self._notifications
 
     # ----------------------------------------------------------------------- #
     # DB identity, heartbeat, and status — used by /api/health, the status
@@ -846,6 +856,8 @@ class AlphaLabService:
             approval_error = self._paper_execution_approval_error(idea_id)
             if approval_error:
                 self._log_execution_attempt(idea_id, approval_error, dry_run=dry_run)
+                if approval_error.get("action") == "needs_human_approval":
+                    self._notify_approval_required(idea_id, approval_error)
                 return approval_error
         try:
             decision = self.run_decision(idea_id, dry_run=dry_run, as_option=as_option)
@@ -1033,16 +1045,47 @@ class AlphaLabService:
             return AlphaLabRepository(conn).list_pending_approvals(limit)
 
     def approve_idea_for_execution(self, idea_id: int, note: str = "") -> dict[str, Any]:
-        with connect(self.db_path) as conn:
-            return self._with_business_brief(AlphaLabRepository(conn).set_approval_status(idea_id, "approved", note))
+        return self._decide_approval(idea_id, "approved", note)
 
     def reject_idea_for_execution(self, idea_id: int, note: str = "rejected by reviewer") -> dict[str, Any]:
-        with connect(self.db_path) as conn:
-            return self._with_business_brief(AlphaLabRepository(conn).set_approval_status(idea_id, "rejected", note))
+        return self._decide_approval(idea_id, "rejected", note)
 
     def expire_idea(self, idea_id: int, note: str = "expired before review") -> dict[str, Any]:
+        return self._decide_approval(idea_id, "expired", note)
+
+    def _decide_approval(self, idea_id: int, decision: str, note: str) -> dict[str, Any]:
+        """Apply an approval decision AND its audit row in ONE transaction.
+
+        The audit INSERT is staged first (no commit), then set_approval_status
+        performs its writes and issues the single commit that flushes BOTH. If
+        either step raises, the connect() context manager rolls the whole
+        transaction back, so we can never end up with a committed approval whose
+        audit row was lost — and an audit failure is surfaced, not swallowed.
+        """
         with connect(self.db_path) as conn:
-            return self._with_business_brief(AlphaLabRepository(conn).set_approval_status(idea_id, "expired", note))
+            self._record_approval_decision(conn, idea_id, decision, note)
+            return self._with_business_brief(
+                AlphaLabRepository(conn).set_approval_status(idea_id, decision, note)
+            )
+
+    def _record_approval_decision(self, conn, idea_id: int, decision: str, note: str = "") -> None:
+        """Stage the approval audit INSERT (no commit) within the caller's
+        transaction.
+
+        Stamps whether live execution was enabled at decision time so the record
+        proves under which posture (paper vs. live) sign-off occurred. NOTE:
+        ``live_mode`` is audit metadata only — it does not gate execution (live
+        trading is blocked at the broker layer). This does NOT commit and does NOT
+        swallow errors: the caller's single commit flushes it atomically with the
+        approval, and any failure propagates so it is never lost silently.
+        """
+        conn.execute(
+            """
+            INSERT INTO approval_decisions (idea_id, decision, decided_by, note, live_mode)
+            VALUES (?, ?, 'human', ?, ?)
+            """,
+            (idea_id, decision, str(note or "")[:500], 1 if live_execution_enabled() else 0),
+        )
 
     def get_trade_explanation(self, idea_id: int) -> dict[str, Any]:
         with connect(self.db_path) as conn:
@@ -1748,6 +1791,29 @@ class AlphaLabService:
                 "order_payload": None,
                 "order_response": {"submitted": False, "message": "No Alpaca paper order was placed."},
             }
+
+    def _notify_approval_required(self, idea_id: int, approval_error: dict[str, Any]) -> None:
+        """Fire an informational APPROVAL_REQUIRED alert routing to the sign-off UI.
+
+        Deduped by idea so repeated paper-trade attempts on the same idea never
+        spam push/SMS. This is purely a notification side-channel: it does NOT
+        approve, reject, or place anything, and it must never break the (already
+        blocked) trade flow, so any failure is contained.
+        """
+        ticker = str(approval_error.get("ticker") or "idea")
+        try:
+            self.notifications.notify_event(
+                "APPROVAL_REQUIRED",
+                f"Approval needed: {ticker}",
+                "An LLM-assisted signal is awaiting human sign-off before any Alpaca paper order. "
+                "Open Approvals to review or reject it.",
+                source="paper-execution",
+                dedup_key=f"approval:{idea_id}",
+                related_trade_id=None,
+            )
+        except Exception:
+            # Notification delivery is best-effort and must not affect trade safety.
+            pass
 
     def _paper_approval_required(self) -> bool:
         return os.getenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "true").strip().lower() not in FALSE_ENV_VALUES

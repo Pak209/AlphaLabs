@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AlphaLab" />
 
-    <link rel="stylesheet" href="/static/styles.css?v=43" />
+    <link rel="stylesheet" href="/static/styles.css?v=45" />
   </head>
   <body>
     <div class="app-shell">
@@ -315,6 +315,19 @@
           </section>
         </section>
 
+        <section class="page" data-page="alerts">
+          <section class="panel alerts-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Alerts</h2>
+                <p class="muted">System alerts from AlphaLab. Push/SMS delivery is opt-in and configured in Settings. Mark alerts read or dismissed here.</p>
+              </div>
+              <button id="refresh-alerts" class="secondary">Refresh</button>
+            </div>
+            <div id="alerts-list" class="alerts-list"></div>
+          </section>
+        </section>
+
         <section class="page" data-page="inbox">
           <section class="panel automation-panel">
             <div>
@@ -396,12 +409,54 @@
                 </div>
               </form>
             </div>
+
+            <div class="settings-block">
+              <h3>Notifications</h3>
+              <p class="muted">Push and SMS are both off by default and never send unless the server is configured. With the server in dry-run, choices here are saved but deliveries are only logged to the audit table.</p>
+              <div id="notif-status" class="token-status"></div>
+              <form id="notif-form" class="notif-form">
+                <label class="notif-row">
+                  <input type="checkbox" id="notif-push-enabled" />
+                  <span>Enable PWA push on this device</span>
+                </label>
+                <label class="notif-field">
+                  <span>Push minimum level</span>
+                  <select id="notif-push-min"></select>
+                </label>
+                <label class="notif-row">
+                  <input type="checkbox" id="notif-sms-enabled" />
+                  <span>Enable SMS alerts</span>
+                </label>
+                <label class="notif-field">
+                  <span>SMS phone number</span>
+                  <input id="notif-sms-number" type="tel" autocomplete="off" placeholder="+15555550123" />
+                </label>
+                <label class="notif-field">
+                  <span>SMS minimum level</span>
+                  <select id="notif-sms-min"></select>
+                </label>
+                <div class="notif-field-group">
+                  <label class="notif-field">
+                    <span>Quiet hours start</span>
+                    <input id="notif-quiet-start" type="time" />
+                  </label>
+                  <label class="notif-field">
+                    <span>Quiet hours end</span>
+                    <input id="notif-quiet-end" type="time" />
+                  </label>
+                </div>
+                <div class="token-actions">
+                  <button type="submit" id="notif-save">Save preferences</button>
+                  <button type="button" id="notif-test" class="secondary">Send test alert</button>
+                </div>
+              </form>
+            </div>
           </section>
         </section>
       </main>
     </div>
     <div id="toast" class="toast"></div>
-    <script src="/static/app.js?v=43"></script>
+    <script src="/static/app.js?v=45"></script>
     <script>
       // Register the service worker (served from root so its scope is "/").
       if ("serviceWorker" in navigator) {

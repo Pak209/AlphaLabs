@@ -740,3 +740,169 @@ Replaced the manual paper validation checklist with a concise market-hours runbo
 
 ### Next Recommended Task
 During regular market hours, follow docs/MANUAL_PAPER_VALIDATION.md and stop on any failed or ambiguous readiness, order, or evidence result.
+
+
+## 2026-06-20 22:31 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Implemented PWA Web Push + Twilio SMS notification system: alerts/preferences/subscriptions/approval-decisions schema, notifications.py delivery core (pure route_alert, dry-run default, secret sanitization, full audit), API endpoints, service approval audit, notify_test CLI, frontend Alerts page + notification settings + push subscribe + SW push handlers.
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/database.py
+- alpha_lab/api.py
+- alpha_lab/service.py
+- alpha_lab/notify_test.py
+- alpha_lab/static/app.js
+- alpha_lab/static/index.html
+- alpha_lab/static/sw.js
+- alpha_lab/static/styles.css
+- .env.example
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest -q
+- create_app() route introspection
+- .venv/bin/python -m alpha_lab.notify_test
+
+### Results
+- 328 passed (13 new notification tests: routing rules, quiet-hours bypass, dry-run dispatch audit, subscription roundtrip)
+- 5 new tables: alerts, notification_preferences (single-row defaults push/SMS OFF), push_subscriptions, notification_audit, approval_decisions
+- 11 notification routes registered (alerts CRUD/status, prefs, vapid-public-key, subscribe/unsubscribe, test, audit)
+- approve/reject/expire now write approval_decisions audit rows stamped with live_mode; live_execution_enabled gate (default OFF)
+- creates WATCH/URGENT_IDEA/APPROVAL_REQUIRED/RISK_KILL alerts, dispatch forced dry-run, all channels correctly suppressed (prefs default off)
+- Alerts page + nav unread badge; Settings notification block (push/SMS toggles, min-levels, quiet hours, test button); SW push + notificationclick handlers; cache v9 / asset v44
+- documented ALERT_DELIVERY_DRY_RUN(default true), ALERT_SMS_ENABLED, TWILIO_*, ALERT_SMS_TO_NUMBER, VAPID_*, ALPHALAB_ALLOW_LIVE_EXECUTION(default false)
+
+### Risks / Blockers
+- Real push/SMS delivery untested (no VAPID keys / Twilio creds / pywebpush installed in this env); delivery path exercised only in dry-run. pywebpush is an optional dependency not in requirements.txt.
+- No live trading touched; all delivery defaults to dry-run, SMS/push/live-execution all default OFF and require explicit env + per-channel opt-in.
+
+### Next Recommended Task
+On a configured device: install pywebpush, set VAPID keys + Twilio env, then end-to-end test push subscribe + a forced non-dry-run APPROVAL_REQUIRED alert before flipping ALERT_DELIVERY_DRY_RUN=false.
+
+
+## 2026-06-20 23:11 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Remediated Codex audit of the PWA push + Twilio SMS notification system: 11 security/trade-safety/correctness fixes across notifications, API, service, DB, SW, and frontend. NOT COMMITTED (left for review).
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/api.py
+- alpha_lab/service.py
+- alpha_lab/database.py
+- alpha_lab/static/sw.js
+- alpha_lab/static/app.js
+- requirements.txt
+- .env.example
+- alpha_lab/tests/test_notifications.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_notifications.py -q
+- .venv/bin/python -m pytest -q
+- node --check app.js && node --check sw.js
+
+### Results
+- Strict pref validation (bool/level/phone/clock raise on malformed), https subscription validation, clamp_limit pagination, SMS env fallback injected in dispatch via _apply_sms_fallback, dedup_key idempotent notify_event, corrected live_execution_enabled docstring to audit-metadata-only.
+- Secured /api/notifications/test: dry-run only by default, real send requires ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true (403 otherwise), bounded title/body/source, rejects unknown fields and unknown levels; preferences endpoint returns 400 on bad input; audit limit clamped.
+- Approval decision + audit now one transaction (audit staged before committing set_approval_status; no swallow, no separate commit) so an audit failure rolls back the approval; wired deduped APPROVAL_REQUIRED alert on paper-trade approval-needed via notify_event.
+- Added alerts.dedup_key column + idx_alerts_dedup via additive migration; corrected approval_decisions comment (audit-only, live exec blocked at broker).
+- Service worker no longer caches /api/ responses (privacy: prefs/phone/subscriptions/alerts/approvals); cache bumped v9->v10 to purge prior API caches.
+- Router tolerates #alerts/<id> deep-links via routeBase().
+- Added pywebpush>=1.14 (push imports remain lazy/optional).
+- Documented ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS; corrected ALPHALAB_ALLOW_LIVE_EXECUTION to audit-metadata-only.
+- 34 passed (test endpoint gating, API auth, fake live push/SMS send, transactional+atomic approval audit, dedup, SMS fallback, strict validation, SW no /api cache, click routing).
+- 349 passed.
+- both OK (via /opt/homebrew/bin/node).
+
+### Risks / Blockers
+- Correcting prior Claude claims: ALPHALAB_ALLOW_LIVE_EXECUTION does NOT gate execution (audit-stamp only; live blocked at AlpacaClient paper-api endpoint); test_notifications.py IS a modified/added file; approval audit is now transactional (failures surfaced, not lost); urgent/approval events ARE now wired (APPROVAL_REQUIRED fired on paper-trade approval-needed, deduped).
+
+### Next Recommended Task
+Codex re-review of the 11 fixes, then human decision on committing. Do NOT commit .ai-bridge/.
+
+
+## 2026-06-20 23:52 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Targeted final fix pass on the notification system: validated the ALERT_SMS_TO_NUMBER env fallback fail-closed, made event dedupe atomic via a partial UNIQUE index, masked the stored SMS number on API reads, scoped URGENT_IDEA out of production wiring, and added a Settings divider. URGENT_IDEA is NOT wired to a production trigger (intentionally scoped out); only APPROVAL_REQUIRED fires from production (paper-trade approval-needed, deduped). Notifications remain informational only and cannot approve/reject/place trades.
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/database.py
+- alpha_lab/static/app.js
+- alpha_lab/static/styles.css
+- alpha_lab/static/index.html
+- alpha_lab/static/sw.js
+- alpha_lab/tests/test_notifications.py
+
+### Commands / Tests Run
+- node --check
+- node --check
+- .venv/bin/python -m pytest alpha_lab/tests/test_notifications.py -q
+- .venv/bin/python -m pytest -q
+- git diff --check
+
+### Results
+- ALERT_SMS_TO_NUMBER now runs through _validate_phone fail-closed (malformed -> not injected, never logged); notify_event uses INSERT OR IGNORE as the single arbiter; get/update_preferences return masked phone + sms_phone_configured (raw stays server-side for delivery)
+- Added partial UNIQUE index idx_alerts_dedup_live ON alerts(dedup_key) WHERE dedup_key IS NOT NULL AND status IN (unread,read); IF NOT EXISTS keeps init idempotent and safe for existing DBs
+- Settings never loads the masked number into the editable field (placeholder hint only); blank SMS field omits the key on save so the stored number is preserved
+- Added .settings-block + .settings-block divider (border-top var(--line)) between API-token and Notifications groups; dark theme intact
+- asset cache-bust v44 -> v45
+- CACHE alphalab-v10 -> v11; shell assets bumped to v45
+- 40 passed; added masking, fail-closed env-fallback, and atomic-dedup (partial-unique blocks racing duplicate, re-alert allowed after dismissal) tests
+- 355 passed
+- clean
+
+### Risks / Blockers
+- URGENT_IDEA intentionally scoped out: the level exists and is usable via notify_event/test-mode, but no production code path emits it. If urgent-idea alerts are later desired, wire them informationally + deduped, never to execution.
+- .ai-bridge/ is untracked and NOT git-ignored — exclude it from any commit (add files by name, never git add -A).
+
+### Next Recommended Task
+Run the final Codex read-only audit, then commit the 12 notification files by name (excluding .ai-bridge/).
+
+
+## 2026-06-21 00:05 PT — Claude
+
+Branch: tooling/codexpro-devspace
+Commit: none
+Working Tree: modified
+
+### Summary
+Migration-hardening fix for the notification dedupe unique index. Before creating the partial UNIQUE index idx_alerts_dedup_live, init now deterministically reconciles any pre-fix duplicate LIVE dedup keys so index creation can never raise IntegrityError on an older DB. Per dedup_key, the newest live row (max id) stays canonical; older duplicates have their dedup_key set to NULL (retired from the index). Alert history is preserved (no deletes); deterministic, idempotent, safe for fresh DBs, the existing local DB (index already present, no duplicates), and repeated runs.
+
+### Files Modified
+- alpha_lab/database.py
+- alpha_lab/tests/test_notifications.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_notifications.py -q
+- .venv/bin/python -m pytest -q
+- node --check alpha_lab/static/app.js && node --check alpha_lab/static/sw.js
+- git diff --check
+
+### Results
+- Added a reconcile UPDATE (null older duplicate live dedup keys, keep max id) immediately before CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_dedup_live; index still enforced for future duplicates
+- 41 passed; added test_migration_reconciles_duplicate_live_dedup_keys: simulates a pre-fix DB with duplicate live keys + a dismissed history row, re-runs init (no IntegrityError), asserts index exists, only the newest live row keeps the key, 2 older rows retired to NULL, all 4 rows preserved, and a second init stays idempotent
+- 356 passed
+- both OK
+- clean
+
+### Risks / Blockers
+- Reconcile runs on every init_db, but is a no-op once reconciled (matches no rows); negligible cost. Older duplicate live alerts lose their dedup_key (history kept) — acceptable per the preferred behavior.
+- .ai-bridge/ remains untracked and NOT git-ignored — exclude from any commit (add files by name, never git add -A).
+
+### Next Recommended Task
+Run the final Codex read-only audit, then commit the 12 notification files by name (excluding .ai-bridge/).
