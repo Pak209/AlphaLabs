@@ -6,13 +6,13 @@
  * Tailscale. Only same-origin GET requests are cached; POSTs and cross-origin
  * requests pass straight through untouched.
  */
-const CACHE = "alphalab-v11";
+const CACHE = "alphalab-v13";
 
 // App shell precached on install so the very first offline open works.
 const SHELL = [
   "/",
-  "/static/styles.css?v=45",
-  "/static/app.js?v=45",
+  "/static/styles.css?v=46",
+  "/static/app.js?v=47",
   "/static/manifest.webmanifest",
   "/static/icon-192.png",
   "/static/icon-512.png",
@@ -82,10 +82,19 @@ self.addEventListener("push", (event) => {
     data = { title: "AlphaLab", body: event.data ? event.data.text() : "" };
   }
   const title = data.title || "AlphaLab alert";
+  // Carry the safe routing metadata on the notification so the click handler can
+  // deep-link to the exact item (and so the focused tab can highlight it). Only
+  // ids/level/source/url travel here — never secrets.
   const options = {
     body: data.body || "",
     tag: data.alert_id ? `alert-${data.alert_id}` : undefined,
-    data: { url: data.url || "/", alert_id: data.alert_id || null },
+    data: {
+      url: data.url || "/",
+      alert_id: data.alert_id || null,
+      related_trade_id: data.related_trade_id || null,
+      level: data.level || null,
+      source: data.source || null,
+    },
     icon: "/static/icon-192.png",
     badge: "/static/icon-192.png",
   };
@@ -97,12 +106,18 @@ self.addEventListener("push", (event) => {
 // /#approvals for sign-off-class alerts, otherwise /#alerts/<id>.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "/";
+  const meta = event.notification.data || {};
+  const url = meta.url || "/";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ("focus" in client) {
+          // Navigate the hash for browsers that honor it, but also postMessage the
+          // routing metadata: an already-open tab may not fire hashchange when the
+          // target route matches its current base, so the app routes + highlights
+          // from this message instead of relying on the URL change alone.
           if ("navigate" in client) client.navigate(url).catch(() => {});
+          client.postMessage({ type: "notification-click", ...meta });
           return client.focus();
         }
       }

@@ -26,6 +26,11 @@ let state = {
   alertLevels: ["INFO", "WATCH", "URGENT_IDEA", "APPROVAL_REQUIRED", "RISK_KILL"],
 };
 let activeRoute = "overview";
+// When a push notification is tapped, the route carries a sub-segment
+// (e.g. "alerts/42" or "approvals/7"). We stash the id here so that after the
+// target page renders we can scroll to and briefly highlight the exact card
+// that triggered the notification. Cleared once applied.
+let pendingFocus = null;
 
 function getApiToken() {
   return localStorage.getItem("alphalab_api_token") || "";
@@ -194,6 +199,9 @@ function render() {
   renderSavedBriefings();
   renderNav();
   renderPage();
+  // A notification tapped before data finished loading leaves a pendingFocus;
+  // now that the cards exist, scroll to and highlight the triggering item.
+  applyPendingFocus();
 }
 
 // ---- Overview / Alpha Command Center ----------------------------------------
@@ -691,12 +699,51 @@ function routeBase(route) {
   return PAGE_META[base] ? base : "overview";
 }
 
+function routeFocusId(route) {
+  // The trailing segment of a deep-link route ("alerts/42" -> "42"). Returns the
+  // id string when present and numeric-ish, else null. Used to highlight the
+  // exact card a push notification points at.
+  const parts = String(route || "").split("/");
+  const id = parts.length > 1 ? parts.slice(1).join("/").trim() : "";
+  return id ? id : null;
+}
+
 function setRoute(route, updateHash = true) {
-  activeRoute = routeBase(route);
-  if (updateHash && window.location.hash !== `#${activeRoute}`) {
-    history.replaceState(null, "", `#${activeRoute}`);
+  const base = routeBase(route);
+  const focusId = routeFocusId(route);
+  activeRoute = base;
+  if (focusId) pendingFocus = { base, id: focusId };
+  if (updateHash) {
+    // Preserve the deep-link sub-path in the hash so a refresh keeps context,
+    // but only rewrite when it actually changed.
+    const target = focusId ? `#${base}/${focusId}` : `#${base}`;
+    if (window.location.hash !== target) history.replaceState(null, "", target);
   }
   renderPage();
+  applyPendingFocus();
+}
+
+// Scroll to and briefly highlight the card that a notification pointed at. The
+// target depends on the page: an alert card by alert id, or an approval card by
+// its idea id (the natural key of the approval queue). Safe no-op if the element
+// isn't present yet (e.g. data still loading) — it re-runs after each render
+// until applied.
+function applyPendingFocus() {
+  if (!pendingFocus) return;
+  const { base, id } = pendingFocus;
+  let selector = null;
+  if (base === "alerts") selector = `.alert-card[data-alert-id="${CSS.escape(id)}"]`;
+  else if (base === "approvals") selector = `.approval-card[data-idea-id="${CSS.escape(id)}"]`;
+  if (!selector) {
+    pendingFocus = null;
+    return;
+  }
+  const el = document.querySelector(selector);
+  if (!el) return; // not rendered yet; leave pendingFocus for the next render
+  pendingFocus = null;
+  el.classList.add("notif-focus");
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => el.classList.remove("notif-focus"), 4000);
 }
 
 // ---- Sidebar navigation (data-driven) ---------------------------------------
@@ -2359,6 +2406,18 @@ document.querySelector("#nav-links").addEventListener("click", (event) => {
   if (link) setRoute(link.dataset.route);
 });
 window.addEventListener("hashchange", () => setRoute(window.location.hash.replace("#", "") || "overview", false));
+
+// The service worker postMessages routing metadata when a push notification is
+// tapped while the app is already open (an existing tab may not fire hashchange
+// if the target base matches its current route). Route + highlight from it.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    const data = event.data || {};
+    if (data.type !== "notification-click") return;
+    const route = String(data.url || "/").replace(/^\/?#?/, "") || "overview";
+    setRoute(route, true);
+  });
+}
 bind("#test-new", "click", () => testNewIdeas().catch(showError));
 document.querySelector("#test-trending-dry").addEventListener("click", () => testTrendingStrategies(true).catch(showError));
 document.querySelector("#test-trending-paper").addEventListener("click", () => testTrendingStrategies(false).catch(showError));
@@ -2467,7 +2526,12 @@ function showError(err) {
   document.body.insertAdjacentHTML("afterbegin", `<pre class="panel runtime-error">${message}</pre>`);
 }
 
-activeRoute = routeBase(window.location.hash.replace("#", ""));
+{
+  const initialRoute = window.location.hash.replace("#", "");
+  activeRoute = routeBase(initialRoute);
+  const initialFocus = routeFocusId(initialRoute);
+  if (initialFocus) pendingFocus = { base: activeRoute, id: initialFocus };
+}
 renderNav();
 renderPage();
 load().catch(showError);

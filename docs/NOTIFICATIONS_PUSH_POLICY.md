@@ -63,6 +63,62 @@ curl -s -X POST http://127.0.0.1:8787/api/notifications/preferences \
   -d '{"push_min_level":"URGENT_IDEA"}' >/dev/null
 ```
 
+## Actionable routing: where a tapped notification opens
+
+A delivered push is not just a banner — tapping it opens AlphaLabs directly to the
+item that triggered it. The server attaches only safe routing metadata to the
+payload (no secrets): `alert_id`, `related_trade_id` (FK to `trades`, may be
+null), `level`, `source`, and a precomputed in-app hash `url`.
+
+`_click_url()` in `alpha_lab/notifications.py` chooses the destination:
+
+| Alert level                         | Destination hash route        |
+| ----------------------------------- | ----------------------------- |
+| `APPROVAL_REQUIRED` / `RISK_KILL`   | `/#approvals` (the queue)     |
+| All other levels (`URGENT_IDEA`, …) | `/#alerts/<alert_id>`         |
+
+All destinations are **hash-only, same-origin** routes — no external URLs ever
+travel in the payload (`test_click_url_routes_are_hash_only_no_external_urls`).
+
+Why sign-off alerts are **not** deep-linked to a specific card: the approval
+queue is keyed by `idea_id` (an idea awaiting sign-off, *before* any trade
+exists), while the only structured id an alert carries is `related_trade_id` — a
+`trades` foreign key that only exists *after* placement. The two never coincide on
+the approvals page, so a `/#approvals/<trade_id>` deep-link could never match a
+card. Sign-off clicks therefore land on the queue itself, which is the reliable
+behavior. (`related_trade_id` still rides along in the payload as informational
+metadata.)
+
+Delivery path:
+
+1. `_deliver_push()` builds the payload with the metadata above.
+2. `sw.js` `push` handler stores `{url, alert_id, related_trade_id, level,
+   source}` on the notification's `data`.
+3. `sw.js` `notificationclick` navigates the focused/new tab to `url` **and**
+   `postMessage`s the same metadata (an already-open tab whose base route matches
+   may not fire `hashchange`, so the app routes from the message instead).
+4. `app.js` parses the trailing id from the hash (`routeFocusId`), stashes it as
+   `pendingFocus`, and `applyPendingFocus()` highlights the matching card with a
+   transient `.notif-focus` pulse, scrolling it into view. The selectors match the
+   markers the cards actually render: alert detail uses
+   `.alert-card[data-alert-id]`; the approvals branch uses
+   `.approval-card[data-idea-id]` (the queue's natural key). Since sign-off alerts
+   route to `/#approvals` with no trailing id, the approvals highlight is a safe
+   no-op today, but the selector is now correct so an idea-keyed deep-link would
+   highlight the right card if one is ever introduced.
+
+Future option (out of scope here, needs a DB change): to deep-link a sign-off
+notification to its exact approval card, the alert would need to carry the
+`idea_id` (e.g. a new `related_idea_id` column on `alerts`) and `_click_url()`
+would emit `/#approvals/<idea_id>`. The frontend selector already targets
+`data-idea-id`, so only the server/schema side would need work.
+
+Tests covering this: `test_click_url_*`,
+`test_app_js_approval_highlight_targets_idea_id_marker`,
+`test_push_payload_includes_safe_routing_metadata`, and
+`test_service_worker_carries_routing_metadata_and_posts_click` in
+`alpha_lab/tests/test_notifications.py`.
+
 ## 1. How to run ONE supervised real push test
 
 Real delivery is OFF by default (`ALERT_DELIVERY_DRY_RUN=true`). A real send also

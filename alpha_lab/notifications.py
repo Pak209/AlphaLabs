@@ -759,11 +759,16 @@ class NotificationCenter:
     # -- internal channel delivery -------------------------------------------- #
     def _deliver_push(self, alert: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
         subscriptions = self.list_subscriptions()
+        # Safe routing metadata only — ids, level, and source let the service
+        # worker/PWA deep-link to the triggering item. No secrets, prices, or
+        # free-text beyond the already-sanitized title/body are included.
         payload = {
             "title": f"[{alert['level']}] {alert['title']}",
             "body": alert["body"],
             "alert_id": alert["id"],
+            "related_trade_id": alert.get("related_trade_id"),
             "level": alert["level"],
+            "source": alert.get("source") or "",
             "url": _click_url(alert),
         }
         if dry_run:
@@ -981,8 +986,18 @@ def _read_alert(conn, alert_id: int) -> dict[str, Any]:
 
 
 def _click_url(alert: dict[str, Any]) -> str:
-    """Where a notification click should land: approvals for sign-off-class alerts,
-    otherwise the specific alert detail."""
+    """Where a notification click should land.
+
+    Sign-off-class alerts (APPROVAL_REQUIRED / RISK_KILL) open the approval queue
+    (``/#approvals``). They are intentionally NOT deep-linked to a specific card:
+    the approval queue is keyed by ``idea_id`` (an idea awaiting sign-off, before
+    any trade exists), whereas the only structured id an alert carries is
+    ``related_trade_id`` — a ``trades`` foreign key that only exists *after*
+    placement and is therefore never present on an approval-queue card. Emitting
+    ``/#approvals/<trade_id>`` could never match a card, so the click lands on the
+    queue itself. All other alerts open their own detail (``/#alerts/<id>``).
+    Routes are in-app hash fragments only — no external URLs and no secrets.
+    """
     if alert["level"] in ("APPROVAL_REQUIRED", "RISK_KILL"):
         return "/#approvals"
     return f"/#alerts/{alert['id']}"

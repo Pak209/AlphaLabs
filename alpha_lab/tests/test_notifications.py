@@ -424,6 +424,80 @@ def test_click_url_resolves_to_known_routes(tmp_path: Path):
     assert _click_url(crit) == "/#approvals"
 
 
+# ---- actionable deep-link routing -------------------------------------------
+def test_click_url_alert_detail_for_non_signoff_levels():
+    # INFO/WATCH/URGENT_IDEA deep-link to the specific alert detail.
+    for level in ("INFO", "WATCH", "URGENT_IDEA"):
+        assert _click_url({"level": level, "id": 42, "related_trade_id": None}) == "/#alerts/42"
+
+
+def test_click_url_approvals_queue_when_no_trade_id():
+    # Sign-off-class alerts with no related trade open the approval queue.
+    assert _click_url({"level": "APPROVAL_REQUIRED", "id": 5, "related_trade_id": None}) == "/#approvals"
+    assert _click_url({"level": "RISK_KILL", "id": 6, "related_trade_id": None}) == "/#approvals"
+
+
+def test_click_url_signoff_alerts_never_deep_link_by_trade_id():
+    # The approval queue is keyed by idea_id; an alert's related_trade_id is a
+    # trades FK that can never identify an approval-queue card. So sign-off alerts
+    # always land on the queue itself — even when a related trade id is present.
+    assert _click_url({"level": "APPROVAL_REQUIRED", "id": 5, "related_trade_id": 17}) == "/#approvals"
+    assert _click_url({"level": "RISK_KILL", "id": 6, "related_trade_id": 99}) == "/#approvals"
+
+
+def test_click_url_routes_are_hash_only_no_external_urls():
+    # Every generated route is an in-app hash fragment — never an absolute URL.
+    for alert in (
+        {"level": "INFO", "id": 1, "related_trade_id": None},
+        {"level": "APPROVAL_REQUIRED", "id": 2, "related_trade_id": 3},
+    ):
+        url = _click_url(alert)
+        assert url.startswith("/#")
+        assert "http://" not in url and "https://" not in url
+
+
+def test_push_payload_includes_safe_routing_metadata(tmp_path: Path):
+    # The dispatched push payload must carry alert_id, related_trade_id, level,
+    # source, and a hash-only url so the SW/PWA can deep-link to the item.
+    fake = _FakePush()
+    nc = NotificationCenter(db_path=str(tmp_path / "meta.sqlite3"), push_client=fake)
+    nc.update_preferences({"pwa_push_enabled": True, "push_min_level": "URGENT_IDEA"})
+    nc.save_subscription({"endpoint": "https://push.example/abc", "keys": {"p256dh": "k", "auth": "a"}})
+    nc.create_and_dispatch("URGENT_IDEA", "Approval needed: NVDA", "b", "paper-execution", force_dry_run=False)
+    assert len(fake.sent) == 1
+    _sub, payload = fake.sent[0]
+    assert payload["level"] == "URGENT_IDEA"
+    assert payload["source"] == "paper-execution"
+    assert isinstance(payload["alert_id"], int)
+    assert "related_trade_id" in payload  # present (None when no trade linked)
+    assert payload["url"].startswith("/#")
+    # Defense in depth: the payload must not leak obvious secret-like material.
+    assert "token" not in payload and "auth" not in payload
+
+
+# ---- service worker carries routing metadata + deep-link click --------------
+def test_service_worker_carries_routing_metadata_and_posts_click():
+    sw = Path("alpha_lab/static/sw.js").read_text(encoding="utf-8")
+    # The shown notification's data must include the routing fields.
+    assert "related_trade_id" in sw
+    assert "level:" in sw and "source:" in sw
+    # The click handler posts the metadata back to the focused client.
+    assert "notification-click" in sw
+    assert "postMessage" in sw
+
+
+# ---- frontend approval highlight marker reconciliation ----------------------
+def test_app_js_approval_highlight_targets_idea_id_marker():
+    app_js = Path("alpha_lab/static/app.js").read_text(encoding="utf-8")
+    # Approval cards render data-idea-id, so the focus highlight must select that
+    # marker. A trades-FK id could never match an idea-keyed approval card, so the
+    # stale data-trade-id selector must not survive anywhere in the app.
+    assert 'approval-card[data-idea-id="' in app_js
+    assert "data-trade-id" not in app_js
+    # The alert-detail highlight still targets the alert-id marker.
+    assert 'alert-card[data-alert-id="' in app_js
+
+
 # ---- service worker privacy (#7) --------------------------------------------
 def test_service_worker_excludes_api_from_cache():
     sw = Path("alpha_lab/static/sw.js").read_text(encoding="utf-8")

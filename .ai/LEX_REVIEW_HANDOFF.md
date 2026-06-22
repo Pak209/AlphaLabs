@@ -1292,3 +1292,79 @@ Ran ONE supervised real PWA push test validating the safe-push policy on the old
 
 ### Next Recommended Task
 Safe-push policy validated end-to-end at the URGENT_IDEA floor; no further action required.
+
+
+## 2026-06-22 16:26 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Implemented actionable trade-approval notification routing: enriched push payload with safe routing metadata (alert_id, related_trade_id, level, source) and a precomputed hash url; tapping a push now deep-links to the alert/approval item and highlights it. Notifications-only; no scheduler/paper/Alpaca/SMS/live changes; real delivery stays dry-run by default. Not committed pending human approval.
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/static/sw.js
+- alpha_lab/static/app.js
+- alpha_lab/static/styles.css
+- alpha_lab/static/index.html
+- alpha_lab/tests/test_notifications.py
+- docs/NOTIFICATIONS_PUSH_POLICY.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests -q
+- node --check alpha_lab/static/app.js
+- .venv/bin/python -m pytest alpha_lab/tests/test_notifications.py -q
+
+### Results
+- _click_url deep-links APPROVAL_REQUIRED/RISK_KILL to /#approvals/<trade_id> (or /#approvals when no trade), others to /#alerts/<id>; _deliver_push payload adds related_trade_id+source
+- CACHE alphalab-v12, SHELL v=46; notification data carries url/alert_id/related_trade_id/level/source; notificationclick navigates AND postMessages routing metadata before focus
+- added pendingFocus, routeFocusId, setRoute deep-link parsing, applyPendingFocus highlight, SW message listener, bootstrap hash parse; JS syntax OK
+- added .notif-focus pulse highlight + @keyframes notif-focus-pulse
+- styles.css/app.js refs bumped v=45 to v=46
+- 6 new tests for click-url routing + payload metadata + sw.js text assertions; 66 passed (notifications), 361 passed (full suite)
+- added Actionable routing section documenting deep-link destinations, delivery path, and the approval-card highlight limitation
+
+### Risks / Blockers
+- Approval alerts emit related_trade_id=None so /#approvals/<trade_id> deep-link is unexercised in prod; approval cards render data-idea-id not data-trade-id, so card-level highlight would not match until markers reconciled. Alert-detail highlight works. SW cache bump to v12 requires clients to update SW to pick up new routing.
+
+### Next Recommended Task
+Get human approval to commit; on next deploy verify the iPhone receives a URGENT_IDEA push and tapping opens /#alerts/<id> with the card highlighted (supervised, dry-run revert per runbook).
+
+
+## 2026-06-22 16:40 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Reconciled the approval-card highlight marker mismatch in notification deep-link routing. Root cause: approval-queue cards are keyed by idea_id (un-traded idea), but an alert's only structured id is related_trade_id (a trades FK that exists only after placement) — different id spaces that never coincide on the approvals page. Fix: applyPendingFocus now selects the real .approval-card[data-idea-id] marker (stale data-trade-id removed), and _click_url routes sign-off alerts to /#approvals (the queue) instead of the never-matchable /#approvals/<trade_id>. Notifications/UI only; no scheduler/trading/Alpaca/SMS/DB/.env changes. Not committed pending approval.
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/static/app.js
+- alpha_lab/static/index.html
+- alpha_lab/static/sw.js
+- alpha_lab/tests/test_notifications.py
+- docs/NOTIFICATIONS_PUSH_POLICY.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests -q
+- node --check alpha_lab/static/app.js
+- node --check alpha_lab/static/sw.js
+
+### Results
+- _click_url: APPROVAL_REQUIRED/RISK_KILL -> /#approvals (dropped trade-id deep-link that could never match an idea-keyed approval card); other levels unchanged (/#alerts/<id>); related_trade_id retained as informational payload metadata
+- applyPendingFocus approvals selector changed from [data-trade-id] to .approval-card[data-idea-id]; data-trade-id no longer appears anywhere in app.js; JS syntax OK
+- app.js asset ref bumped v=46 to v=47 so PWA clients fetch the updated app.js
+- CACHE alphalab-v12 to v13 and SHELL app.js?v=47 so the service worker re-precaches the new app.js; JS syntax OK
+- replaced trade-id deep-link test with test_click_url_signoff_alerts_never_deep_link_by_trade_id; added test_app_js_approval_highlight_targets_idea_id_marker; 67 notification tests pass, 362 full suite pass
+- updated Actionable routing section: corrected destination table, documented the id-space rationale, and noted the future idea_id-deep-link option (needs a DB change, out of scope)
+
+### Risks / Blockers
+- Approval notifications still land on the queue (no card-level highlight) by design — deep-linking a sign-off alert to its exact card would require carrying idea_id on the alert (a new column / DB migration), which is out of scope and unapproved. Clients must update the service worker (v13) + fetch app.js?v=47 to pick up the selector fix.
+
+### Next Recommended Task
+Get human approval to commit. If a per-card approval deep-link is desired later, add related_idea_id to alerts (DB migration, requires approval) and emit /#approvals/<idea_id> from _click_url — frontend selector already targets data-idea-id.
