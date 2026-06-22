@@ -1107,3 +1107,32 @@ Fixed real Web Push send failing with results.pwa_push.error=ValueError. Root ca
 
 ### Next Recommended Task
 With approval: commit+push, deploy main to old Mac, restart dashboard, then perform one supervised real push test (temporarily ALERT_DELIVERY_DRY_RUN=false + force_dry_run=false) to confirm a notification lands on the iPhone, then revert to dry-run.
+
+
+## 2026-06-22 11:11 PT — Claude
+
+Branch: main
+Commit: 7d1e66b
+Working Tree: clean
+
+### Summary
+Committed+pushed (7d1e66b) and deployed the legacy-hex VAPID private-key normalization fix to the old Mac. Preflight passed (local 7d1e66b ahead of remote ca6a56d, both clean, safe stabilization true); deploy advanced server ca6a56d -> 7d1e66b, restarted dashboard+scheduler, all hard checks passed (heartbeat mode dry_run). Verified against the server's REAL keys (shapes only, no values printed): VAPID_PUBLIC_KEY=130-char hex (65-byte P-256 point), VAPID_PRIVATE_KEY=64-char hex (32-byte raw scalar) — the legacy form the fix handles. With .env loaded, WebPushClient.is_configured=True and py_vapid from_string parses the normalized private key successfully (private_key_parses=True). Keypair is valid hex, NOT mismatched; no regeneration needed. No real send performed; delivery remains dry-run gated.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- git push origin main
+- ./ops deploy-preflight && ./ops deploy --yes
+- read-only ssh: load server .env, inspect VAPID key shapes + WebPushClient parse
+
+### Results
+- 6494eb2..7d1e66b pushed
+- preflight passed; deploy ca6a56d -> 7d1e66b; all hard checks passed; dashboard listening 127.0.0.1:8787; heartbeat mode dry_run; same-DB proof OK
+- public=130hex/65B point, private=64hex/32B scalar; is_configured=True; private_key_parses=True (fix works on real keys)
+
+### Risks / Blockers
+- Real (non-dry-run) push has still not been exercised end-to-end on the iPhone; that requires a deliberate supervised flip of ALERT_DELIVERY_DRY_RUN=false + force_dry_run=false for one test (operator/.env change, needs explicit approval), then revert. No trading-safety settings changed.
+
+### Next Recommended Task
+With explicit approval: run one supervised real push test to confirm a notification lands on the iPhone (temporarily disable dry-run for the single /api/notifications/test call), verify audit shows status=sent sent=1, then revert ALERT_DELIVERY_DRY_RUN to dry-run.
