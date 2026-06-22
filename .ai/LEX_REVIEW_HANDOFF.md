@@ -1259,3 +1259,36 @@ Applied the safe-push policy to the live old-Mac box: set notification preferenc
 
 ### Next Recommended Task
 With approval, commit the push-policy code+docs+tests (notifications.py, database.py, tests, docs/NOTIFICATIONS_PUSH_POLICY.md). Production preference fix is already live.
+
+
+## 2026-06-22 16:00 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: clean
+
+### Summary
+Ran ONE supervised real PWA push test validating the safe-push policy on the old-Mac server. With push_min_level=URGENT_IDEA live, temporarily enabled real delivery, sent a single URGENT_IDEA alert (force_dry_run=false), confirmed real push delivered, then immediately reverted .env and restarted. Policy floor confirmed working end-to-end. Scheduler/paper-trading untouched.
+
+### Files Modified
+- server ~/AlphaLab/.env (temporary, reverted; backup made+removed)
+
+### Commands / Tests Run
+- python3 in-place .env edit: 3 keys set then reverted (values not printed)
+- ./ops restart --yes (x2)
+- POST /api/notifications/test {level:URGENT_IDEA,force_dry_run:false} (Bearer token, not printed)
+- pre-test GET /api/notifications/preferences
+- ./ops safety-status (before + after)
+
+### Results
+- During test: ALERT_DELIVERY_DRY_RUN=false, ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true, ALERT_SMS_ENABLED=false. After: reverted to true/false/false; backup .env.bak.realtest removed.
+- dashboard+scheduler running both times; health http=200.
+- dry_run=false; results.pwa_push={delivered:true,sent:1,error:null}; channels_sent=[pwa_push]; decision push=true('eligible') sms=false. Real push at policy floor confirmed delivered.
+- Confirmed pwa_push_enabled=true, push_min_level=URGENT_IDEA, sms_enabled=false before testing.
+- Unchanged: scheduler dry_run; automation paper trading armed=false; scheduler paper jobs enabled=false; safe stabilization mode=true.
+
+### Risks / Blockers
+- Real notification path briefly live for a single URGENT_IDEA push. Window closed: .env reverted, services restarted, dry-run restored, opt-in off, backup removed. No scheduler/paper/Alpaca/SMS/Twilio changes.
+
+### Next Recommended Task
+Safe-push policy validated end-to-end at the URGENT_IDEA floor; no further action required.
