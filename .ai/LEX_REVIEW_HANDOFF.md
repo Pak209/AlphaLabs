@@ -994,3 +994,88 @@ Fixed iPhone PWA push 'applicationServerKey must contain a valid P-256 public ke
 
 ### Next Recommended Task
 With approval: deploy main to old Mac, restart dashboard, then re-run on-device dry-run subscribe to confirm subscription saved and audit shows dry_run/not-sent.
+
+
+## 2026-06-21 22:59 PT — Claude
+
+Branch: main
+Commit: ca6a56d
+Working Tree: clean
+
+### Summary
+Deployed main (ca6a56d, VAPID base64url normalization fix) to old Mac via ./ops deploy. Preflight passed (local ahead of remote, both clean, safe stabilization true). Deploy advanced server 12570c8 -> ca6a56d, restarted dashboard+scheduler. Verified /api/notifications/vapid-public-key now returns a normalized base64url key that decodes to a valid 65-byte uncompressed P-256 point (0x04 prefix, len 87) instead of legacy hex. No trading-safety settings changed.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ./ops safety-status
+- ./ops deploy-preflight
+- ./ops deploy --yes
+- read-only ssh: curl /api/notifications/vapid-public-key
+
+### Results
+- mode=dry_run, automation paper guard disarmed, safe stabilization=true (unchanged)
+- passed: local ca6a56d / remote 12570c8, both clean, safe mode true
+- commit 12570c8 -> ca6a56d; all hard checks passed; dashboard listening 127.0.0.1:8787; scheduler 18 jobs; heartbeat mode dry_run; same-DB proof OK
+- present=True, urlsafe_no_pad=True, decodes_to_valid_p256_point=True, len=87 (no longer hex)
+
+### Risks / Blockers
+- On-device iPhone push still requires active Tailscale Serve HTTPS (no serve mapping last checked). If server VAPID public/private are a mismatched pair (not just encoding), re-subscribe would still fail and a keypair regen would be needed (operator/.env change, needs approval).
+
+### Next Recommended Task
+With approval: enable tailscale serve on old Mac, then run supervised on-device PWA dry-run subscribe + /api/notifications/test; confirm subscription saved and audit shows dry_run/not-sent.
+
+
+## 2026-06-21 23:02 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Confirmed Tailscale Serve HTTPS already active on old Mac (prior 'no serve mapping' was a false negative: the tailscale binary is not on the non-interactive SSH PATH, lives at /Applications/Tailscale.app/Contents/MacOS/Tailscale). Serve maps https://daniels-macbook-pro-2.<tailnet>.ts.net/ -> http://127.0.0.1:8787. Verified over tailnet HTTPS: /api/health 200 and /api/notifications/vapid-public-key returns a valid base64url 65-byte P-256 point (len 87). iPhone (iphone-14-pro) is on the same tailnet. No infra changes were needed; nothing enabled/modified. No trading-safety settings touched.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- read-only ssh: locate tailscale binary + serve status
+- read-only ssh: curl tailnet HTTPS /api/health and /api/notifications/vapid-public-key
+
+### Results
+- binary at /Applications/Tailscale.app/...; serve already mapping / -> 127.0.0.1:8787; tailnet-only HTTPS URL active; iphone-14-pro present on tailnet
+- health 200; vapid key present, urlsafe_no_pad=True, valid_p256_point=True, len=87
+
+### Risks / Blockers
+- If on-device re-subscribe still errors after this, the server VAPID public/private may be a mismatched pair (not just encoding); that would need a keypair regen into .env (operator/.env change, needs approval). Real push delivery remains dry-run (ALERT_DELIVERY_DRY_RUN safe default).
+
+### Next Recommended Task
+Operator: on iPhone open the tailnet HTTPS URL in Safari, Add to Home Screen, open the installed PWA, Settings -> Notifications -> enable push, Allow the iOS prompt, then Send test alert; verify subscription saved + audit shows dry_run/not-sent.
+
+
+## 2026-06-21 23:22 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+On-device iPhone PWA push subscription verified end-to-end in dry-run-safe mode. After deploying the VAPID base64url normalization fix (ca6a56d) and confirming Tailscale Serve HTTPS, the operator installed the PWA on iPhone (iOS 18_7) over the tailnet HTTPS URL, enabled push, and ran a dry-run test alert. NO P-256 error this time (the fix worked). Server-side verification confirmed: push_subscriptions row stored (iPhone UA), test WATCH alert created (source=test-mode), and notification_audit shows channel=pwa_push status=dry_run dry_run=1 (logged, nothing actually sent). SMS channel left disabled. Delivery remains dry-run (ALERT_DELIVERY_DRY_RUN safe default); no real push sent. No trading-safety settings changed.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- read-only ssh: query push_subscriptions / alerts / notification_audit on server DB
+- ./ops safety-status (earlier this session)
+
+### Results
+- push_subscriptions_count=1 (iPhone OS 18_7, created 2026-06-22 06:16:30); latest test alert id=3 WATCH source=test-mode unread; recent audit rows all pwa_push status=dry_run dry_run=1 — logged not sent
+- mode=dry_run, automation paper guard disarmed, safe stabilization=true (unchanged)
+
+### Risks / Blockers
+- Operator left the documented example number +15555550123 in the SMS field, but SMS channel is disabled so nothing routes there. 3 leftover test WATCH alerts (ids 1-3) are unread on the dashboard; clear from Alerts page if undesired. A real (non-dry-run) push has NOT been validated; that requires a deliberate supervised flip of ALERT_DELIVERY_DRY_RUN=false for the test (operator/.env change, needs explicit approval).
+
+### Next Recommended Task
+Optional, with explicit approval: perform one supervised real push send (temporarily ALERT_DELIVERY_DRY_RUN=false + force_dry_run=false on /api/notifications/test) to confirm an actual notification lands on the iPhone, then revert to dry-run. Otherwise, on-device PWA push setup is complete and safe.
