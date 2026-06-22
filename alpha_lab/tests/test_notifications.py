@@ -9,12 +9,15 @@ from alpha_lab.api import create_app
 from alpha_lab.database import connect, init_db
 from alpha_lab.notifications import (
     NotificationCenter,
+    WebPushClient,
     _apply_sms_fallback,
     _click_url,
+    _sanitize_push_error,
     clamp_limit,
     in_quiet_hours,
     level_at_least,
     normalize_level,
+    normalize_vapid_private_key,
     normalize_vapid_public_key,
     route_alert,
     sanitize_text,
@@ -85,6 +88,91 @@ def test_vapid_missing_input_returns_empty_safely():
     assert normalize_vapid_public_key("") == ""
     assert normalize_vapid_public_key("   ") == ""
     assert normalize_vapid_public_key(None) == ""
+
+
+# ---- VAPID private-key normalization (legacy hex -> base64url raw scalar) -----
+def test_vapid_private_hex_is_converted_to_raw_base64url():
+    scalar = bytes(range(1, 33))  # 32-byte private scalar
+    hex_key = scalar.hex()  # 64 chars, the legacy hex form
+    assert len(hex_key) == 64
+    out = normalize_vapid_private_key(hex_key)
+    # Must decode to exactly 32 bytes — the form py_vapid's from_string treats as raw.
+    padded = out + "=" * (-len(out) % 4)
+    decoded = _base64.urlsafe_b64decode(padded)
+    assert decoded == scalar and len(decoded) == 32
+    assert "=" not in out and "+" not in out and "/" not in out
+
+
+def test_vapid_private_hex_key_is_parseable_by_py_vapid():
+    # The actual failure was py_vapid raising ValueError on a 64-char hex key.
+    # After normalization the raw-key path must succeed.
+    py_vapid = pytest.importorskip("py_vapid")
+    scalar = bytes(range(1, 33))
+    out = normalize_vapid_private_key(scalar.hex())
+    # from_string base64url-decodes and uses from_raw when len==32; must not raise.
+    py_vapid.Vapid01.from_string(out)
+
+
+def test_vapid_private_pem_is_passed_through_untouched():
+    pem = "-----BEGIN PRIVATE KEY-----\nMIGHAgEA\n-----END PRIVATE KEY-----"
+    assert normalize_vapid_private_key(pem) == pem
+
+
+def test_vapid_private_base64_is_normalized_urlsafe():
+    raw = bytes(32)
+    std = _base64.b64encode(raw).decode()
+    out = normalize_vapid_private_key(std)
+    assert "+" not in out and "/" not in out and "=" not in out
+
+
+def test_vapid_private_missing_returns_empty_safely():
+    assert normalize_vapid_private_key("") == ""
+    assert normalize_vapid_private_key("   ") == ""
+    assert normalize_vapid_private_key(None) == ""
+
+
+def test_webpush_client_accepts_hex_private_key_without_format_failure(monkeypatch):
+    # A client built from a legacy hex private key must store a parseable raw key
+    # and report itself configured (given pywebpush present) — i.e. the key-format
+    # problem is resolved before any network send is attempted.
+    pytest.importorskip("pywebpush")
+    scalar = bytes(range(1, 33))
+    point = b"\x04" + bytes(range(64))
+    client = WebPushClient(
+        public_key=point.hex(),
+        private_key=scalar.hex(),
+        subject="mailto:alerts@alphalab.local",
+    )
+    # Stored private key is the normalized 32-byte raw form, not the raw hex.
+    stored = client._private_key
+    padded = stored + "=" * (-len(stored) % 4)
+    assert _base64.urlsafe_b64decode(padded) == scalar
+    assert client.is_configured is True
+
+
+def test_sanitize_push_error_strips_endpoint_and_caps():
+    msg = "WebPushException: failed for https://fcm.googleapis.com/fcm/send/abc123TOKEN"
+    out = _sanitize_push_error(msg)
+    assert "https://" not in out and "abc123TOKEN" not in out
+    assert "[endpoint]" in out
+
+
+def test_send_returns_sanitized_detail_without_endpoint(monkeypatch):
+    # Force the webpush call to raise with an endpoint-bearing message; the
+    # returned detail must be scrubbed and must not contain the URL/token.
+    pytest.importorskip("pywebpush")
+    scalar = bytes(range(1, 33))
+    point = b"\x04" + bytes(range(64))
+    client = WebPushClient(point.hex(), scalar.hex(), "mailto:a@b.c")
+
+    def boom(*a, **k):
+        raise ValueError("boom at https://fcm.googleapis.com/fcm/send/SECRETTOKEN")
+
+    monkeypatch.setattr(client, "_webpush", boom)
+    res = client.send({"endpoint": "https://x/y", "p256dh": "p", "auth": "a"}, {"t": 1})
+    assert res["ok"] is False
+    assert res["error"] == "ValueError"
+    assert "https://" not in res["detail"] and "SECRETTOKEN" not in res["detail"]
 
 
 def test_level_at_least_ordering():
@@ -495,6 +583,23 @@ def test_vapid_endpoint_returns_empty_when_unconfigured(tmp_path: Path, monkeypa
     resp = client.get("/api/notifications/vapid-public-key")
     assert resp.status_code == 200
     assert resp.json()["public_key"] == ""
+
+
+def test_vapid_route_never_exposes_private_key(tmp_path: Path, monkeypatch):
+    # With BOTH keys configured, no public route may echo the private key in any form.
+    secret_hex = bytes(range(1, 33)).hex()  # legacy 64-char hex private key
+    secret_b64 = _base64.urlsafe_b64encode(bytes(range(1, 33))).decode().rstrip("=")
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", (b"\x04" + bytes(range(64))).hex())
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", secret_hex)
+    client = _client(tmp_path)
+    for path in (
+        "/api/notifications/vapid-public-key",
+        "/api/notifications/preferences",
+        "/api/notifications/audit",
+    ):
+        body = client.get(path).text
+        assert secret_hex not in body
+        assert secret_b64 not in body
 
 
 def test_test_endpoint_is_dry_run_by_default(tmp_path: Path, monkeypatch):

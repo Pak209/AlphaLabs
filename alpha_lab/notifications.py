@@ -318,6 +318,56 @@ def public_vapid_key() -> str:
     return normalize_vapid_public_key(os.getenv("VAPID_PUBLIC_KEY", ""))
 
 
+def normalize_vapid_private_key(raw: str) -> str:
+    """Return a VAPID private key in a form py_vapid/pywebpush can parse, or "".
+
+    py_vapid's ``from_string`` base64url-decodes the value and treats it as a raw
+    32-octet private scalar only when the decoded length is exactly 32 (otherwise
+    it tries DER). A key stored as **legacy 64-char hex** decodes to 48 bytes, so
+    it falls through to DER parsing and raises ``ValueError`` — exactly the real
+    send failure observed. Three stored forms are accepted:
+
+      * PEM (``-----BEGIN``) — returned untouched; parsed directly by py_vapid.
+      * Legacy hex (64 hex chars = 32 raw bytes) — converted to base64url so the
+        raw-key path is taken.
+      * Base64 / base64url (raw or DER) — normalized to unpadded URL-safe.
+
+    This NEVER returns or logs the key elsewhere; the value flows only to the
+    in-process pywebpush call. Callers must not print the result.
+    """
+    key = (raw or "").strip()
+    if not key:
+        return ""
+    # PEM is parsed as-is (it has its own framing and internal newlines).
+    if "-----BEGIN" in key:
+        return key
+    # Legacy raw hex: 32 octets == 64 hex chars. The length + hex alphabet pin it
+    # unambiguously (a base64url 32-byte key is 43 chars), so a real base64 key is
+    # never misclassified as hex.
+    if len(key) == 64 and all(c in _HEX_DIGITS for c in key):
+        try:
+            data = bytes.fromhex(key)
+        except ValueError:
+            data = b""
+        if len(data) == 32:
+            return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+        # Not a 32-byte scalar; fall through and serve normalized as-is.
+    # Standard base64 -> URL-safe; drop padding (py_vapid re-pads on decode).
+    return key.replace("+", "-").replace("/", "_").rstrip("=")
+
+
+# Strip endpoint URLs (which carry per-subscription push tokens) from any error
+# text before it is stored/returned.
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _sanitize_push_error(message: Any) -> str:
+    """Make a push exception safe to persist: drop endpoint URLs/tokens, redact
+    secret-like substrings, and cap length. Never includes key material."""
+    text = _URL_RE.sub("[endpoint]", str(message or ""))
+    return sanitize_text(text, max_length=200)
+
+
 class WebPushClient:
     """Web Push (VAPID) sender backed by the optional ``pywebpush`` package.
 
@@ -329,7 +379,10 @@ class WebPushClient:
 
     def __init__(self, public_key: str, private_key: str, subject: str):
         self._public_key = public_key
-        self._private_key = private_key
+        # Normalize the private key (e.g. legacy 64-char hex -> base64url) so the
+        # raw-key path py_vapid expects is taken; without this a hex key reaches
+        # pywebpush in an unsupported format and the send fails with ValueError.
+        self._private_key = normalize_vapid_private_key(private_key)
         self._subject = subject or "mailto:alerts@alphalab.local"
         try:  # Optional dependency; absence is a soft, expected condition.
             from pywebpush import webpush, WebPushException  # type: ignore
@@ -378,7 +431,12 @@ class WebPushClient:
         except Exception as exc:  # pragma: no cover - network/library dependent
             name = type(exc).__name__
             status = getattr(getattr(exc, "response", None), "status_code", None)
-            return {"ok": False, "error": name, "status_code": status}
+            # Capture the first line of the message, scrubbed of endpoint URLs (which
+            # carry per-subscription tokens) and any secret-like substrings, so the
+            # audit row is diagnosable without leaking the key or subscription.
+            first_line = str(exc).splitlines()[0] if str(exc) else ""
+            detail = _sanitize_push_error(f"{name}: {first_line}" if first_line else name)
+            return {"ok": False, "error": name, "detail": detail, "status_code": status}
 
 
 class NotificationCenter:
@@ -716,12 +774,17 @@ class NotificationCenter:
             if result.get("ok"):
                 sent += 1
             else:
-                errors.append(str(result.get("error")))
+                # Prefer the sanitized first-line detail (no secrets/endpoints) for
+                # diagnosis; fall back to the bare exception class name.
+                errors.append(str(result.get("detail") or result.get("error")))
                 # A 404/410 means the browser dropped the subscription; prune it.
                 if result.get("status_code") in (404, 410):
                     self.remove_subscription(sub["endpoint"])
         status = "sent" if sent else "error"
-        self._audit(alert["id"], CHANNEL_PUSH, status, f"sent={sent} errors={len(errors)}", dry_run=False)
+        detail = f"sent={sent} errors={len(errors)}"
+        if errors and not sent:
+            detail = f"{detail}: {'; '.join(errors[:3])}"
+        self._audit(alert["id"], CHANNEL_PUSH, status, detail, dry_run=False)
         return {"delivered": sent > 0, "sent": sent, "error": "; ".join(errors[:3]) if errors and not sent else None}
 
     def _deliver_sms(self, alert: dict[str, Any], prefs: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:

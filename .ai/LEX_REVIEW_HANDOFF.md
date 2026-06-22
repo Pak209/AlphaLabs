@@ -1079,3 +1079,31 @@ On-device iPhone PWA push subscription verified end-to-end in dry-run-safe mode.
 
 ### Next Recommended Task
 Optional, with explicit approval: perform one supervised real push send (temporarily ALERT_DELIVERY_DRY_RUN=false + force_dry_run=false on /api/notifications/test) to confirm an actual notification lands on the iPhone, then revert to dry-run. Otherwise, on-device PWA push setup is complete and safe.
+
+
+## 2026-06-22 00:26 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Fixed real Web Push send failing with results.pwa_push.error=ValueError. Root cause: VAPID_PRIVATE_KEY stored as legacy 64-char hex; py_vapid's from_string base64url-decodes and only takes the raw-key path when the decoded length is 32, but a 64-char hex string decodes to 48 bytes -> falls through to DER parsing -> ValueError. Added normalize_vapid_private_key(): converts legacy 64-char hex -> base64url of the raw 32-byte scalar; passes PEM through untouched; normalizes base64/base64url to unpadded url-safe. WebPushClient.__init__ now normalizes the private key before use. Also added _sanitize_push_error() to strip endpoint URLs (per-subscription push tokens) and secret-like substrings from push exception messages before they are stored in notification_audit/returned; send() now returns a sanitized 'detail'. Private key is never printed/logged/exposed; verified no public route echoes it. No regeneration of the keypair required (key was only mis-encoded, not mismatched). No trading-safety behavior changed.
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/tests/test_notifications.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_notifications.py -q
+- local proof: py_vapid Vapid01.from_string on raw hex vs normalized
+
+### Results
+- 56 passed (9 new: hex->raw base64url conversion, py_vapid parseability, PEM passthrough, base64 url-safe, empty-safe, client accepts hex key & is_configured, sanitized push error strips endpoint, send() returns scrubbed detail, vapid routes never expose private key)
+- raw-hex from_string FAILS->ValueError (reproduces the reported error); normalized from_string OK
+
+### Risks / Blockers
+- Fix is code-only and NOT yet deployed; the live server still runs the prior build so real push will keep returning ValueError until main is deployed to the old Mac (needs approval). Real push delivery remains gated by ALERT_DELIVERY_DRY_RUN + ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS; no real send was performed in this task.
+
+### Next Recommended Task
+With approval: commit+push, deploy main to old Mac, restart dashboard, then perform one supervised real push test (temporarily ALERT_DELIVERY_DRY_RUN=false + force_dry_run=false) to confirm a notification lands on the iPhone, then revert to dry-run.
