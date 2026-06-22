@@ -1168,3 +1168,34 @@ Diagnosed CodexPro 502/530 upstream and restored service. Root cause: cloudflare
 
 ### Next Recommended Task
 Rotate MCP token and switch launcher to read token without exposing it in ps; document that CodexPro/tunnel live on the dev Mac.
+
+
+## 2026-06-22 15:10 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: clean
+
+### Summary
+Ran ONE supervised real PWA push test over Tailscale/SSH against the old-Mac server. Temporarily set ALERT_DELIVERY_DRY_RUN=false + ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true (SMS kept false), restarted services, sent a single WATCH alert with force_dry_run=false, then immediately reverted .env and restarted. Real push delivered to the iPhone PWA. Scheduler/paper-trading untouched throughout.
+
+### Files Modified
+- server ~/AlphaLab/.env (temporary, reverted; backup made+removed)
+
+### Commands / Tests Run
+- python3 in-place .env edit: 3 keys set then reverted (values not printed)
+- ./ops restart --yes (x2: after set, after revert)
+- POST /api/notifications/test {level:WATCH,force_dry_run:false} on 127.0.0.1:8787 (Bearer token, not printed)
+- ./ops safety-status (before + after)
+
+### Results
+- Pre: dry-run on. During test: ALERT_DELIVERY_DRY_RUN=false, ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true, ALERT_SMS_ENABLED=false. After: reverted to true/false/false; backup .env.bak.realtest removed.
+- dashboard+scheduler kickstarted and running both times; health http=200.
+- dry_run=false; results.pwa_push={delivered:true,sent:1,error:null}; channels_sent=[pwa_push]; decision push=true sms=false ('sms disabled in preferences'). Real push confirmed delivered.
+- Unchanged: ALPHALAB_SCHEDULER_MODE=dry_run; automation paper trading armed=false; scheduler paper jobs enabled=false; safe stabilization mode=true.
+
+### Risks / Blockers
+- Real notification delivery path was briefly live (single WATCH push). Window closed: .env reverted, services restarted, dry-run restored, opt-in flag off, backup removed. No scheduler/paper-trade/Alpaca/Twilio/SMS changes.
+
+### Next Recommended Task
+PWA push verified end-to-end; no further action required. If desired, await operator confirmation the notification appeared on the iPhone.
