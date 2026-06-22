@@ -1199,3 +1199,63 @@ Ran ONE supervised real PWA push test over Tailscale/SSH against the old-Mac ser
 
 ### Next Recommended Task
 PWA push verified end-to-end; no further action required. If desired, await operator confirmation the notification appeared on the iPhone.
+
+
+## 2026-06-22 15:40 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Created a safe production PWA push policy: real push reserved for URGENT_IDEA/APPROVAL_REQUIRED/RISK_KILL; INFO/WATCH never push. Encoded as code (PRODUCTION_PUSH_MIN_LEVEL=URGENT_IDEA, fail-safe routing default, schema default push_min_level=URGENT_IDEA), added tests, and wrote a runbook. No runtime/scheduler/.env changes; dry-run and SMS-off preserved. Uncommitted pending approval.
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/database.py
+- alpha_lab/tests/test_notifications.py
+- docs/NOTIFICATIONS_PUSH_POLICY.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest -q
+- read-only GET /api/notifications/preferences on server
+
+### Results
+- Added PRODUCTION_PUSH_MIN_LEVEL/PUSH_ELIGIBLE_LEVELS; route_alert now fails safe to the policy floor when push_min_level missing.
+- notification_preferences.push_min_level schema default changed INFO -> URGENT_IDEA (new installs safe-by-default; existing rows unchanged).
+- Added 4 policy tests; full suite 375 passed.
+- New runbook: allowed levels, one supervised real-push test, revert-to-dry-run, never-change list, and existing-box push_min_level fix.
+- FINDING: prod has pwa_push_enabled=true AND push_min_level=INFO -> if dry-run were ever disabled, INFO/WATCH would push (spam). Safe now only because ALERT_DELIVERY_DRY_RUN=true.
+
+### Risks / Blockers
+- Existing prod prefs row still has push_min_level=INFO; schema default does not backfill it. Policy not enforced on prod until operator sets push_min_level=URGENT_IDEA (documented; NOT applied, awaiting approval).
+
+### Next Recommended Task
+With approval: set prod push_min_level=URGENT_IDEA via preferences API (strictly safety-increasing), then commit the policy code+docs+tests.
+
+
+## 2026-06-22 15:44 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Applied the safe-push policy to the live old-Mac box: set notification preference push_min_level=URGENT_IDEA via the token-protected preferences API. Now INFO/WATCH cannot push even if real delivery is later enabled. No .env, dry-run, scheduler, paper-trading, Alpaca, SMS, or Twilio changes.
+
+### Files Modified
+- server notification_preferences row (push_min_level, via API)
+
+### Commands / Tests Run
+- POST /api/notifications/preferences {push_min_level:URGENT_IDEA} (Bearer token, not printed)
+- ./ops safety-status
+
+### Results
+- http=200; GET preferences now shows pwa_push_enabled=true, push_min_level=URGENT_IDEA, sms_enabled=false.
+- Unchanged: scheduler dry_run; automation paper trading armed=false; scheduler paper jobs enabled=false; safe stabilization mode=true.
+
+### Risks / Blockers
+- None new. Real delivery still gated by ALERT_DELIVERY_DRY_RUN=true and the per-run opt-in; this change only narrows which levels could ever push.
+
+### Next Recommended Task
+With approval, commit the push-policy code+docs+tests (notifications.py, database.py, tests, docs/NOTIFICATIONS_PUSH_POLICY.md). Production preference fix is already live.

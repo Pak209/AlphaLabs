@@ -42,6 +42,16 @@ LEVEL_ORDER = {name: index for index, name in enumerate(ALERT_LEVELS)}
 # user who set quiet hours still needs them (a trade needs sign-off; risk tripped).
 QUIET_HOURS_BYPASS_LEVELS = {"APPROVAL_REQUIRED", "RISK_KILL"}
 
+# Safe production PWA push policy. Real pushes are reserved for important,
+# actionable alerts — URGENT_IDEA and above (URGENT_IDEA, APPROVAL_REQUIRED,
+# RISK_KILL). INFO and WATCH never push by default, so the phone is not spammed.
+# This is the floor used as the routing default; the operator can raise it per
+# preferences but the system fails safe to this level when none is stored.
+PRODUCTION_PUSH_MIN_LEVEL = "URGENT_IDEA"
+PUSH_ELIGIBLE_LEVELS = frozenset(
+    name for name in ALERT_LEVELS if LEVEL_ORDER[name] >= LEVEL_ORDER[PRODUCTION_PUSH_MIN_LEVEL]
+)
+
 # Env values that read as "off"/false for boolean flags.
 FALSE_ENV_VALUES = {"", "0", "false", "no", "off"}
 
@@ -140,7 +150,7 @@ def route_alert(level: Any, prefs: dict[str, Any], now: Optional[datetime] = Non
     quiet_blocks = quiet and not bypass
 
     push_enabled = bool(prefs.get("pwa_push_enabled"))
-    push_min = normalize_level(prefs.get("push_min_level") or "INFO")
+    push_min = normalize_level(prefs.get("push_min_level") or PRODUCTION_PUSH_MIN_LEVEL)
     push = push_enabled and level_at_least(norm_level, push_min)
     if not push_enabled:
         reasons["push"] = "push disabled in preferences"

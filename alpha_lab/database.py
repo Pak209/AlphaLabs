@@ -578,7 +578,10 @@ CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
 CREATE TABLE IF NOT EXISTS notification_preferences (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   pwa_push_enabled INTEGER NOT NULL DEFAULT 0,
-  push_min_level TEXT NOT NULL DEFAULT 'INFO',
+  -- Safe production push policy: only URGENT_IDEA and above push by default
+  -- (URGENT_IDEA, APPROVAL_REQUIRED, RISK_KILL). INFO/WATCH never push, so a
+  -- newly provisioned box cannot spam the phone even if push is later enabled.
+  push_min_level TEXT NOT NULL DEFAULT 'URGENT_IDEA',
   sms_enabled INTEGER NOT NULL DEFAULT 0,
   sms_phone_number TEXT NOT NULL DEFAULT '',
   sms_min_level TEXT NOT NULL DEFAULT 'APPROVAL_REQUIRED',

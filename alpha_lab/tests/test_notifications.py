@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from alpha_lab.api import create_app
 from alpha_lab.database import connect, init_db
 from alpha_lab.notifications import (
+    PRODUCTION_PUSH_MIN_LEVEL,
+    PUSH_ELIGIBLE_LEVELS,
     NotificationCenter,
     WebPushClient,
     _apply_sms_fallback,
@@ -210,6 +212,48 @@ def test_route_push_respects_min_level():
     prefs = base_prefs(pwa_push_enabled=True, push_min_level="URGENT_IDEA")
     assert route_alert("WATCH", prefs)["push"] is False
     assert route_alert("URGENT_IDEA", prefs)["push"] is True
+
+
+# ---- safe production push policy ---------------------------------------------
+def test_production_push_policy_eligible_levels():
+    # Policy: real push only for URGENT_IDEA, APPROVAL_REQUIRED, RISK_KILL.
+    assert PRODUCTION_PUSH_MIN_LEVEL == "URGENT_IDEA"
+    assert PUSH_ELIGIBLE_LEVELS == {"URGENT_IDEA", "APPROVAL_REQUIRED", "RISK_KILL"}
+    # INFO and WATCH are explicitly excluded so the phone is not spammed.
+    assert "INFO" not in PUSH_ELIGIBLE_LEVELS
+    assert "WATCH" not in PUSH_ELIGIBLE_LEVELS
+
+
+def test_route_alert_production_policy_pushes_only_important_levels():
+    # With push enabled at the production floor, only the three eligible levels
+    # push; INFO/WATCH never do.
+    prefs = base_prefs(pwa_push_enabled=True, push_min_level=PRODUCTION_PUSH_MIN_LEVEL)
+    assert route_alert("INFO", prefs)["push"] is False
+    assert route_alert("WATCH", prefs)["push"] is False
+    assert route_alert("URGENT_IDEA", prefs)["push"] is True
+    assert route_alert("APPROVAL_REQUIRED", prefs)["push"] is True
+    assert route_alert("RISK_KILL", prefs)["push"] is True
+
+
+def test_route_alert_fails_safe_to_policy_floor_when_min_level_missing():
+    # A prefs dict lacking push_min_level must default to the production floor,
+    # not to INFO — so a missing/blank value can never widen push coverage.
+    prefs = base_prefs(pwa_push_enabled=True)
+    prefs.pop("push_min_level", None)
+    assert route_alert("WATCH", prefs)["push"] is False
+    assert route_alert("URGENT_IDEA", prefs)["push"] is True
+
+
+def test_fresh_db_push_min_level_defaults_to_policy_floor(tmp_path: Path):
+    # A newly provisioned box is safe-by-default: the seeded preferences row has
+    # push_min_level at the production floor, so enabling push later cannot spam
+    # on INFO/WATCH.
+    nc = NotificationCenter(db_path=str(tmp_path / "fresh.sqlite3"))
+    with connect(nc.db_path) as conn:
+        stored = conn.execute(
+            "SELECT push_min_level FROM notification_preferences WHERE id = 1"
+        ).fetchone()[0]
+    assert stored == PRODUCTION_PUSH_MIN_LEVEL
 
 
 def test_route_sms_requires_number_and_min_level():
