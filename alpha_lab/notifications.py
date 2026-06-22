@@ -45,6 +45,9 @@ QUIET_HOURS_BYPASS_LEVELS = {"APPROVAL_REQUIRED", "RISK_KILL"}
 # Env values that read as "off"/false for boolean flags.
 FALSE_ENV_VALUES = {"", "0", "false", "no", "off"}
 
+# Hex alphabet used to detect a legacy hex-encoded VAPID public key.
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
 ALERT_STATUSES = {"unread", "read", "dismissed", "actioned"}
 
 # Channel identifiers used in channels_sent / notification_audit.
@@ -271,6 +274,48 @@ class TwilioSMSClient:
             return {"ok": False, "error": sanitize_text(message, max_length=200)}
         except (urllib.error.URLError, OSError, ValueError) as exc:
             return {"ok": False, "error": sanitize_text(str(exc).splitlines()[0], max_length=200)}
+
+
+def normalize_vapid_public_key(raw: str) -> str:
+    """Return a VAPID public key as unpadded URL-safe base64, or "" if unset.
+
+    The browser Push API requires ``applicationServerKey`` to be the raw,
+    uncompressed P-256 public point (65 bytes, ``0x04`` prefix) encoded as
+    URL-safe base64. Two stored forms are accepted and both are normalized:
+
+      * Standard or URL-safe base64 — normalized to unpadded URL-safe.
+      * Legacy hex (130 hex chars = 65 raw bytes) — converted to base64url.
+        A hex key served verbatim is misread by the browser as base64 and
+        rejected with "applicationServerKey must contain a valid P-256 public
+        key"; converting it here is exactly what prevents that failure.
+
+    This only ever touches the public key — the private key is never read here.
+    """
+    key = (raw or "").strip()
+    if not key:
+        return ""
+    # Legacy hex form: an uncompressed P-256 point is exactly 65 bytes -> 130
+    # hex chars. The length pins it unambiguously (a base64url 65-byte key is
+    # 87/88 chars), so a real base64 key is never misclassified as hex.
+    if len(key) == 130 and all(c in _HEX_DIGITS for c in key):
+        try:
+            data = bytes.fromhex(key)
+        except ValueError:
+            data = b""
+        if len(data) == 65 and data[0] == 0x04:
+            return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+        # Not a valid P-256 point; fall through and serve normalized as-is.
+    # Standard base64 -> URL-safe; drop padding (the browser re-pads itself).
+    return key.replace("+", "-").replace("/", "_").rstrip("=")
+
+
+def public_vapid_key() -> str:
+    """Env-backed VAPID public key, normalized to base64url.
+
+    Reads ``VAPID_PUBLIC_KEY`` only — never the private key — so it is safe to
+    expose to the browser via the public-key API route.
+    """
+    return normalize_vapid_public_key(os.getenv("VAPID_PUBLIC_KEY", ""))
 
 
 class WebPushClient:

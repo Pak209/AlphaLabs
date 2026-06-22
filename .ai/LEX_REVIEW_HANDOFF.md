@@ -906,3 +906,91 @@ Migration-hardening fix for the notification dedupe unique index. Before creatin
 
 ### Next Recommended Task
 Run the final Codex read-only audit, then commit the 12 notification files by name (excluding .ai-bridge/).
+
+
+## 2026-06-21 17:03 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: clean
+
+### Summary
+Deployed latest main (notification feature) to the old-Mac production runtime via ./ops deploy and refreshed dependencies. Server advanced 366597b -> 12570c8 (git pull --ff-only). pywebpush + VAPID stack installed on the server. Dashboard + scheduler kickstarted; post-deploy verifier passed all hard checks. Notification routes are live (preferences/alerts/vapid-public-key/audit -> 200; test -> 405 POST-only, not sent). Safety posture UNCHANGED before/after: scheduler mode=dry_run, automation paper-trade guard disarmed, safe_stabilization_mode=true. No .env, DB, logs, or launchd config touched; no real SMS/push enabled; no trading-mode change.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ./ops safety-status (before)
+- ./ops deploy --yes
+- ssh server: python -c import pywebpush
+- ssh server: curl loopback notification routes
+- .venv/bin/python -m pytest -q (dev Mac)
+
+### Results
+- mode=dry_run, automation_paper_trading_armed=false, safe_stabilization_mode=true
+- commit 366597b -> 12570c8; bootstrap pull+pip ok; dashboard+scheduler kickstarted; verify_old_mac_runtime.sh all hard checks passed (18 scheduler jobs, heartbeat fresh, /api/health 200, DB ideas=230 trades=32, loopback-only bind)
+- pywebpush ok on server
+- preferences/alerts/vapid-public-key/audit -> 200; /api/notifications/test -> 405 (registered, POST-only, no send)
+- 356 passed; test_notifications.py 41 passed; node --check app.js/sw.js OK
+
+### Risks / Blockers
+- Real delivery remains OFF by default (ALERT_DELIVERY_DRY_RUN true; ALERT_SMS_ENABLED/VAPID not enabled by this task). Flip only via a deliberate, supervised env change — not done here.
+- .ai-bridge/ remains untracked/ignored; not staged or committed.
+
+### Next Recommended Task
+Optional: supervised real-send test of one channel via ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS, only when an operator opts in. Otherwise no action; runner stays dry_run/disarmed.
+
+
+## 2026-06-21 18:23 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Audited real-device PWA push readiness in dry-run-safe mode. Verified code paths (SW registration, manifest standalone, vapid-public-key route, /api/notifications/test dry-run gate) and live server config. Found two unmet prerequisites for on-device push setup: VAPID_PUBLIC_KEY/PRIVATE_KEY missing from server .env, and Tailscale Serve HTTPS not currently active. SMS structurally disabled (all Twilio vars empty). Real-test gate off. Made no config changes.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ./ops safety-status
+- read-only ssh: .env key presence + tailscale serve status + pywebpush
+
+### Results
+- mode=dry_run, automation paper guard disarmed, safe stabilization=true (unchanged)
+- VAPID public/private MISSING; Twilio all empty; ALERT_DELIVERY_DRY_RUN/ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS unset (dry-run-safe defaults); pywebpush installed; no active tailscale serve mapping
+
+### Risks / Blockers
+- On-device push cannot be exercised until operator (a) generates a VAPID keypair into server .env and (b) enables Tailscale Serve HTTPS. Both require explicit human approval (.env/infra change). No real sends enabled.
+
+### Next Recommended Task
+With approval: generate VAPID keypair, add to server .env (keep ALERT_DELIVERY_DRY_RUN dry-run), enable tailscale serve, then run supervised on-device dry-run subscribe + /api/notifications/test.
+
+
+## 2026-06-21 22:47 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Fixed iPhone PWA push 'applicationServerKey must contain a valid P-256 public key'. Root cause: /api/notifications/vapid-public-key served VAPID_PUBLIC_KEY verbatim; when stored as legacy hex (130 chars = 65-byte uncompressed P-256 point) the browser misread it as base64url. Added normalize_vapid_public_key()/public_vapid_key() to convert legacy hex -> unpadded base64url and standard base64 -> url-safe; endpoint now returns normalized key. Private key never read/exposed by the public route. Frontend unchanged (already decodes base64url). No trading-safety behavior touched.
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/api.py
+- alpha_lab/tests/test_notifications.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_notifications.py -q
+
+### Results
+- 47 passed (incl. 6 new VAPID normalization/endpoint tests: hex->base64url, base64url passthrough, std-base64->url-safe, empty-safe, endpoint returns valid base64url when configured, empty when unconfigured)
+
+### Risks / Blockers
+- Server fix is code-only and not yet deployed; on-device push still requires deploy + active Tailscale Serve HTTPS. If server VAPID_PUBLIC_KEY/PRIVATE_KEY were generated as a mismatched pair (not just hex-vs-base64), re-subscribe would still fail and a keypair regen would be needed (operator/.env change, needs approval).
+
+### Next Recommended Task
+With approval: deploy main to old Mac, restart dashboard, then re-run on-device dry-run subscribe to confirm subscription saved and audit shows dry_run/not-sent.

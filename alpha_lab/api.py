@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .agent_status import build_agent_status
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .market_data import get_bitcoin_market, get_business_profiles, get_liquidity_flows, get_oil_market, get_trending_stocks
-from .notifications import ALERT_LEVELS, NotificationCenter, clamp_limit
+from .notifications import ALERT_LEVELS, NotificationCenter, clamp_limit, public_vapid_key
 from .scheduler import scheduler_safety_status
 from .service import AlphaLabService
 
@@ -467,8 +467,10 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
 
     @app.get("/api/notifications/vapid-public-key")
     def vapid_public_key() -> dict[str, Any]:
-        # Public key only; the private key never leaves the server.
-        return {"public_key": os.getenv("VAPID_PUBLIC_KEY", "").strip()}
+        # Public key only, normalized to the base64url form the browser Push API
+        # requires (accepts a legacy hex-stored key too). The private key never
+        # leaves the server.
+        return {"public_key": public_vapid_key()}
 
     @app.post("/api/notifications/subscribe")
     def subscribe_push(payload: dict[str, Any]) -> dict[str, Any]:

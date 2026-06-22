@@ -15,6 +15,7 @@ from alpha_lab.notifications import (
     in_quiet_hours,
     level_at_least,
     normalize_level,
+    normalize_vapid_public_key,
     route_alert,
     sanitize_text,
 )
@@ -41,6 +42,49 @@ def test_normalize_level_defaults_to_info():
     assert normalize_level("urgent_idea") == "URGENT_IDEA"
     assert normalize_level("nonsense") == "INFO"
     assert normalize_level(None) == "INFO"
+
+
+# ---- VAPID public-key normalization (P-256 / base64url) ---------------------
+import base64 as _base64
+
+
+def _sample_p256_point() -> bytes:
+    # A 65-byte uncompressed P-256 point: 0x04 prefix + 64 bytes (X||Y). The bytes
+    # need not be a real curve point for normalization/encoding shape testing.
+    return b"\x04" + bytes(range(64))
+
+
+def test_vapid_hex_input_is_converted_to_base64url():
+    point = _sample_p256_point()
+    hex_key = point.hex()  # 130 chars, the legacy hex form
+    assert len(hex_key) == 130
+    out = normalize_vapid_public_key(hex_key)
+    # Round-trips back to the same raw 65-byte point, and is URL-safe + unpadded.
+    assert out == _base64.urlsafe_b64encode(point).decode().rstrip("=")
+    assert "=" not in out and "+" not in out and "/" not in out
+    padded = out + "=" * (-len(out) % 4)
+    assert _base64.urlsafe_b64decode(padded) == point
+
+
+def test_vapid_base64url_input_is_passed_through_normalized():
+    point = _sample_p256_point()
+    b64 = _base64.urlsafe_b64encode(point).decode()  # padded url-safe
+    out = normalize_vapid_public_key(b64)
+    assert out == b64.rstrip("=")  # unpadded, unchanged otherwise
+
+
+def test_vapid_standard_base64_is_converted_to_urlsafe():
+    # A standard-base64 key (with +/) must be translated to URL-safe (-/_).
+    raw = bytes([0xFB, 0xFF, 0x04]) + bytes(62)
+    std = _base64.b64encode(raw).decode()
+    out = normalize_vapid_public_key(std)
+    assert "+" not in out and "/" not in out and "=" not in out
+
+
+def test_vapid_missing_input_returns_empty_safely():
+    assert normalize_vapid_public_key("") == ""
+    assert normalize_vapid_public_key("   ") == ""
+    assert normalize_vapid_public_key(None) == ""
 
 
 def test_level_at_least_ordering():
@@ -430,6 +474,27 @@ def _client(tmp_path: Path) -> TestClient:
         audit_log_path=str(tmp_path / "audit.jsonl"),
     )
     return TestClient(create_app(lab))
+
+
+def test_vapid_endpoint_returns_base64url_when_configured(tmp_path: Path, monkeypatch):
+    # Stored as legacy hex; the endpoint must serve a valid base64url key.
+    point = _sample_p256_point()
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", point.hex())
+    client = _client(tmp_path)
+    resp = client.get("/api/notifications/vapid-public-key")
+    assert resp.status_code == 200
+    key = resp.json()["public_key"]
+    assert key and "+" not in key and "/" not in key and "=" not in key
+    padded = key + "=" * (-len(key) % 4)
+    assert _base64.urlsafe_b64decode(padded) == point  # round-trips to the P-256 point
+
+
+def test_vapid_endpoint_returns_empty_when_unconfigured(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("VAPID_PUBLIC_KEY", raising=False)
+    client = _client(tmp_path)
+    resp = client.get("/api/notifications/vapid-public-key")
+    assert resp.status_code == 200
+    assert resp.json()["public_key"] == ""
 
 
 def test_test_endpoint_is_dry_run_by_default(tmp_path: Path, monkeypatch):
