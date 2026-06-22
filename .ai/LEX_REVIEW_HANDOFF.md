@@ -1136,3 +1136,35 @@ Committed+pushed (7d1e66b) and deployed the legacy-hex VAPID private-key normali
 
 ### Next Recommended Task
 With explicit approval: run one supervised real push test to confirm a notification lands on the iPhone (temporarily disable dry-run for the single /api/notifications/test call), verify audit shows status=sent sent=1, then revert ALERT_DELIVERY_DRY_RUN to dry-run.
+
+
+## 2026-06-22 12:15 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: clean
+
+### Summary
+Diagnosed CodexPro 502/530 upstream and restored service. Root cause: cloudflared named tunnel (codexpro-alphalab) was dead on the DEV Mac while CodexPro's local server kept running (4d uptime). NOT the old Mac, which is awake/healthy and never hosted CodexPro. Restarted CodexPro + tunnel on the dev Mac via repo scripts.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ssh danielkimoto@100.91.41.60 ./scripts/codexpro-status.sh (read-only)
+- lsof/pgrep/curl on dev Mac (read-only)
+- ./scripts/codexpro-stop.sh
+- CF_HOSTNAME=mcp.pak-labs.com nohup ./scripts/codexpro-cloudflare-stable.sh & (detached)
+
+### Results
+- Old Mac reachable, SSH OK, but no ~/.codexpro, no ~/.cloudflared, no cloudflared bin, no token -> CodexPro never ran there.
+- Pre-fix: 8799 listening (codexpro up 4d, local 401), cloudflared NOT running, public mcp.pak-labs.com=530.
+- Verified CLEAN (server + stale tunnels stopped).
+- Relaunched: 8799 listening (PID 40972), cloudflared named tunnel running (PID 40974), local /mcp=401, public /mcp=401 (was 530). 502 cleared.
+
+### Risks / Blockers
+- MCP token is exposed in ps process args (--token on command line); any local user can read it -- consider rotating and moving to token-file/env.
+- Architecture mismatch: CodexPro/cloudflared run on the DEV Mac, not the old Mac; runbooks/mental model assumed old Mac.
+
+### Next Recommended Task
+Rotate MCP token and switch launcher to read token without exposing it in ps; document that CodexPro/tunnel live on the dev Mac.
