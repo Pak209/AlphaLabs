@@ -1540,3 +1540,44 @@ Read-only audit of the approval workflow for mobile/PWA decision flow (post-push
 
 ### Next Recommended Task
 Get operator decision on optional small UI fixes: (a) render created_at freshness, (b) enlarge approval action tap targets toward 44px, (c) add confirm() to Reject. Notifications/UI only; no scheduler/trading/Alpaca/SMS/.env/DB changes.
+
+
+## 2026-06-23 00:02 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Implemented mobile/PWA approval-queue UI polish from the prior audit: card freshness/stale line from created_at, phone-sized (>=44px, full-width on narrow) approval tap targets, and confirm() on Reject/Expire. UI/UX only; no execution/approval-lifecycle/trading paths touched. Bumped asset+SW cache versions. Not deployed; not committed pending operator approval.
+
+### Files Modified
+- alpha_lab/static/app.js
+- alpha_lab/static/styles.css
+- alpha_lab/static/index.html
+- alpha_lab/static/sw.js
+- alpha_lab/tests/test_notifications.py
+
+### Commands / Tests Run
+- node --check app.js && node --check sw.js
+- .venv/bin/python -m pytest alpha_lab/tests/test_notifications.py -q
+- .venv/bin/python -m pytest -q
+- git diff --check
+
+### Results
+- Added approvalFreshness/timeAgo/minutesSince helpers; render 'Created <rel> · <abs>' with .stale flag >=120 min; approvalAction now confirms reject/expire (approve-only stays frictionless).
+- .approval-actions button min-height 44px + flex; full-width stack at <=520px; .approval-fresh/.stale styling.
+- styles.css?v=46->47, app.js?v=48->49.
+- CACHE alphalab-v14->v15 + SHELL asset refs bumped to match.
+- +3 assertion tests: freshness render, reject/expire confirm, CSS 44px/full-width tap targets.
+- Both OK.
+- 71 passed.
+- 388 passed (was 385, +3).
+- clean.
+
+### Risks / Blockers
+- Frontend-only; no server/DB/scheduler/trading change. Order path and approval-lifecycle fail-closed checks untouched (approvalAction stays state-only; server gate still enforces).
+- Not deployed: devices need SW v15 + app.js?v=49/styles.css?v=47 to pick up changes.
+
+### Next Recommended Task
+On operator approval, commit (UI-only) then deploy via ./ops and confirm on-device that approval cards show freshness, tap targets are comfortable, and Reject/Expire prompt.

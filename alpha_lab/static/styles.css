@@ -251,7 +251,12 @@ td .business-brief .driver-list span { font-size: 11px; }
 .approval-field span { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
 .approval-field p { margin: 0; line-height: 1.35; }
 .approval-section { display: grid; gap: 7px; }
-.approval-actions { justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 10px; }
+.approval-fresh { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.approval-fresh.stale { color: var(--amber); font-weight: 800; }
+.approval-actions { justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 10px; gap: 8px; }
+/* Phone-friendly tap targets for the approval decision buttons: at least 44px
+   tall with breathing room so Reject is not crammed against Approve. */
+.approval-actions button { min-height: 44px; padding: 10px 14px; font-size: 14px; flex: 1 1 auto; }
 .source-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .source-list a, .source-list span { border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; color: var(--muted); text-decoration: none; max-width: 100%; overflow-wrap: anywhere; }
 .source-list a:hover { color: var(--text); border-color: var(--blue); }
@@ -390,6 +395,10 @@ td .business-brief .driver-list span { font-size: 11px; }
 @media (max-width: 520px) {
   .sb-row { grid-template-columns: 1fr auto; }
   .sb-extra { grid-column: 1 / -1; justify-content: flex-start; }
+  /* On phones, stack each approval action full-width so the buttons can't
+     cluster tightly and a destructive Reject can't be mis-tapped. */
+  .approval-actions { gap: 10px; }
+  .approval-actions button { width: 100%; flex: 1 1 100%; }
 }
 
 /* Analyst chat */

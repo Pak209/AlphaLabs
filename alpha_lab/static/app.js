@@ -920,6 +920,7 @@ function approvalCard(item) {
             <span class="badge">${explanation.time_horizon || item.timeframe || "timeframe n/a"}</span>
           </div>
           <h3>${explanation.setup_type || "LLM-assisted setup"}</h3>
+          ${approvalFreshness(item.created_at)}
         </div>
         <div class="approval-score">
           <span>Confidence</span>
@@ -961,6 +962,37 @@ function approvalCard(item) {
 
 function approvalField(label, value) {
   return `<div class="approval-field"><span>${label}</span><p>${value || "n/a"}</p></div>`;
+}
+
+// Freshness line for an approval card. Approvals are time-sensitive, so show how
+// long the idea has been waiting (relative) plus the absolute timestamp. Items
+// older than the stale threshold get a .stale flag so an old idea is obvious on
+// the phone before it is approved.
+function approvalFreshness(createdAt) {
+  if (!createdAt) return "";
+  const ageMin = minutesSince(createdAt);
+  const stale = ageMin !== null && ageMin >= 120;
+  const cls = stale ? "approval-fresh stale" : "approval-fresh";
+  const flag = stale ? " · stale" : "";
+  return `<div class="${cls}">Created ${timeAgo(createdAt)} · ${formatTime(createdAt)}${flag}</div>`;
+}
+
+function minutesSince(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
+}
+
+function timeAgo(value) {
+  const min = minutesSince(value);
+  if (min === null) return "unknown";
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  const days = Math.round(hr / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 function sourceRefsHtml(refs) {
@@ -1009,6 +1041,15 @@ async function refreshTradeLevels(ideaId, ticker) {
 }
 
 async function approvalAction(ideaId, action) {
+  // Reject/Expire are state-changing and should never fire from an accidental
+  // phone tap, so they require a deliberate confirm. Approve only is
+  // non-destructive (and the order path approveAndPaperTrade already confirms),
+  // so it stays frictionless.
+  const confirmPrompts = {
+    reject: "Reject this idea? It will be removed from the approval queue.",
+    expire: "Expire this idea? It will be removed from the approval queue.",
+  };
+  if (confirmPrompts[action] && !confirm(confirmPrompts[action])) return;
   const defaultNotes = {
     approve: "approved for paper risk validation",
     reject: "rejected by reviewer",

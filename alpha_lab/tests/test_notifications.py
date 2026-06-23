@@ -516,6 +516,36 @@ def test_app_js_test_button_uses_eligible_level_and_local_notification():
     assert "url," in app_js and "alert_id:" in app_js
 
 
+# ---- mobile approval UI polish ----------------------------------------------
+def test_app_js_approval_card_shows_freshness():
+    app_js = Path("alpha_lab/static/app.js").read_text(encoding="utf-8")
+    # The card renders a freshness line from created_at, and an old idea is
+    # flagged stale so it is obvious on the phone before approval.
+    assert "approvalFreshness(item.created_at)" in app_js
+    assert "function approvalFreshness(" in app_js
+    assert "function timeAgo(" in app_js
+    assert "min ago" in app_js
+    assert "approval-fresh stale" in app_js
+
+
+def test_app_js_reject_and_expire_require_confirm():
+    app_js = Path("alpha_lab/static/app.js").read_text(encoding="utf-8")
+    # Reject and Expire are state-changing; they must prompt before acting so an
+    # accidental phone tap can't remove an idea from the queue. Approve only is
+    # non-destructive and stays frictionless.
+    assert "confirmPrompts" in app_js
+    assert "if (confirmPrompts[action] && !confirm(confirmPrompts[action])) return;" in app_js
+
+
+def test_css_approval_actions_have_phone_tap_targets():
+    css = Path("alpha_lab/static/styles.css").read_text(encoding="utf-8")
+    # The approval decision buttons must meet the ~44px mobile tap-target floor
+    # and stack full-width on phones so they can't cluster tightly.
+    assert ".approval-actions button { min-height: 44px;" in css
+    assert ".approval-actions button { width: 100%;" in css
+    assert ".approval-fresh.stale" in css
+
+
 # ---- service worker privacy (#7) --------------------------------------------
 def test_service_worker_excludes_api_from_cache():
     sw = Path("alpha_lab/static/sw.js").read_text(encoding="utf-8")
