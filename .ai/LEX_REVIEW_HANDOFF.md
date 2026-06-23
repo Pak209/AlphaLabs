@@ -1437,3 +1437,38 @@ Deployed a0288be (test-notification local-preview routing fix) to the old-Mac pr
 
 ### Next Recommended Task
 Optional: run ONE supervised, env-gated real URGENT_IDEA push test per the runbook (temporarily flip the three notification flags, send one, revert). Otherwise no action needed; server is healthy and safe.
+
+
+## 2026-06-22 22:51 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: clean
+
+### Summary
+Ran one supervised, env-gated real URGENT_IDEA Web Push test on the old-Mac runner, then reverted to the safe dry-run posture. Confirmed real on-device push delivery works end-to-end under commit b73e164 with push_min_level=URGENT_IDEA. Only the three transient notification flags were touched (backed up and restored from backup for an exact revert); no .env secrets, scheduler mode, paper/live trading, Alpaca, SMS, Twilio, DB, logs, or local config changed. SMS stayed disabled throughout. No secrets/tokens/VAPID keys were printed.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- GET /api/notifications/preferences
+- env_toggle: set ALERT_DELIVERY_DRY_RUN=false, ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true, ALERT_SMS_ENABLED=false (backup .env.pushtest.bak created)
+- ./ops restart --yes (load test env)
+- POST /api/notifications/test {level:URGENT_IDEA, force_dry_run:false} (token read from .env, never printed)
+- revert: cp .env.pushtest.bak .env; rm backup; ./ops restart --yes
+- ./ops safety-status
+
+### Results
+- pwa_push_enabled=true, push_min_level=URGENT_IDEA, sms_enabled=false (pre-test confirm)
+- only those three keys changed; all other .env lines preserved byte-for-byte
+- dashboard + scheduler running; /api/health=200
+- dry_run=false; channels_sent=[pwa_push]; pwa_push.delivered=true; pwa_push.sent=1; error=None; alert level=URGENT_IDEA — real push delivered
+- flags restored to ALERT_DELIVERY_DRY_RUN=true, ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=false, ALERT_SMS_ENABLED=false; services running
+- ALPHALAB_SCHEDULER_MODE=dry_run; automation paper trading armed=false; scheduler paper jobs enabled=false; paper trades triggerable=false; safe stabilization mode=true
+
+### Risks / Blockers
+- Real delivery flags were transiently true during the single test window only; now reverted to dry-run + real-test-gate off and verified. Posture is back to safe baseline. No persistent real-push state remains.
+
+### Next Recommended Task
+No action required; server healthy and disarmed. The real URGENT_IDEA push path is validated. If desired, confirm the iPhone received the notification and that tapping it deep-links/highlights (requires the device to have updated to SW v14 + app.js?v=48).
