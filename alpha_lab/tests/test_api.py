@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 from alpha_lab.api import create_app
 from alpha_lab.catalysts import get_catalyst_radar
+from alpha_lab.database import connect
 from alpha_lab.service import AlphaLabService
 
 
@@ -41,6 +43,40 @@ def test_health_and_idea_flow(tmp_path: Path):
     assert dashboard["counts"]["ideas_today"] >= 1
     assert dashboard["counts"]["dry_run_tests_today"] == 1
     assert dashboard["counts"]["paper_orders_today"] == 0
+
+
+def test_alpaca_health_reports_tls_interception_without_weakening_verification(
+    tmp_path: Path, monkeypatch
+):
+    lab = AlphaLabService(
+        db_path=str(tmp_path / "api_tls_health.sqlite3"),
+        risk_config_path="alpha_lab/config.example.json",
+        audit_log_path=str(tmp_path / "audit_tls_health.jsonl"),
+    )
+    monkeypatch.setattr(
+        "alpha_lab.service.load_credentials_from_env",
+        lambda: SimpleNamespace(
+            api_key="redacted-test-key",
+            secret_key="redacted-test-secret",
+            base_url="https://paper-api.alpaca.markets",
+        ),
+    )
+    monkeypatch.setattr(
+        "alpha_lab.service.AlpacaClient.get_account",
+        lambda self: (_ for _ in ()).throw(
+            OSError(
+                "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+                "self signed certificate in certificate chain"
+            )
+        ),
+    )
+
+    status = lab.alpaca_health()
+
+    assert status["ok"] is False
+    assert status["paper_endpoint"] is True
+    assert "TLS is being intercepted" in status["recommendation"]
+    assert "disable" not in status["recommendation"].lower()
 
 
 def test_safety_status_endpoint_reports_scheduler_guard(tmp_path: Path, monkeypatch):
@@ -417,10 +453,19 @@ def test_approval_dashboard_endpoint_flow(tmp_path: Path, monkeypatch):
     assert len(queue) == 1
     assert queue[0]["ticker"] == "NVDA"
     assert queue[0]["status"] == "needs_review"
+    assert queue[0]["idea_status"] == "needs_review"
     explanation = queue[0]["trade_explanation"]["explanation"]
     assert explanation["setup_type"] == "direct company catalyst"
     assert explanation["suggested_entry_zone"] == "confirmation above trigger"
+    assert explanation["suggested_stop_loss"] == "configured stop"
+    assert explanation["suggested_take_profit"] == "configured take profit"
     assert explanation["risk_factors"][0] == "headline may be priced in"
+
+    # POST /api/ideas is the create-only manual-validation candidate path: it
+    # must not run a decision or create execution/trade/order evidence.
+    with connect(lab.db_path) as conn:
+        for table in ("decision_logs", "execution_audit", "trades", "orders"):
+            assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
 
     detail = client.get(f"/api/ideas/{idea_id}/explanation")
     assert detail.status_code == 200
@@ -430,6 +475,78 @@ def test_approval_dashboard_endpoint_flow(tmp_path: Path, monkeypatch):
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
     assert client.get("/api/ideas/pending-approval").json() == []
+
+
+def test_rejected_idea_is_hidden_and_cannot_be_approved(tmp_path: Path, monkeypatch):
+    lab = AlphaLabService(
+        db_path=str(tmp_path / "api_rejected_pending.sqlite3"),
+        risk_config_path="alpha_lab/config.example.json",
+        audit_log_path=str(tmp_path / "audit_rejected_pending.jsonl"),
+    )
+    client = TestClient(create_app(lab))
+
+    monkeypatch.setattr(
+        "alpha_lab.service.build_trade_explanation",
+        lambda signal, context: {
+            "thesis_summary": "Candidate thesis",
+            "catalyst": "Candidate catalyst",
+            "why_this_matters": "Candidate context",
+            "market_context": "Mixed",
+            "setup_type": "direct company catalyst",
+            "confidence_score": 0.86,
+            "risk_factors": ["headline risk"],
+            "invalidation_level_or_condition": "breaks support",
+            "suggested_entry_zone": "$100.00-$101.00",
+            "suggested_stop_loss": "$97.00",
+            "suggested_take_profit": "$106.00",
+            "time_horizon": "intraday",
+            "source_refs": ["unit_test"],
+            "analyst_mode": "anthropic",
+            "analyst_assisted": True,
+        },
+    )
+    created = client.post(
+        "/api/ideas",
+        json={
+            "ticker": "NVDA",
+            "bias": "bullish",
+            "confidence": 0.86,
+            "timeframe": "intraday",
+            "thesis": "Candidate thesis.",
+            "source": "unit_test_news",
+            "timestamp": "2026-06-22T13:00:00Z",
+        },
+    ).json()
+    idea_id = created["id"]
+
+    # Model an execution/risk rejection that historically left the queue row
+    # at needs_review. The row is preserved, but it is no longer actionable.
+    lab.set_idea_status(idea_id, "rejected", "broker unavailable")
+    assert client.get("/api/ideas/pending-approval").json() == []
+
+    approval = client.post(
+        f"/api/ideas/{idea_id}/approval/approve",
+        json={"note": "must fail closed"},
+    )
+    assert approval.status_code == 409
+    assert "not eligible for approval" in approval.json()["detail"]
+
+    legacy = client.post(f"/api/ideas/{idea_id}/approve")
+    assert legacy.status_code == 409
+
+    with connect(lab.db_path) as conn:
+        idea_status = conn.execute(
+            "SELECT status FROM alpha_ideas WHERE id = ?", (idea_id,)
+        ).fetchone()[0]
+        queue_status = conn.execute(
+            "SELECT status FROM approval_queue WHERE idea_id = ?", (idea_id,)
+        ).fetchone()[0]
+        approval_decisions = conn.execute(
+            "SELECT COUNT(*) FROM approval_decisions WHERE idea_id = ?", (idea_id,)
+        ).fetchone()[0]
+    assert idea_status == "rejected"
+    assert queue_status == "needs_review"
+    assert approval_decisions == 0
 
 
 def test_rejected_approval_leaves_queue_and_does_not_execute(tmp_path: Path, monkeypatch):

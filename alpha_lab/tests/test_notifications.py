@@ -805,7 +805,7 @@ def _lab(tmp_path: Path) -> AlphaLabService:
 
 
 def _make_idea(lab: AlphaLabService) -> dict:
-    return lab.create_idea(
+    idea = lab.create_idea(
         {
             "ticker": "NVDA",
             "bias": "bullish",
@@ -816,6 +816,15 @@ def _make_idea(lab: AlphaLabService) -> dict:
             "timestamp": "2026-06-04T13:00:00Z",
         }
     )
+    # Approval-audit tests must use a genuinely actionable approval state.
+    # The default mock analyst is unassisted, so explicitly engage the same
+    # repository path used by an analyst-assisted explanation.
+    with connect(lab.db_path) as conn:
+        AlphaLabRepository(conn).create_trade_explanation(
+            idea["id"],
+            {"analyst_assisted": True, "analyst_mode": "test"},
+        )
+    return idea
 
 
 def test_approval_writes_audit_row(tmp_path: Path):

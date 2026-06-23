@@ -25,9 +25,23 @@ paper-only and reachable, the dashboard is healthy, the runtime uses one DB,
 and the scheduler heartbeat is fresh. A failure is a stop condition; diagnose
 it without deploying or changing scheduler mode.
 
+If Python reports `CERTIFICATE_VERIFY_FAILED` or a self-signed certificate in
+the chain, stop and rerun the read-only readiness check from a trusted network.
+Allowlist `paper-api.alpaca.markets` or use the approved network/VPN path if TLS
+interception persists. Never disable certificate verification or install an
+unverified CA bundle to make the check pass.
+
 ## 2. Select exactly one idea
 
 After the regular equity session opens:
+
+If a fresh candidate must be created, use the create-only `POST /api/ideas` or
+`POST /api/ideas/import` surface. Do not use `POST /api/ideas/import-and-test`
+for this step: that surface immediately runs execution/risk evaluation. Before
+creating the candidate, confirm its equity ticker is absent from the current
+Alpaca paper positions. Creation is successful only when the resulting idea and
+approval queue rows both remain `needs_review`, the explanation is
+`analyst_assisted=true`, and entry, stop, and target levels are populated.
 
 1. Open the dashboard **Approvals** page.
 2. Select one card whose asset class is **equity**. Do not use crypto or options

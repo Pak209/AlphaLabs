@@ -312,7 +312,12 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
 
     @app.post("/api/ideas/{idea_id}/approve")
     def approve_idea(idea_id: int) -> dict[str, Any]:
-        return lab.set_idea_status(idea_id, "accepted")
+        try:
+            return lab.approve_idea_for_execution(idea_id, "approved via legacy endpoint")
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/ideas/{idea_id}/reject")
     def reject_idea(idea_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -321,7 +326,12 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
     @app.post("/api/ideas/{idea_id}/approval/approve")
     def approve_idea_for_execution(idea_id: int, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         body = payload or {}
-        return lab.approve_idea_for_execution(idea_id, str(body.get("note", "")))
+        try:
+            return lab.approve_idea_for_execution(idea_id, str(body.get("note", "")))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/ideas/{idea_id}/approval/reject")
     def reject_idea_for_execution(idea_id: int, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:

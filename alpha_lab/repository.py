@@ -625,7 +625,7 @@ class AlphaLabRepository:
             SELECT q.*, i.ticker, i.bias, i.confidence, i.timeframe, i.thesis, i.catalyst, i.source, i.status AS idea_status
             FROM approval_queue q
             JOIN alpha_ideas i ON i.id = q.idea_id
-            WHERE q.status = 'needs_review'
+            WHERE q.status = 'needs_review' AND i.status = 'needs_review'
             ORDER BY datetime(q.created_at) ASC
             LIMIT ?
             """,
@@ -641,6 +641,24 @@ class AlphaLabRepository:
     def set_approval_status(self, idea_id: int, status: str, note: str = "") -> dict[str, Any]:
         if status not in {"approved", "rejected", "expired"}:
             raise ValueError("approval status must be approved, rejected, or expired")
+        if status == "approved":
+            state = self.conn.execute(
+                """
+                SELECT i.status AS idea_status, q.status AS approval_status
+                FROM alpha_ideas i
+                LEFT JOIN approval_queue q ON q.idea_id = i.id
+                WHERE i.id = ?
+                """,
+                (idea_id,),
+            ).fetchone()
+            if state is None:
+                raise KeyError(f"idea not found: {idea_id}")
+            if state["idea_status"] != "needs_review" or state["approval_status"] != "needs_review":
+                raise ValueError(
+                    f"idea {idea_id} is not eligible for approval: "
+                    f"idea_status={state['idea_status']} "
+                    f"approval_status={state['approval_status'] or 'missing'}"
+                )
         idea_status = status
         self.conn.execute(
             """

@@ -1472,3 +1472,71 @@ Ran one supervised, env-gated real URGENT_IDEA Web Push test on the old-Mac runn
 
 ### Next Recommended Task
 No action required; server healthy and disarmed. The real URGENT_IDEA push path is validated. If desired, confirm the iPhone received the notification and that tapping it deep-links/highlights (requires the device to have updated to SW v14 + app.js?v=48).
+
+
+## 2026-06-22 23:22 PT — Codex
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Implemented the manual-validation fail-closed lifecycle invariant: split rejected/needs_review rows are hidden and cannot be approved; documented and tested the existing create-only candidate path; verified TLS diagnostics and old-Mac readiness.
+
+### Files Modified
+- alpha_lab/repository.py
+- alpha_lab/api.py
+- alpha_lab/tests/test_api.py
+- alpha_lab/tests/test_notifications.py
+- docs/MANUAL_PAPER_VALIDATION.md
+- .ai/LEX_REVIEW_HANDOFF.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_api.py alpha_lab/tests/test_analyst_layer.py alpha_lab/tests/test_paper_validation_status.py alpha_lab/tests/test_paper_validation_evidence.py -q
+- .venv/bin/python -m pytest -q
+- PYTHONPYCACHEPREFIX=/private/tmp/alphalab-pyc .venv/bin/python -m compileall -q alpha_lab paper_trader
+- ./ops paper-validation-status (read-only, outside Codex sandbox)
+
+### Results
+- Focused suite passed: 134 tests.
+- Full suite passed: 385 tests.
+- Old-Mac readiness passed all checks with ready_for_manual_validation=true; earlier SSH failure was sandbox reachability.
+- Current read-only Alpaca paper account and positions checks succeeded with TLS verification enabled; no trade or position mutation occurred.
+
+### Risks / Blockers
+- Historical split rows remain preserved in the DB for auditability, but are now non-actionable; no migration was performed.
+- Local scheduler logs contain earlier transient TLS interception failures; current verified requests pass, so certificate verification was not weakened.
+- Changes are not deployed and require read-only review before any operational use.
+
+### Next Recommended Task
+Run Codex read-only diff review, then generate one fresh create-only analyst-assisted equity candidate whose ticker is absent from current Alpaca paper positions.
+
+
+## 2026-06-22 23:34 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Read-only audit of the approval workflow for mobile/PWA decision flow (post-push). Verified on-card context coverage, action clarity/safety, accidental-order protection, and audit logging; identified 3 minor UX gaps. No files changed.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- .venv/bin not invoked (audit-only, no tests run)
+
+### Results
+- Audit-only; source-level verification across app.js, styles.css, api.py, service.py, repository.py, database.py.
+- CONTEXT (good): approvalCard renders ticker, bias, status badge, time_horizon, setup_type, confidence_score, thesis, catalyst, why-it-matters, market context, entry/stop/take-profit, invalidation, risk_factors, source_refs.
+- SAFETY (sound): order placement is double-gated — approveAndPaperTrade has a confirm() AND server-side _paper_execution_approval_error requires status=='approved' before any paper order; approvalAction (approve/reject/expire) places no order, so an accidental tap cannot trigger an order.
+- AUDIT (sound): _decide_approval writes an approval_decisions row (decided_by='human', note, live_mode) atomically in the same transaction as the status change.
+
+### Risks / Blockers
+- GAP1: no timestamp/freshness shown on approval card though item.created_at is available (q.* from approval_queue).
+- GAP2: mobile tap targets small — .actions button = padding 6px 8px, font-size 12px, no min-height, width:auto; five buttons wrap tightly (destructive Reject adjacent to Approve-only). Other surfaces use 44px targets.
+- GAP3: approvalAction (approve/reject/expire) has no confirm() dialog (state-change only, recoverable, no order) — lower severity than the order path which is already confirmed.
+
+### Next Recommended Task
+Get operator decision on optional small UI fixes: (a) render created_at freshness, (b) enlarge approval action tap targets toward 44px, (c) add confirm() to Reject. Notifications/UI only; no scheduler/trading/Alpaca/SMS/.env/DB changes.
