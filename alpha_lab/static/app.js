@@ -1277,13 +1277,60 @@ async function unsubscribePush() {
 }
 
 async function sendTestAlert() {
+  let res;
   try {
-    const res = await api("/api/notifications/test", { method: "POST", body: JSON.stringify({ level: "WATCH" }) });
-    const mode = res.dry_run ? "dry-run (logged, not sent)" : "sent";
-    showToast(`Test alert created — delivery ${mode}.`);
-    await refreshAlerts();
+    // Create a dry-run synthetic alert at an eligible level (URGENT_IDEA, at/above
+    // the documented push floor). This is ALWAYS dry-run: the button never asks the
+    // server for a real send, so no real device push leaves the box and no delivery
+    // env flags are touched. A real on-device push requires the separate supervised,
+    // env-gated server test. The alert is created so the Alerts list updates and so
+    // the local preview below has a real id to deep-link to.
+    res = await api("/api/notifications/test", { method: "POST", body: JSON.stringify({ level: "URGENT_IDEA" }) });
   } catch (err) {
     showToast(`Test alert failed: ${cleanErrorMessage(err.message || String(err))}`);
+    return;
+  }
+  await refreshAlerts();
+  // Show a LOCAL notification (not a server push) so this device can actually
+  // verify the notification UI and tap-to-route behavior without enabling real
+  // delivery. This is what makes the button visibly "do something" on-device.
+  const shown = await showLocalTestNotification(res.alert);
+  if (shown) {
+    showToast("Test notification shown on this device (dry-run — no server push sent).");
+  } else {
+    showToast("Test alert created (dry-run). Enable notifications on this device to preview the on-device notification.");
+  }
+}
+
+// Display a local test notification through the service worker registration. It
+// uses the SAME notification options shape as a real server push, so tapping it
+// exercises the live notificationclick -> route + highlight path — but nothing
+// leaves the box: no push is sent and no delivery env flags are touched. Returns
+// false (and is a safe no-op) when notifications are unsupported or not granted.
+async function showLocalTestNotification(alert) {
+  if (!("serviceWorker" in navigator) || !("Notification" in window)) return false;
+  if (Notification.permission !== "granted") return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const id = alert && alert.id;
+    const url = id ? `/#alerts/${id}` : "/#alerts";
+    const level = (alert && alert.level) || "URGENT_IDEA";
+    await reg.showNotification(`[${level}] ${(alert && alert.title) || "Test notification"}`, {
+      body: (alert && alert.body) || "Local test notification — tap to verify routing.",
+      tag: id ? `alert-${id}` : "alert-test",
+      data: {
+        url,
+        alert_id: id || null,
+        related_trade_id: null,
+        level,
+        source: (alert && alert.source) || "test-mode",
+      },
+      icon: "/static/icon-192.png",
+      badge: "/static/icon-192.png",
+    });
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 

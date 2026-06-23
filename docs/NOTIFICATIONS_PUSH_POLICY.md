@@ -119,6 +119,30 @@ Tests covering this: `test_click_url_*`,
 `test_service_worker_carries_routing_metadata_and_posts_click` in
 `alpha_lab/tests/test_notifications.py`.
 
+## The "Send test notification" button (on-device preview, no server push)
+
+The button in **Settings → Notifications** is a local, dry-run preview — it never
+triggers a real server push and never touches a delivery env flag. On click it:
+
+1. POSTs `/api/notifications/test` with `level: "URGENT_IDEA"` (at/above the push
+   floor) and **no** `force_dry_run`. The endpoint forces dry-run by default, so
+   the server only creates an audited synthetic alert — it does not send.
+2. Shows a **local** notification via `registration.showNotification()` using the
+   same options/`data` shape a real push uses. Tapping it exercises the live
+   `notificationclick → navigate + postMessage → route + highlight` path on the
+   device, with nothing leaving the box.
+
+This replaced the previous button, which POSTed `level: "WATCH"`. Under the safe
+policy WATCH is below the push floor, so it was silently dropped (no push, no push
+audit row) and looked like "nothing happened" — the symptom this change fixes.
+
+If notifications are not granted on the device, the local preview is a safe no-op
+and the toast says the alert was created (dry-run) but the on-device preview needs
+notification permission. A real on-device **server** push still requires the
+separate supervised, env-gated test in section 1 below.
+
+Covered by `test_app_js_test_button_uses_eligible_level_and_local_notification`.
+
 ## 1. How to run ONE supervised real push test
 
 Real delivery is OFF by default (`ALERT_DELIVERY_DRY_RUN=true`). A real send also

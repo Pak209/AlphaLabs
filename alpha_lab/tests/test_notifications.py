@@ -498,6 +498,24 @@ def test_app_js_approval_highlight_targets_idea_id_marker():
     assert 'alert-card[data-alert-id="' in app_js
 
 
+# ---- test-notification button shows an on-device local notification ---------
+def test_app_js_test_button_uses_eligible_level_and_local_notification():
+    app_js = Path("alpha_lab/static/app.js").read_text(encoding="utf-8")
+    # The test button must request an eligible level (>= the URGENT_IDEA push
+    # floor), not WATCH — a WATCH test is silently dropped under the safe policy and
+    # looks like "nothing happened".
+    assert '"/api/notifications/test"' in app_js
+    assert 'JSON.stringify({ level: "URGENT_IDEA" })' in app_js
+    assert 'level: "WATCH"' not in app_js
+    # The button shows a LOCAL notification via the SW registration so the device
+    # visibly previews the notification + tap routing without any server push.
+    assert "showLocalTestNotification" in app_js
+    assert "reg.showNotification(" in app_js
+    # The local notification carries the same routing data shape the click handler
+    # reads, so tapping it exercises the real route + highlight path.
+    assert "url," in app_js and "alert_id:" in app_js
+
+
 # ---- service worker privacy (#7) --------------------------------------------
 def test_service_worker_excludes_api_from_cache():
     sw = Path("alpha_lab/static/sw.js").read_text(encoding="utf-8")

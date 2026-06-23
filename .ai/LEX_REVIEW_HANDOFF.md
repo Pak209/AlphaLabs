@@ -1368,3 +1368,39 @@ Reconciled the approval-card highlight marker mismatch in notification deep-link
 
 ### Next Recommended Task
 Get human approval to commit. If a per-card approval deep-link is desired later, add related_idea_id to alerts (DB migration, requires approval) and emit /#approvals/<idea_id> from _click_url — frontend selector already targets data-idea-id.
+
+
+## 2026-06-22 22:19 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Diagnosed why the PWA 'Send test alert' button did nothing after the actionable-routing deploy, and fixed it. Read-only diagnostics confirmed the deploy itself is healthy; the button was the problem. ROOT CAUSE: sendTestAlert POSTed level=WATCH with no force_dry_run. WATCH is below the push floor so route_alert dropped it (no push, no audit row), and the endpoint forces dry-run by default, so the button could never produce an on-device notification. Server alerts 8 and 9 (WATCH, channels_sent=[]) with no matching notification_audit rows confirm working-as-designed, not a delivery failure. FIX (frontend/UI only): button now requests an eligible level (URGENT_IDEA) and shows a LOCAL notification via the service-worker registration so the device previews the notification + tap-routing with zero server push and zero env-flag changes. Relabeled button 'Send test notification'. No scheduler/trading/Alpaca/SMS/.env/DB changes. Not committed pending approval.
+
+### Files Modified
+- alpha_lab/static/app.js
+- alpha_lab/static/index.html
+- alpha_lab/static/sw.js
+- alpha_lab/tests/test_notifications.py
+- docs/NOTIFICATIONS_PUSH_POLICY.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests -q
+- node --check alpha_lab/static/sw.js
+- ssh old-mac: git rev-parse HEAD; curl /sw.js; curl /static/app.js?v=47; curl /api/notifications/preferences; curl /api/alerts; curl /api/notifications/audit
+
+### Results
+- sendTestAlert now posts level=URGENT_IDEA (was WATCH); added showLocalTestNotification() that calls reg.showNotification with the same data shape a real push uses so notificationclick routing is exercised on-device with no server push
+- button relabeled 'Send test notification'; app.js asset ref bumped v=47 to v=48
+- CACHE alphalab-v13 to v14 and SHELL app.js?v=48 so clients re-precache the new app.js; JS syntax OK
+- added test_app_js_test_button_uses_eligible_level_and_local_notification (asserts URGENT_IDEA not WATCH, and a local showNotification preview); 68 notification tests pass, 363 full suite pass
+- documented the test-notification button behavior (local dry-run preview, why WATCH was the symptom, permission no-op path)
+- Server on a48da63; sw.js=v13, app.js?v=47 http=200 (deploy healthy, pre-this-fix). Preferences: pwa_push_enabled=true, sms_enabled=false, but push_min_level=APPROVAL_REQUIRED (NOT URGENT_IDEA as the task context stated — more restrictive/safer). Audit trail matches the WATCH-dropped diagnosis.
+
+### Risks / Blockers
+- Server push_min_level is APPROVAL_REQUIRED, not URGENT_IDEA — so even a real URGENT_IDEA push would currently be dropped by policy. This is a preference/config value; left unchanged (no approval to modify). If on-device server-push validation at URGENT_IDEA is wanted, push_min_level must first be lowered to URGENT_IDEA via the preferences API. The new button is a LOCAL preview only and does not validate the real server push path. iPhone must update SW to v14 + fetch app.js?v=48 to get the fix.
+
+### Next Recommended Task
+Get approval to commit + deploy. Optionally: decide whether to set push_min_level=URGENT_IDEA (preferences API write, needs approval) to match the documented floor, then run one supervised env-gated real URGENT_IDEA push test per the runbook.
