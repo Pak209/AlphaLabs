@@ -1404,3 +1404,36 @@ Diagnosed why the PWA 'Send test alert' button did nothing after the actionable-
 
 ### Next Recommended Task
 Get approval to commit + deploy. Optionally: decide whether to set push_min_level=URGENT_IDEA (preferences API write, needs approval) to match the documented floor, then run one supervised env-gated real URGENT_IDEA push test per the runbook.
+
+
+## 2026-06-22 22:33 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: clean
+
+### Summary
+Deployed a0288be (test-notification local-preview routing fix) to the old-Mac production runner and applied the notification preference floor. Deploy was code-only (git ff-only + service reload); no .env/db/logs/launchd/trading changes. Safety posture preserved: scheduler dry_run, paper-trade guard disarmed. Then set push_min_level=URGENT_IDEA via the token-protected preferences API to match the documented production push floor (the server had been APPROVAL_REQUIRED). Real delivery remains dry-run/disabled; this preference does not enable any real push.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ./ops deploy --yes
+- ./ops health
+- ./ops safety-status
+- ssh old-mac: git rev-parse HEAD
+- POST /api/notifications/preferences {push_min_level:URGENT_IDEA} (token read from .env, never printed)
+
+### Results
+- commit a48da63 -> a0288be; all hard checks passed; scheduler heartbeat mode dry_run; db_path matches resolver; scanner_runs write smoke ok
+- all hard checks passed; /api/health + /api/db-status 200; heartbeat dry_run
+- ALPHALAB_SCHEDULER_MODE=dry_run; automation paper trading armed=false; scheduler paper jobs enabled=false; paper trades triggerable=false; safe stabilization mode=true
+- server confirmed on a0288be (fix: preview notification routing test locally)
+- post_http=200; GET /api/notifications/preferences now shows pwa_push_enabled=true, push_min_level=URGENT_IDEA, sms_enabled=false
+
+### Risks / Blockers
+- push_min_level=URGENT_IDEA widens push eligibility to URGENT_IDEA+ (from APPROVAL_REQUIRED+), matching documented policy. This does NOT send anything: ALERT_DELIVERY_DRY_RUN stays true and ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS stays false, so all deliveries remain audited dry-run no-sends. iPhone must update the service worker to v14 and fetch app.js?v=48 to pick up the local test-notification fix.
+
+### Next Recommended Task
+Optional: run ONE supervised, env-gated real URGENT_IDEA push test per the runbook (temporarily flip the three notification flags, send one, revert). Otherwise no action needed; server is healthy and safe.
