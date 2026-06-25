@@ -1945,3 +1945,30 @@ Reconciled the Mac mini's divergent handoff log and fast-forwarded the Mini to o
 
 ### Next Recommended Task
 On approval, commit the merged handoff (containing all entries) and push so origin and the Mini converge fully.
+
+
+## 2026-06-25 14:39 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Aligned the Mac mini to origin/main c368627. The Mini's local handoff edit was provably redundant (its 9 migration entries byte-identical to origin and fully contained upstream, which also added the 14:21/14:31 entries), so backed it up once more, discarded it, and fast-forwarded 31fdc92->c368627. No .env, trading mode, broker creds, scheduler/daemon, Cloudflare/CodexPro/Tailscale, or reboot touched.
+
+### Files Modified
+- .ai/LEX_REVIEW_HANDOFF.md
+
+### Commands / Tests Run
+- cp .ai/LEX_REVIEW_HANDOFF.md .ai/LEX_REVIEW_HANDOFF.md.pre-align.bak.20260625-143841; git checkout -- .ai/LEX_REVIEW_HANDOFF.md; git fetch origin main; git merge --ff-only origin/main
+- ./ops health; ./ops scheduler-status; scheduler_safety_status()
+
+### Results
+- Mini HEAD == origin/main == c368627; tracked tree clean; verify_old_mac_runtime.sh (9977334) and verify_server_runtime.sh (2c5b5bd) match origin
+- All hard checks passed; agent running; heartbeat 14:35 PT fresh; dry_run / armed=false / safe_stabilization_mode=true
+
+### Risks / Blockers
+- No deletions performed: untracked backups remain on the Mini (two handoff backups .local.bak.20260625-142804 + .pre-align.bak.20260625-143841, and the temporary verifier backup verify_old_mac_runtime.sh.bak.20260625-141401); plus pre-existing untracked Mini infra docs/scripts (AGENTS.md, CODEXPRO/MCP setup md, codexpro-mini-launch.sh, tailscale-keepalive.sh).
+
+### Next Recommended Task
+Optional housekeeping (on approval): remove the now-unneeded temporary verifier backup and the two handoff backups on the Mini; decide whether the untracked Mini infra docs/scripts should be committed or git-ignored.
