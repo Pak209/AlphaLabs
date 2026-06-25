@@ -1583,6 +1583,243 @@ Implemented mobile/PWA approval-queue UI polish from the prior audit: card fresh
 On operator approval, commit (UI-only) then deploy via ./ops and confirm on-device that approval cards show freshness, tap targets are comfortable, and Reject/Expire prompt.
 
 
+## 2026-06-23 21:07 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Installed Node 22 (via nvm 0.40.3) and CodexPro 0.28.5 on Mac mini. Configured local-only, read-only, no-tunnel mode for AlphaLab repo. All safety controls verified: session-ID auth, write=off, bash=off, .env and sqlite blocked, server binds 127.0.0.1 only.
+
+### Files Modified
+- CODEXPRO_MAC_MINI_SETUP.md
+
+### Commands / Tests Run
+- codexpro start --root /Users/pak/AlphaLab --host 127.0.0.1 (with CODEXPRO_BLOCKED_GLOBS set)
+
+### Results
+- All 8 safety tests PASS: loopback-only binding, session-ID auth, CLAUDE.md readable, .env blocked, sqlite blocked, write blocked, bash blocked, no tunnel
+
+### Risks / Blockers
+- CODEXPRO_BLOCKED_GLOBS must be exported manually before each launch (not yet in shell profile). cloudflared not installed — only needed if tunnel ever approved.
+
+### Next Recommended Task
+Add nvm init and CODEXPRO_BLOCKED_GLOBS export to ~/.zshrc so CodexPro launch env is automatic
+
+
+## 2026-06-23 22:09 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Read-only topology audit: confirmed Dev Mac CodexPro on port 8799 with Cloudflare named tunnel codexpro-alphalab -> mcp.pak-labs.com. Old Mac hosts AlphaLab dashboard on 8787 via Tailscale Serve (no CodexPro). Mac Mini CodexPro port 8787 COLLIDES with running AlphaLab dashboard (PID 22568). Generated MCP_TOPOLOGY_REPORT.md. No changes made.
+
+### Files Modified
+- MCP_TOPOLOGY_REPORT.md
+
+### Commands / Tests Run
+- Read-only inspection only: lsof, pgrep, git log, cat scripts/, cat .ai/
+
+### Results
+- Topology fully mapped. Port collision identified: Mac Mini CodexPro profile uses 8787, AlphaLab dashboard already on 8787. ~/.zshrc does not exist on Mac Mini (no backup needed). Multiple pak-labs.com hostnames confirmed feasible via Cloudflare.
+
+### Risks / Blockers
+- Port 8787 collision on Mac Mini — CodexPro will fail to bind if AlphaLab dashboard is running. Must change CodexPro port to 8788 before enabling any tunnel.
+
+### Next Recommended Task
+1) Confirm ~/.zshrc content and write it. 2) Fix Mac Mini CodexPro port to 8788. 3) Decide on dual-hostname Cloudflare setup (see MCP_TOPOLOGY_REPORT.md Section 6).
+
+
+## 2026-06-23 22:16 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Created ~/.zshrc with nvm init and CODEXPRO_BLOCKED_GLOBS. Fixed Mac Mini CodexPro port 8787->8788 (was colliding with AlphaLab dashboard). Started CodexPro on 127.0.0.1:8788, all 8 safety checks PASS. AlphaLab dashboard confirmed still running on 127.0.0.1:8787 (HTTP 200). Dev Mac / cloudflared / mcp.pak-labs.com untouched. Updated MCP_TOPOLOGY_REPORT.md.
+
+### Files Modified
+- ~/.zshrc
+- MCP_TOPOLOGY_REPORT.md
+
+### Commands / Tests Run
+- codexpro settings set --port 8788
+- codexpro start --root /Users/pak/AlphaLab --tunnel none --host 127.0.0.1 --write off --bash off
+
+### Results
+- Dashboard HTTP 200 on :8787. CodexPro session-ID auth on :8788. .env blocked, sqlite blocked, write off, bash off. No port collision. No Cloudflare changes.
+
+### Risks / Blockers
+- CodexPro on :8788 is running in background (PID 25298/25296). Stop with: pkill -f codexpro. No tunnel or auth token yet for Mac Mini public exposure.
+
+### Next Recommended Task
+When ready for public Mac Mini MCP: install cloudflared, create codexpro-mini tunnel, bind mcp-mini.pak-labs.com DNS route, configure MCP token — see MCP_TOPOLOGY_REPORT.md Section 6.
+
+
+## 2026-06-23 22:36 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Created Cloudflare named tunnel 'codexpro-mini' for Mac Mini CodexPro. Verified auth token mechanism (CODEXPRO_HTTP_TOKEN env var). Tunnel ID 0af4408b. Public endpoint mcp-mini.pak-labs.com returns 401 unauthenticated. All safety checks PASS via public tunnel. Two LaunchAgents installed for reboot persistence. Dev Mac / mcp.pak-labs.com / codexpro-alphalab untouched.
+
+### Files Modified
+- scripts/codexpro-mini-launch.sh
+- MCP_MINI_CLOUDFLARE_SETUP.md
+- MCP_TOPOLOGY_REPORT.md
+
+### Commands / Tests Run
+- cloudflared tunnel create codexpro-mini
+- cloudflared tunnel route dns codexpro-mini mcp-mini.pak-labs.com
+- launchctl load com.alphalab.codexpro-mini.plist + com.alphalab.cloudflared-mini.plist
+
+### Results
+- mcp-mini.pak-labs.com live: 401 unauth, 200 with token. authEnabled=true, writeMode=off, bashMode=off. .env and sqlite blocked. Dashboard :8787 still HTTP 200. Both LaunchAgents exit code 0. 4 tunnel connections to CF edge (sjc05/sjc08/lax07).
+
+### Risks / Blockers
+- mcp.pak-labs.com is 530 (Dev Mac cloudflared offline) — pre-existing, not caused by this work. Mac Mini token must be manually copied to MCP client connector. Token rotation requires LaunchAgent restart.
+
+### Next Recommended Task
+Copy token value from ~/.codexpro/mini-mcp.token and paste into ChatGPT/MCP connector with Server URL https://mcp-mini.pak-labs.com/mcp + Bearer auth. Separately: restart Dev Mac cloudflared to restore mcp.pak-labs.com.
+
+
+## 2026-06-24 19:02 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Diagnosed and partially fixed Tailscale reliability on Mac mini. Root cause: tssentineld system daemon not installed; Tailscale only ran via Login Item (GUI session only). Reconnected with 'tailscale up', installed user-level keepalive LaunchAgent for in-session recovery. sudo required for full fix (tssentineld system daemon). Power settings confirmed good. SSH confirmed reachable at 100.112.142.16.
+
+### Files Modified
+- scripts/tailscale-keepalive.sh
+
+### Commands / Tests Run
+- tailscale up
+- launchctl load com.alphalab.tailscale-keepalive.plist
+
+### Results
+- Tailscale reconnected (100.112.142.16). Keepalive LaunchAgent running (PID 44187). SSH responds on Tailscale IP. AlphaLab dashboard (:8787) and CodexPro (:8788) untouched. Power: sleep=0, womp=1, standby=0, autorestart=1.
+
+### Risks / Blockers
+- REMAINING GAP: tssentineld not installed as system daemon (requires sudo). After hard reboot with no auto-login, Tailscale will NOT reconnect until someone physically logs in. User LaunchAgent only covers in-session dropout.
+
+### Next Recommended Task
+Run: sudo launchctl bootstrap system /Applications/Tailscale.app/Contents/Library/LaunchDaemons/io.tailscale.ipn.macsys.tssentineld.plist  — one command, fixes boot/logout gap permanently.
+
+
+## 2026-06-24 21:51 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Diagnosed Tailscale App Store persistence model from binary strings. tssentineld is explicitly disabled on App Store variant ('ignoring on App Store variant' literal in CLI binary). Correct model is NEVPNManager + restartVPNIfNeeded — no launchctl bootstrap supported or needed. Keepalive LaunchAgent was causing keychain prompts (tailscale CLI accessing keychain from bash context = unknown caller). Removed keepalive LaunchAgent. Tailscale remains connected via native mechanism.
+
+### Files Modified
+- scripts/tailscale-keepalive.sh
+
+### Commands / Tests Run
+- launchctl unload com.alphalab.tailscale-keepalive.plist && rm com.alphalab.tailscale-keepalive.plist
+
+### Results
+- Keepalive LaunchAgent removed. Tailscale connected at 100.112.142.16 via native NEVPNManager. VPN config shows Connected for io.tailscale.ipn.macsys. No keychain prompts expected.
+
+### Risks / Blockers
+- Remaining gap: Login Item (TailscaleLoginItemHelper) is Aqua-session-only. After hard reboot with no user login, Tailscale will not reconnect. Standalone pkg is the only fix for this. VPNOnDemandIsUserConfigured=0 means On-Demand not enabled by user (may limit auto-reconnect on network changes).
+
+### Next Recommended Task
+If boot-level persistence is required: install Tailscale standalone pkg from tailscale.com (replaces App Store version, uses tailscaled system daemon). Otherwise current setup is correct for an always-logged-in Mac mini.
+
+
+## 2026-06-24 22:19 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Converted com.alphalab.cloudflared-mini from LaunchAgent to LaunchDaemon. Service is now system-level (survives user logout/reboot). Migration required two iterations: first attempt used /var/log/ for log path which root-only on this macOS version causing EX_CONFIG crash loop; fixed by changing log path to /Users/pak/Library/Logs/cloudflared-mini.log (pak-writable). Added --config /Users/pak/.cloudflared/config.yml (explicit, no HOME dependency), --no-autoupdate, UserName=pak, HOME env var. All 4 tunnel connections registered. Public endpoint mcp-mini.pak-labs.com returns 401 (auth required, expected). AlphaLab dashboard and CodexPro unaffected.
+
+### Files Modified
+- /Library/LaunchDaemons/com.alphalab.cloudflared-mini.plist
+
+### Commands / Tests Run
+- sudo cp /tmp/com.alphalab.cloudflared-mini.plist /Library/LaunchDaemons/com.alphalab.cloudflared-mini.plist
+- sudo launchctl bootout system/com.alphalab.cloudflared-mini && sudo launchctl bootstrap system /Library/LaunchDaemons/com.alphalab.cloudflared-mini.plist
+
+### Results
+- state=running, runs=1, last exit code=never exited, 4 tunnel connections to CF edge (lax08x2, sjc07, lax08)
+- Daemon running in system domain as pak. mcp-mini.pak-labs.com → HTTP 401. Dashboard :8787 → HTTP 200. CodexPro :8788 → listening.
+
+### Risks / Blockers
+- LaunchAgent plist still exists at ~/Library/LaunchAgents/com.alphalab.cloudflared-mini.plist — it was unloaded but not deleted. Should be removed to prevent accidental double-load after future login.
+
+### Next Recommended Task
+Remove the stale LaunchAgent plist ~/Library/LaunchAgents/com.alphalab.cloudflared-mini.plist. Then consider converting com.alphalab.codexpro-mini from LaunchAgent to LaunchDaemon (same approach: UserName=pak, explicit paths, ~/Library/Logs log path).
+
+
+## 2026-06-24 22:37 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Converted com.alphalab.codexpro-mini from LaunchAgent to LaunchDaemon using the Cloudflare daemon as reference implementation. Launch script unchanged — it already handles NVM sourcing and token injection. Plist changes: UserName=pak, GroupName=staff, EnvironmentVariables HOME=/Users/pak + PATH, ThrottleInterval=10. Log path kept at /Users/pak/Library/Logs/codexpro-mini.log (pak-writable). Old LaunchAgent backed up to ~/Library/LaunchAgents.disabled/. Both system daemons (cloudflared-mini and codexpro-mini) now running state=running, runs=1, never exited.
+
+### Files Modified
+- /Library/LaunchDaemons/com.alphalab.codexpro-mini.plist
+- /Users/pak/Library/LaunchAgents.disabled/com.alphalab.codexpro-mini.plist.bak-codexpro-daemon-migration
+
+### Commands / Tests Run
+- sudo cp /tmp/com.alphalab.codexpro-mini.plist /Library/LaunchDaemons/ && launchctl unload ~/Library/LaunchAgents/com.alphalab.codexpro-mini.plist && sudo launchctl bootstrap system /Library/LaunchDaemons/com.alphalab.codexpro-mini.plist
+- mv ~/Library/LaunchAgents/com.alphalab.codexpro-mini.plist ~/Library/LaunchAgents.disabled/com.alphalab.codexpro-mini.plist.bak-codexpro-daemon-migration
+
+### Results
+- state=running, runs=1, never exited. http://127.0.0.1:8788 → HTTP 401. mcp-mini.pak-labs.com → HTTP 401. Dashboard :8787 → HTTP 200. Cloudflare daemon state=running.
+- LaunchAgents.disabled now holds rollback plists for both cloudflared-mini and codexpro-mini.
+
+### Risks / Blockers
+- CodexPro depends on NVM-managed node binary at /Users/pak/.nvm/versions/node/v22.23.1/. If NVM version changes, the daemon picks up the new version automatically via nvm.sh sourcing — but if nvm.sh breaks, CodexPro will not restart cleanly.
+
+### Next Recommended Task
+Both Cloudflare and CodexPro are now system LaunchDaemons. Remaining LaunchAgent candidates: AlphaLab dashboard (:8787) and Scheduler — user has explicitly deferred these. No further daemon migrations without explicit instruction.
+
+
+## 2026-06-24 23:57 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Authorized Dev Mac SSH public key on Mac mini for non-interactive access. Created ~/.ssh/authorized_keys (did not exist before). Added one ed25519 key: danielpak-devmac-to-alphalab-server. Permissions correct: ~/.ssh=700, authorized_keys=600, owner=pak:staff. sshd_config not modified. Dev Mac / Claude automation can now SSH to Mini without password prompt.
+
+### Files Modified
+- /Users/pak/.ssh/authorized_keys
+
+### Commands / Tests Run
+- cat > ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+
+### Results
+- 1 key installed. Fingerprint: SHA256:zLQPuaRWm7r3AzpzpOI4ECA6v3llgk38U0d9d11cX7M (ED25519). sshd_config AuthorizedKeysFile=.ssh/authorized_keys (default, unmodified, last modified Mar 19 2026).
+
+### Risks / Blockers
+- No existing keys were present — this is the first authorized_keys file. If the Dev Mac key is rotated, this file must be updated manually.
+
+### Next Recommended Task
+Test SSH login from Dev Mac: ssh pak@<mini-ip-or-tailscale>. Confirm non-interactive access works end-to-end.
+
+
 ## 2026-06-25 14:09 PT — Claude
 
 Branch: main
@@ -1644,3 +1881,67 @@ Deployed the migration-cleanup verifier changes to the Mac mini via surgical scp
 
 ### Next Recommended Task
 Observe one market session on the LaunchAgent scheduler; then decide LaunchAgent->LaunchDaemon conversion with rollback per the prepared plan
+
+
+## 2026-06-25 14:21 PT — Claude
+
+Branch: main
+Commit: 31fdc92
+Working Tree: modified
+
+### Summary
+Committed+pushed Mac-mini retargeting of server runtime verifiers to origin/main; analyzed Mini pull-reconciliation risk (read-only); confirmed safe posture holds.
+
+### Files Modified
+- scripts/verify_old_mac_runtime.sh
+- scripts/verify_server_runtime.sh
+- .ai/LEX_REVIEW_HANDOFF.md
+
+### Commands / Tests Run
+- git push origin main
+- ./ops health; ./ops scheduler-status
+- scheduler_safety_status() on Mini
+
+### Results
+- origin/main now at 31fdc92 (547df1d..31fdc92); 3 files committed
+- Mini working-tree blob == pushed blob byte-for-byte (no deploy/pull of verifiers needed)
+- Mini local handoff has its own newer appends; pull would conflict — do NOT blindly pull
+- All hard checks passed; agent running; heartbeat fresh 14:20 PT; mode=dry_run
+- scheduler_mode=dry_run, automation_paper_trading_armed=false, safe_stabilization_mode=true
+
+### Risks / Blockers
+- Mini is 1 commit behind origin/main and working tree is dirty (handoff log + untracked verify_server_runtime.sh); a naive git pull would be refused and could clobber Mini local handoff appends.
+
+### Next Recommended Task
+On approval, reconcile Mini: preserve its local handoff appends first, then bring Mini to origin/main (verifier content already matches, so no functional change).
+
+
+## 2026-06-25 14:31 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Reconciled the Mac mini's divergent handoff log and fast-forwarded the Mini to origin/main (31fdc92). Preserved the Mini's 9 unpushed local entries (Jun 23-24 infra work) by splicing them into their correct chronological slot ahead of the Jun-25 entries; zero deletions. Verifier files on the Mini now match the committed copies exactly.
+
+### Files Modified
+- .ai/LEX_REVIEW_HANDOFF.md
+
+### Commands / Tests Run
+- git merge --ff-only origin/main
+- backup + checkout HEAD + move untracked verify_server_runtime.sh aside, then ff
+- python splice + git diff --numstat
+- ./ops health; ./ops scheduler-status; scheduler_safety_status()
+
+### Results
+- Mini HEAD 547df1d->31fdc92 == origin/main; tracked tree clean except the re-spliced handoff (preserved appends)
+- handoff backed up to .ai/LEX_REVIEW_HANDOFF.md.local.bak.20260625-142804 (sha256 24d061f...); untracked verifier backed up to /tmp/mini-untracked-bak.20260625-142804/
+- 237 lines added, 0 deleted; 9 Mini entries byte-identical to backup (12914 bytes); chronological order verified (Jun23-24 before Jun25)
+- All hard checks passed; agent running; heartbeat 14:30 PT fresh; dry_run / armed=false / safe_stabilization_mode=true
+
+### Risks / Blockers
+- The Mini's 9 reconciled entries remain an uncommitted working-tree change on the Mini (and are not yet in origin); the dev-Mac handoff copy has its own newer uncommitted appends. Full cross-machine convergence requires a future commit+push of the merged handoff.
+
+### Next Recommended Task
+On approval, commit the merged handoff (containing all entries) and push so origin and the Mini converge fully.
