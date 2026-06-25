@@ -1,9 +1,15 @@
 #!/bin/zsh
 #
-# verify_old_mac_runtime.sh — post-deploy runtime check, run ON the OLD MAC
-# (the production server) from inside ~/AlphaLab:
+# verify_old_mac_runtime.sh — post-deploy runtime check, run ON the SERVER
+# (the canonical Mac mini runner) from inside ~/AlphaLab:
 #
-#   cd ~/AlphaLab && ./scripts/verify_old_mac_runtime.sh
+#   cd ~/AlphaLab && ./scripts/verify_server_runtime.sh   # canonical name
+#   cd ~/AlphaLab && ./scripts/verify_old_mac_runtime.sh  # legacy alias (same check)
+#
+# NOTE: server-agnostic — it uses $HOME, the live UID, and the runtime DB resolver,
+# so it works on the Mac mini and any future runner. The launchd check below accepts
+# BOTH a gui/<uid> LaunchAgent and a system/ LaunchDaemon (the Mac mini runs the
+# dashboard as a system LaunchDaemon and the scheduler as a gui LaunchAgent).
 #
 # It confirms the deployed code, environment, database, launchd agents, local API,
 # Catalyst Intelligence endpoint, and read-only report/diagnostic commands are all
@@ -202,14 +208,22 @@ else
   err "runtime diagnostics failed (see /tmp/alphalab_diag.err)"
 fi
 
-# --- 5. launchd agents ------------------------------------------------------
-step "launchd agents"
+# --- 5. launchd services (LaunchAgent gui/<uid> OR LaunchDaemon system/) -----
+step "launchd services"
 for LABEL in "$DASHBOARD_LABEL" "$SCHEDULER_LABEL"; do
+  # Prefer the per-user gui domain (LaunchAgent); fall back to the system domain
+  # (LaunchDaemon). The Mac mini runs the dashboard as a system LaunchDaemon, so a
+  # gui-only lookup would wrongly report it "not loaded".
   STATE="$(launchctl print "gui/${UID_NUM}/${LABEL}" 2>/dev/null | awk -F'= ' '/state =/{print $2; exit}')"
+  DOMAIN="gui/${UID_NUM}"
+  if [ -z "$STATE" ]; then
+    STATE="$(launchctl print "system/${LABEL}" 2>/dev/null | awk -F'= ' '/state =/{print $2; exit}')"
+    DOMAIN="system"
+  fi
   if [ -n "$STATE" ]; then
-    ok "agent ${LABEL} loaded (state: $STATE)"
+    ok "service ${LABEL} loaded in ${DOMAIN} (state: $STATE)"
   else
-    err "agent ${LABEL} not loaded — run scripts/setup_old_mac.sh"
+    err "service ${LABEL} not loaded in gui/${UID_NUM} or system — re-run the server setup/install step"
   fi
 done
 

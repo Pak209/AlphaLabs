@@ -1581,3 +1581,66 @@ Implemented mobile/PWA approval-queue UI polish from the prior audit: card fresh
 
 ### Next Recommended Task
 On operator approval, commit (UI-only) then deploy via ./ops and confirm on-device that approval cards show freshness, tap targets are comfortable, and Reject/Expire prompt.
+
+
+## 2026-06-25 14:09 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Migration cleanup: made the Mac mini (pak@dans-mac-mini) the canonical AlphaLabs server target. Repointed git-ignored scripts/server.conf from the retired old Mac to the Mini via the trusted MagicDNS FQDN; made the runtime verifier launchd check domain-aware (dashboard runs as a system LaunchDaemon on the Mini, scheduler as a gui LaunchAgent) and added a forward-named verify_server_runtime.sh wrapper. No trading mode, automation guard, broker creds, scheduler topology, or launchd changed; no reboot.
+
+### Files Modified
+- scripts/server.conf --backed up to scripts/server.conf.bak.* (git-ignored, local dev Mac)
+- scripts/verify_old_mac_runtime.sh --header reworded to server/Mac mini; launchd check now accepts gui/<uid> OR system/ domain
+- scripts/verify_server_runtime.sh --new canonical wrapper that execs the legacy verifier
+
+### Commands / Tests Run
+- ./ops scheduler-status; ./ops health
+- ssh pak@dans-mac-mini scheduler_safety_status()
+- inline launchd domain-fallback probe on Mini
+
+### Results
+- both now target pak@dans-mac-mini; db=/Users/pak/AlphaLab/...; mode=dry_run; heartbeat fresh; 18 jobs; API 200; same-DB proof ok
+- dry_run, automation_paper_trading_armed=false, paper_trades_can_be_triggered_by_scheduler=false, safe_stabilization_mode=true
+- dashboard loaded in system (running); scheduler loaded in gui/501 (running) -- confirms the verifier fix
+
+### Risks / Blockers
+- verify_old_mac_runtime.sh domain fix is on the dev Mac only; the Mini still runs the old copy until a deploy, so ./ops health still shows a false-negative dashboard FAIL until then
+- ALPHALAB_REQUIRE_PAPER_APPROVAL=false on the Mini (pre-existing, not changed); enable before any paper re-arm
+- scheduler remains a gui LaunchAgent: with FileVault on, a cold reboot will not start it until pak logs in
+
+### Next Recommended Task
+On approval: deploy so the Mini picks up the verifier fix; observe one market session; then decide LaunchAgent->LaunchDaemon scheduler conversion with rollback
+
+
+## 2026-06-25 14:14 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Deployed the migration-cleanup verifier changes to the Mac mini via surgical scp -p of TWO files only (scripts/verify_old_mac_runtime.sh updated, scripts/verify_server_runtime.sh new). Did NOT use ./ops deploy (it pulls main ff-only + kickstarts services, out of scope). Backed up the Mini's prior verifier first. No .env, trading mode, broker creds, scheduler agent/daemon status, Cloudflare/CodexPro/Tailscale, or reboot touched.
+
+### Files Modified
+- scripts/verify_old_mac_runtime.sh --copied to Mini (sha d18c57e...); prior copy backed up to scripts/verify_old_mac_runtime.sh.bak.20260625-141401
+- scripts/verify_server_runtime.sh --new canonical wrapper copied to Mini (sha 9b9af59...)
+
+### Commands / Tests Run
+- scp -p verify_old_mac_runtime.sh verify_server_runtime.sh pak@dans-mac-mini:AlphaLab/scripts/
+- ./ops health
+- ./ops scheduler-status
+
+### Results
+- rc=0; on-Mini sha256 of both files matches local source exactly; both -rwxr-xr-x
+- ALL HARD CHECKS PASSED; dashboard now detected in system domain (LaunchDaemon, running) -- prior false-negative FAIL resolved; scheduler in gui/501 running; 18 jobs; API 200; same-DB proof ok; safe_stabilization_mode=True
+- agent running; heartbeat 2026-06-25T14:10 fresh; mode=dry_run; db=/Users/pak/AlphaLab/...
+
+### Risks / Blockers
+- Deployed files are uncommitted/unpushed on both dev Mac and Mini working trees; reconcile into origin/main later so a future ./ops deploy does not revert them
+
+### Next Recommended Task
+Observe one market session on the LaunchAgent scheduler; then decide LaunchAgent->LaunchDaemon conversion with rollback per the prepared plan
