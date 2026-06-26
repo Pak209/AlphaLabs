@@ -548,6 +548,16 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
+    @app.get("/review")
+    def review_prototype() -> FileResponse:
+        # Hidden, read-only route serving the self-contained PM Approval / Morning
+        # Brief prototype bundle. It is NOT the default landing page ("/") and is
+        # not linked from the main dashboard. The bundle drives Screen A from a
+        # single read-only GET /api/review/briefing (mock fallback on failure) and
+        # never POSTs or mutates. Decision buttons are inert.
+        prototype_index = Path(__file__).parent.parent / "prototype" / "index.html"
+        return FileResponse(prototype_index)
+
     @app.get("/sw.js")
     def service_worker() -> FileResponse:
         # Served from root so the service worker's scope is "/" (the whole app),

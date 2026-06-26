@@ -2214,3 +2214,35 @@ Documenting commit 0200f66 'fix: block low-tier alpha from paper execution': add
 
 ### Next Recommended Task
 Refactor the gate to reference shared scoring constants instead of hardcoded tier/threshold values.
+
+
+## 2026-06-26 12:16 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Added hidden, read-only GET /review route serving the self-contained PM Approval / Morning Brief prototype bundle, and flipped the prototype's default data mode to LIVE (single read-only GET /api/review/briefing) with an explicit mock override (?review_data=mock or #/review?data=mock) and automatic mock fallback (with visible warning) on fetch/schema failure. / (dashboard) is unchanged; /review is not linked from the main app and is NOT the default landing. Screens B/C still show honest not-implemented placeholders in live mode; decision buttons remain inert (console.log only, no POST). No approve/reject wired; /api/review/opportunity/{idea_id} not implemented.
+
+### Files Modified
+- alpha_lab/api.py
+- prototype/app.js
+- prototype/index.html
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_api.py alpha_lab/tests/test_api_auth.py alpha_lab/tests/test_review_api.py -q
+- local uvicorn 127.0.0.1:8099 curl checks (server since stopped)
+
+### Results
+- GET /review returns FileResponse(prototype/index.html); read-only.
+- parseDataMode() defaults to live; mock is explicit override + fallback. Header comment updated.
+- Rebuilt self-contained bundle (93,504 bytes) via build_standalone.py.
+- 34 passed.
+- /review 200 serves prototype; / 200 still dashboard (no prototype markers); /api/review/briefing 200 review.v1 passes all 10 validateBriefing checks; only GET fetch, zero POST.
+
+### Risks / Blockers
+- Live render relies on backend reachability; on failure it falls back to mock with a warning. Screens B/C remain placeholders until /api/review/opportunity/{idea_id} exists. Not yet deployed to Mac mini.
+
+### Next Recommended Task
+After human approval, deploy to Mini; later implement /api/review/opportunity/{idea_id} to make Screen B/C live and consider promoting Morning Brief beyond a hidden route.

@@ -948,13 +948,14 @@ window.REVIEW_MOCK = (function () {
 })();
 
 // AlphaLabs PM Approval Prototype — view logic.
-// Data source: mock is the default (window.REVIEW_MOCK, the review.v1 contract).
-// Live mode is opt-in via a query flag (?review_data=live or #/review?data=live)
-// and performs ONLY a single read-only GET to /api/review/briefing to drive
-// Screen A; it never mutates. Decision buttons remain inert: they console.log the
-// endpoint they WOULD call and show a local toast, but never POST or hit the
-// network. Screens B/C have no live wiring and show honest placeholders in live
-// mode rather than mixing mock data with live briefing counts.
+// Data source: live is the DEFAULT (a single read-only GET to /api/review/briefing
+// drives Screen A; window.REVIEW_MOCK is the review.v1 fallback dataset). Mock is an
+// explicit dev override via a query flag (?review_data=mock or #/review?data=mock),
+// and is also the automatic fallback whenever the live fetch or schema validation
+// fails (a visible warning is shown). It never mutates. Decision buttons remain
+// inert: they console.log the endpoint they WOULD call and show a local toast, but
+// never POST or hit the network. Screens B/C have no live wiring and show honest
+// placeholders in live mode rather than mixing mock data with live briefing counts.
 (function () {
   const R = window.REVIEW_MOCK;
   // Active Screen-A briefing. Defaults to the mock contract; in live mode it is
@@ -1142,20 +1143,22 @@ window.REVIEW_MOCK = (function () {
   }
 
   /* ---------------- live data wiring (read-only) ---------------- */
-  // Feature flag: live mode only when explicitly requested via query string
-  // (?review_data=live) or hash query (#/review?data=live). Default is mock.
+  // Feature flag: live mode is the DEFAULT (the /review route attempts the
+  // read-only GET /api/review/briefing). Mock is an explicit dev override via
+  // query string (?review_data=mock) or hash query (#/review?data=mock). Any
+  // live failure still falls back to mock data with a visible warning.
   function parseDataMode() {
     try {
       const qs = new URLSearchParams(location.search);
-      if (qs.get("review_data") === "live") return "live";
+      if (qs.get("review_data") === "mock") return "mock";
       const h = location.hash || "";
       const qi = h.indexOf("?");
       if (qi >= 0) {
         const hp = new URLSearchParams(h.slice(qi + 1));
-        if (hp.get("data") === "live" || hp.get("review_data") === "live") return "live";
+        if (hp.get("data") === "mock" || hp.get("review_data") === "mock") return "mock";
       }
-    } catch (_) { /* malformed URL -> stay on mock */ }
-    return "mock";
+    } catch (_) { /* malformed URL -> fall through to live (mock is the fallback) */ }
+    return "live";
   }
 
   // Structural validation: confirm the payload is review.v1 and carries the
