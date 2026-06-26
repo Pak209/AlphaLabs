@@ -2246,3 +2246,34 @@ Added hidden, read-only GET /review route serving the self-contained PM Approval
 
 ### Next Recommended Task
 After human approval, deploy to Mini; later implement /api/review/opportunity/{idea_id} to make Screen B/C live and consider promoting Morning Brief beyond a hidden route.
+
+
+## 2026-06-26 12:37 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Deployed hidden /review live Morning Brief route to the Mac mini (pak@dans-mac-mini, /Users/pak/AlphaLab). Fast-forwarded Mini main 0200f66 -> 7d2c9d1 (origin/main) and restarted the dashboard so the new FastAPI route loads. No scheduler/broker/.env/trading-logic/launchd changes; no reboot; Cloudflared/CodexPro untouched.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ssh pak@dans-mac-mini: git merge --ff-only origin/main
+- restart dashboard: kill -TERM <pid 644>; system LaunchDaemon com.alphalab.dashboard (KeepAlive=true, UserName=pak) respawned as PID 69011
+- Mini verification curls on 127.0.0.1:8787
+- safety + scheduler check
+
+### Results
+- Mini main 0200f66 -> 7d2c9d1 (FF, working tree had untracked files only).
+- Restart without root via SIGTERM + KeepAlive respawn; new process serves updated code.
+- PASS: /api/review/briefing 200 review.v1 (passes all validateBriefing sections -> live badge); /review 200; / 200 still Alpha Lab dashboard (0 prototype markers); /review defaults live + mock override present; only GET fetch (no POST); Screen B/C placeholders present.
+- safety unchanged: scheduler_mode=dry_run, automation_paper_trading_armed=false, safe_stabilization_mode=true. Scheduler PID 62393 untouched.
+
+### Risks / Blockers
+- Mini dashboard is controlled by the system LaunchDaemon (/Library/LaunchDaemons/com.alphalab.dashboard.plist); a full unload/load needs root, but KeepAlive lets pak restart via SIGTERM. Screen B/C remain placeholders until /api/review/opportunity/{idea_id} exists.
+
+### Next Recommended Task
+Phone/PWA spot-check of https://<mini-tailscale>/review (Live Data badge). Later implement /api/review/opportunity/{idea_id} for Screen B/C.
