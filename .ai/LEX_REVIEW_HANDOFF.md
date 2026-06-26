@@ -2187,3 +2187,30 @@ Tightening pass on the prototype live-wiring (pre-commit, not committed). Update
 
 ### Next Recommended Task
 Await human decision to commit prototype/{app.js,styles.css,index.html} (+ handoff log). Do not wire Screen B/C to live, do not enable approve/reject, do not deploy to Mini.
+
+
+## 2026-06-26 11:38 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Documenting commit 0200f66 'fix: block low-tier alpha from paper execution': adds a paper-order eligibility gate in AlphaLabService.place_trade that blocks live (non-dry_run) paper execution unless the alpha tier is 'tradeable' or 'high_conviction' AND composite_score >= 70. dry_run simulation behavior is preserved (low-tier ideas still simulate, broker untouched). Because the gate lives in the shared place_trade execution path, scheduler-initiated paper orders are also protected. This is a docs-only handoff entry; no code/scheduler/trading/broker/env changes made by this task.
+
+### Files Modified
+- .ai/LEX_REVIEW_HANDOFF.md
+
+### Commands / Tests Run
+- git log/show 0200f66 (read-only audit)
+- .venv/bin/python -m pytest alpha_lab/tests/test_alpha_lab.py alpha_lab/tests/test_analyst_layer.py alpha_lab/tests/test_options_layer.py -q
+
+### Results
+- Reviewed 0200f66 diff: gate in place_trade ~L932 + helper _paper_order_eligibility_error ~L1511; dry_run path returns accepted with paper_eligible=False and no broker order.
+- 39 relevant tests passed (incl. 7 new gate tests; dry_run-low-tier-simulates test confirms broker untouched).
+
+### Risks / Blockers
+- Threshold (composite_score >= 70) and eligible tier set are hardcoded in service.py, duplicating scoring tiers; should eventually reference shared scoring constants to avoid drift.
+
+### Next Recommended Task
+Refactor the gate to reference shared scoring constants instead of hardcoded tier/threshold values.
