@@ -249,6 +249,11 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
     def list_market_briefings(limit: int = 20) -> list[dict[str, Any]]:
         return lab.list_market_briefings(limit)
 
+    @app.get("/api/review/briefing")
+    def review_briefing(limit: int = 50) -> dict[str, Any]:
+        # Read-only review.v1 briefing for the PM Approval UX. Never mutates or trades.
+        return lab.review_briefing(limit)
+
     @app.post("/api/ideas")
     def submit_idea(payload: dict[str, Any]) -> dict[str, Any]:
         try:

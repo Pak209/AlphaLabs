@@ -2063,3 +2063,67 @@ Restructured prototype mock to the proposed review.v1 read-API contract (briefin
 
 ### Next Recommended Task
 Implement GET /api/review/briefing first (read-only, composes existing alpha_ideas + scoring + futures_snapshots + market_briefings + positions); keep opportunity detail and any mutation endpoints for a later step.
+
+
+## 2026-06-26 00:01 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Implemented read-only GET /api/review/briefing returning real AlphaLabs data in the review.v1 contract used by the prototype. No DB migrations, no mutations, no scheduler/trading/.env/broker/launchd changes. Prototype NOT yet wired to the live endpoint (per instruction: wire only once shapes match).
+
+### Files Modified
+- alpha_lab/review_api.py
+- alpha_lab/service.py
+- alpha_lab/api.py
+- alpha_lab/tests/test_review_api.py
+
+### Commands / Tests Run
+- n/a
+- n/a
+- n/a
+- .venv/bin/python -m pytest alpha_lab/tests/test_review_api.py alpha_lab/tests/test_api.py -q
+
+### Results
+- New pure, side-effect-free builder build_review_briefing(): shapes safety status + latest futures snapshot + latest market briefing + reviewable alpha_ideas + approval queue into review.v1 briefing. Honest unavailable states (not_implemented/no_entitlement/insufficient_data/unavailable) with null values, never faked numbers.
+- Added AlphaLabService.review_briefing(limit) read path (lists 1 futures snapshot, 1 market briefing, reviewable ideas, pending approvals). scheduler_safety_status imported lazily inside method to avoid service<->scheduler circular import.
+- Added GET /api/review/briefing route (read-only, no token required like other GETs).
+- 23 passed. New tests: empty-source honest states, real-row shaping, no-short null, endpoint smoke + asserts dashboard endpoint unaffected. Confirmed no circular import via direct import of api/service/scheduler.
+- Captured live JSON via TestClient on a temp DB (production sqlite is a blocked path, never read). Top-level keys and card keys exactly equal REVIEW_MOCK.briefing key sets.
+
+### Risks / Blockers
+- Shape gaps vs mock to resolve before/at prototype wiring: (1) card.conviction_score uses analyst confidence*100, NOT the alpha_composite (composite only exists on trades after a scoring run); (2) card.name=ticker and logo_domain=null (company name/logo not stored server-side); (3) expected_move_text=null, trend_spark=[] (not persisted per idea); (4) market_risks.severity='unknown' vs mock low/medium/high (severity not modeled); (5) added 'availability' fields + portfolio_exposure/watchlist_changes returned not_implemented (no positions classifier / no watchlist tracking).
+
+### Next Recommended Task
+Decide conviction source (confidence vs persisting alpha_composite per idea) and the source->confidence-component mapping, then wire the prototype Screen A to GET /api/review/briefing behind a flag; defer GET /api/review/opportunity/{idea_id} until after briefing wiring is validated.
+
+
+## 2026-06-26 09:40 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Tightening pass on the read-only review.v1 briefing builder per reviewer: confidence normalization, top-5 cap, worst-case envelope freshness, strategy mapping. Tests added for each. No prototype wiring, no migrations/scheduler/trading/.env/broker/launchd changes. Not committed.
+
+### Files Modified
+- alpha_lab/review_api.py
+- alpha_lab/tests/test_review_api.py
+
+### Commands / Tests Run
+- n/a
+- .venv/bin/python -m pytest alpha_lab/tests/ -q
+
+### Results
+- Added _normalize_confidence (0-1 fraction -> 0-100; >1 kept as-is). Capped top_opportunities to top 5 via _TOP_OPPORTUNITIES; best_opportunity + highest_conviction_long/short still computed over the FULL reviewable set; pending_approvals.total still full count. Envelope meta.data_freshness now WORST-CASE = oldest contributing section (regime snapshot + briefing), documented inline; section-level freshness unchanged. Strategy map: intraday->Day Trade, swing->Swing, position->LEAPS, unknown/null->Swing.
+- 377 passed (9 in test_review_api). New tests: confidence 0.84->84 and 84-stays-84/1.0->100; top-5 cap with leaders+counts using full set; worst-case oldest-section envelope freshness; strategy mapping incl position->LEAPS.
+- Captured updated live JSON via TestClient on temp DB (prod sqlite is a blocked path, never read): confidence 0.84->84, 5 cards from 7 ideas, envelope freshness=oldest briefing while regime keeps its own. Confirmed /api/dashboard unaffected (test_api.py 19 passed) and prototype/ unchanged (not wired).
+
+### Risks / Blockers
+- Same shape gaps remain for the wiring decision: conviction_score uses analyst confidence*100 not alpha_composite; name=ticker, logo_domain=null, expected_move_text=null, trend_spark=[]; market_risks.severity=unknown; portfolio_exposure/watchlist_changes not_implemented.
+
+### Next Recommended Task
+Decide conviction source + source->component mapping, then wire prototype Screen A to GET /api/review/briefing behind a flag; defer GET /api/review/opportunity/{idea_id}.

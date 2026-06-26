@@ -24,6 +24,7 @@ from .daily_brief import build_daily_market_brief
 from .live_sources import fetch_polygon_intraday, fetch_yahoo_price
 from .market_data import CRYPTO_COINS, build_trending_stock_signals, get_bitcoin_market, get_crypto_market, get_business_brief, get_liquidity_flows
 from .repository import AlphaLabRepository
+from .review_api import build_review_briefing
 from .performance import build_performance_report
 from .scoring_engine import (
     composite, score_catalyst, score_narrative, score_macro, score_price_volume,
@@ -671,6 +672,25 @@ class AlphaLabService:
     def list_market_briefings(self, limit: int = 20) -> list[dict[str, Any]]:
         with connect(self.db_path) as conn:
             return AlphaLabRepository(conn).list_market_briefings(limit)
+
+    def review_briefing(self, limit: int = 50) -> dict[str, Any]:
+        """Read-only review.v1 briefing: assemble the latest regime snapshot,
+        stored market briefing, reviewable ideas, and pending approvals into the
+        PM Approval UX contract. Never mutates state or places a trade."""
+        from .scheduler import scheduler_safety_status  # local import avoids service<->scheduler cycle
+        with connect(self.db_path) as conn:
+            repo = AlphaLabRepository(conn)
+            futures_snapshots = repo.list_futures_snapshots(1)
+            market_briefings = repo.list_market_briefings(1)
+            ideas = repo.list_ideas(limit)
+            pending = repo.list_pending_approvals(limit)
+        return build_review_briefing(
+            safety=scheduler_safety_status(),
+            futures_snapshots=futures_snapshots,
+            market_briefings=market_briefings,
+            ideas=ideas,
+            pending_approvals=pending,
+        )
 
     def import_daily_brief_and_test(self, dry_run: bool = True, live_catalysts: bool = True) -> dict[str, Any]:
         if not dry_run and os.getenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "").lower() != "true":
