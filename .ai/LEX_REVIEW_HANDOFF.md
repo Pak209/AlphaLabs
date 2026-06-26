@@ -2127,3 +2127,63 @@ Tightening pass on the read-only review.v1 briefing builder per reviewer: confid
 
 ### Next Recommended Task
 Decide conviction source + source->component mapping, then wire prototype Screen A to GET /api/review/briefing behind a flag; defer GET /api/review/opportunity/{idea_id}.
+
+
+## 2026-06-26 10:18 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Wired Screen A / Morning Brief to live GET /api/review/briefing behind a safe query-param feature flag (?review_data=live or #/review?data=live). Default stays mock; live mode fetches, validates schema_version=review.v1 + required sections, renders Screen A, and falls back to mock with a visible warning on any failure. Added Mock/Live badge, null-safe rendering for honest not_implemented/null live fields, and a Screen-B placeholder for live cards absent from mock. Frontend-only; buttons remain inert.
+
+### Files Modified
+- prototype/app.js
+- prototype/styles.css
+- prototype/index.html
+
+### Commands / Tests Run
+- python3 prototype/build_standalone.py
+- preview verify mock + live (temp static fixture) + live-fallback
+
+### Results
+- Rebuilt self-contained index.html (92,148 bytes).
+- Added .data-badge/.data-warning/.sev-unknown styles.
+- Regenerated bundle from app.js+styles.css+data.js.
+- Default route = Mock Data badge, no warning. ?review_data=live with no backend = GET /api/review/briefing 404 -> visible warning + mock fallback (no POST). Temp review.v1 fixture -> Live Data badge, regime/lex/hero render, honest not_implemented notes for watchlist+portfolio, sev-unknown ok, empty trend_spark no error. Tapping live card 9001 -> 'Live detail endpoint not implemented yet' placeholder.
+
+### Risks / Blockers
+- Preview sandbox has no backend network; successful live render was verified via a temporary static JSON fixture (since removed), not the real endpoint. Cross-origin not exercised: real use assumes prototype served same-origin as the API.
+
+### Next Recommended Task
+Have a human review and decide whether to commit the prototype live-wiring; if approved, commit prototype/{app.js,styles.css,index.html} only. Do not wire Screen B / GET /api/review/opportunity/{idea_id}, do not enable approve/reject, do not deploy to Mini.
+
+
+## 2026-06-26 10:27 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Tightening pass on the prototype live-wiring (pre-commit, not committed). Updated the app.js file header (mock default, live opt-in, live = read-only GET /api/review/briefing only, decision buttons inert/no POST). Added an honest Screen-C/Approval-Queue placeholder in live mode ('Live approval queue is not implemented yet. Screen A is using live briefing data only.') so mock approval cards never mix with live pending counts. Mock mode A/B/C unchanged. Frontend-only.
+
+### Files Modified
+- prototype/app.js
+- prototype/index.html
+
+### Commands / Tests Run
+- python3 prototype/build_standalone.py
+- preview verify mock A/B/C + live A/B/C + network
+
+### Results
+- Header comment rewritten; renderQueue returns live placeholder when dataMode==='live'.
+- Rebuilt self-contained bundle (93,200 bytes).
+- Mock default: Screen C shows 3 mock cards (unchanged). Live: Screen A renders from GET (200 via temp fixture, since removed); Screen B = 'Live detail endpoint not implemented yet'; Screen C = live-mode placeholder, 0 mock cards. Network shows only GET /api/review/briefing (200/404); zero POST requests.
+
+### Risks / Blockers
+- Live render still verified via a temporary local JSON fixture (sandbox has no backend network), not the real endpoint.
+
+### Next Recommended Task
+Await human decision to commit prototype/{app.js,styles.css,index.html} (+ handoff log). Do not wire Screen B/C to live, do not enable approve/reject, do not deploy to Mini.

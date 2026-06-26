@@ -1,10 +1,19 @@
 // AlphaLabs PM Approval Prototype — view logic.
-// Consumes the review.v1 mock contract ONLY (window.REVIEW_MOCK). No live API
-// calls, no mutations. Decision buttons are inert: they console.log the endpoint
-// they WOULD call and show a local toast, but never hit the network.
+// Data source: mock is the default (window.REVIEW_MOCK, the review.v1 contract).
+// Live mode is opt-in via a query flag (?review_data=live or #/review?data=live)
+// and performs ONLY a single read-only GET to /api/review/briefing to drive
+// Screen A; it never mutates. Decision buttons remain inert: they console.log the
+// endpoint they WOULD call and show a local toast, but never POST or hit the
+// network. Screens B/C have no live wiring and show honest placeholders in live
+// mode rather than mixing mock data with live briefing counts.
 (function () {
   const R = window.REVIEW_MOCK;
-  const B = R.briefing;                 // GET /api/review/briefing
+  // Active Screen-A briefing. Defaults to the mock contract; in live mode it is
+  // swapped for a validated payload from GET /api/review/briefing. Any failure
+  // falls back to this mock, so the UI is never blank and never fabricated.
+  let B = R.briefing;                   // GET /api/review/briefing
+  let dataMode = "mock";                // "mock" | "live" — drives the UI badge
+  let dataWarning = "";                 // set when a live fetch falls back to mock
   const detail = (id) => R.get_opportunity(id); // GET /api/review/opportunity/{id}
   const app = document.getElementById("app");
 
@@ -14,6 +23,7 @@
     queueIndex: 0,
     queueOrder: R.order.slice(),
     sheet: { open: false, tab: "ai", oppId: R.order[0] },
+    detailPlaceholder: false,           // true when a live card has no mock detail
   };
 
   /* ---------------- small helpers ---------------- */
@@ -171,6 +181,59 @@
     </div>`;
   }
 
+  // "Mock Data" / "Live Data" indicator shown in the Screen-A date row.
+  function dataBadge() {
+    const live = dataMode === "live";
+    return `<span class="data-badge ${live ? "live" : "mock"}">${live ? "Live Data" : "Mock Data"}</span>`;
+  }
+
+  // Visible warning banner shown only when a live fetch failed and we fell back.
+  function dataWarningBanner() {
+    return dataWarning ? `<div class="data-warning">⚠ ${esc(dataWarning)}</div>` : "";
+  }
+
+  /* ---------------- live data wiring (read-only) ---------------- */
+  // Feature flag: live mode only when explicitly requested via query string
+  // (?review_data=live) or hash query (#/review?data=live). Default is mock.
+  function parseDataMode() {
+    try {
+      const qs = new URLSearchParams(location.search);
+      if (qs.get("review_data") === "live") return "live";
+      const h = location.hash || "";
+      const qi = h.indexOf("?");
+      if (qi >= 0) {
+        const hp = new URLSearchParams(h.slice(qi + 1));
+        if (hp.get("data") === "live" || hp.get("review_data") === "live") return "live";
+      }
+    } catch (_) { /* malformed URL -> stay on mock */ }
+    return "mock";
+  }
+
+  // Structural validation: confirm the payload is review.v1 and carries the
+  // sections Screen A needs. Returns "" when valid, else a human-readable reason.
+  function validateBriefing(p) {
+    if (!p || typeof p !== "object") return "response was not a JSON object";
+    const m = p.meta;
+    if (!m || typeof m !== "object") return "response is missing meta envelope";
+    if (m.schema_version !== "review.v1") return "unexpected schema_version (need review.v1)";
+    if (!m.data_freshness || !m.safety_status) return "meta is missing freshness/safety status";
+    if (!p.market_regime || typeof p.market_regime !== "object") return "missing market_regime";
+    if (!p.lex_summary || typeof p.lex_summary !== "object") return "missing lex_summary";
+    if (!Array.isArray(p.top_opportunities)) return "missing top_opportunities";
+    if (!Array.isArray(p.market_risks)) return "missing market_risks";
+    if (!p.watchlist_changes || typeof p.watchlist_changes !== "object") return "missing watchlist_changes";
+    if (!p.portfolio_exposure || typeof p.portfolio_exposure !== "object") return "missing portfolio_exposure";
+    if (!p.pending_approvals || typeof p.pending_approvals !== "object") return "missing pending_approvals";
+    return "";
+  }
+
+  // Read-only GET. Never sends a body, never mutates, never POSTs.
+  async function loadLiveBriefing() {
+    const res = await fetch("/api/review/briefing", { method: "GET", headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
   /* ---------------- Screen A: Morning Brief ---------------- */
   function renderBrief() {
     const r = B.market_regime;
@@ -188,8 +251,9 @@
         <button class="icon-btn bell-wrap">${ICN.bell}<span class="bell-badge">2</span></button>
         <button class="icon-btn">${ICN.refresh}</button>
       </header>
-      <div class="date-row">Thu, Jun 25, 2026 · 6:42 AM PT ${metaChips(B.meta)}</div>
+      <div class="date-row">Thu, Jun 25, 2026 · 6:42 AM PT ${dataBadge()} ${metaChips(B.meta)}</div>
       <div class="content">
+        ${dataWarningBanner()}
 
         <section class="panel">
           <div class="panel-head"><span class="section-num">1</span><span class="panel-eyebrow">Market Regime</span></div>
@@ -197,15 +261,15 @@
             <div class="regime-gauge">${regimeIcon()}</div>
             <div class="regime-meta">
               <div class="regime-label">${esc(r.label)}</div>
-              <div class="regime-conf">${esc(r.confidence_text)} · ${r.confidence}%</div>
+              <div class="regime-conf">${esc(r.confidence_text)}${r.confidence != null ? ` · ${r.confidence}%` : ""}</div>
             </div>
             <div class="futures">
-              ${r.futures.map((f) => `<div class="fut-row"><span class="fn">${esc(f.name)}</span><span class="fv ${f.direction}">${esc(f.value_text)}</span></div>`).join("")}
+              ${(r.futures || []).map((f) => `<div class="fut-row"><span class="fn">${esc(f.name)}</span><span class="fv ${f.direction}">${esc(f.value_text)}</span></div>`).join("")}
             </div>
           </div>
           <div class="lex">
             <div class="lex-title">💬 Lex Summary</div>
-            <div class="lex-body">${esc(B.lex_summary.text)}</div>
+            <div class="lex-body">${esc(B.lex_summary.text || B.lex_summary.note || "No market summary available.")}</div>
           </div>
         </section>
 
@@ -218,10 +282,10 @@
               ${stars(best.star_rating)}
               <div class="tkr-name-lg">${esc(best.ticker)}</div>
               <div class="tkr-sub">${esc(best.name)}</div>
-              <div class="pill-row">${esc(best.strategy)} · ${esc(best.expected_move_text)} · ${esc(best.hold_period_text)}</div>
+              <div class="pill-row">${[best.strategy, best.expected_move_text, best.hold_period_text].filter(Boolean).map(esc).join(" · ")}</div>
             </div>
             <div class="hero-score">
-              <div class="score-big">${best.conviction_score}<span class="den">/100</span></div>
+              <div class="score-big">${best.conviction_score != null ? best.conviction_score : "—"}<span class="den">/100</span></div>
               <div class="score-cap">AI Conviction</div>
             </div>
           </div>
@@ -243,8 +307,8 @@
               </div>
               <div class="opp-right">
                 ${stars(o.star_rating)}
-                <span class="opp-score">${o.conviction_score}</span>
-                ${sparkline(o.trend_spark, sparkColor(o.trend_direction))}
+                <span class="opp-score">${o.conviction_score != null ? o.conviction_score : "—"}</span>
+                ${o.trend_spark && o.trend_spark.length ? sparkline(o.trend_spark, sparkColor(o.trend_direction)) : ""}
               </div>
             </div>
             ${i < top.length - 1 ? '<div class="divline"></div>' : ""}
@@ -254,23 +318,25 @@
         <div class="mini-grid">
           <section class="panel mini">
             <span class="panel-eyebrow"><span class="section-num">4</span> Watchlist Changes</span>
-            <div class="wl-line"><span class="up">↑</span> ${wl.added} Added</div>
-            <div class="wl-line"><span class="down">↓</span> ${wl.removed} Removed</div>
+            ${(wl.added != null || wl.removed != null)
+              ? `<div class="wl-line"><span class="up">↑</span> ${wl.added} Added</div>
+                 <div class="wl-line"><span class="down">↓</span> ${wl.removed} Removed</div>`
+              : `<div class="empty-note" style="margin-top:8px">${esc(wl.note || "Not available yet.")}</div>`}
           </section>
           <section class="panel mini">
             <span class="panel-eyebrow"><span class="section-num">5</span> Highest Conviction Short</span>
             ${hs ? `
               <div style="font-weight:800;margin:6px 0 2px">🔻 ${esc(hs.ticker)}</div>
-              ${stars(hs.star_rating)} <span style="font-weight:800">${hs.conviction_score}</span>
-              <div class="down" style="font-weight:700;margin-top:4px">${esc(hs.expected_move_text)}</div>`
+              ${stars(hs.star_rating)} <span style="font-weight:800">${hs.conviction_score != null ? hs.conviction_score : "—"}</span>
+              ${hs.expected_move_text ? `<div class="down" style="font-weight:700;margin-top:4px">${esc(hs.expected_move_text)}</div>` : ""}`
             : `<div class="empty-note" style="margin-top:8px">No high-conviction short today.</div>`}
           </section>
           <section class="panel mini">
             <span class="panel-eyebrow"><span class="section-num">6</span> Highest Conviction Long</span>
             ${hl ? `
               <div style="font-weight:800;margin:6px 0 2px">🔺 ${esc(hl.ticker)}</div>
-              ${stars(hl.star_rating)} <span style="font-weight:800">${hl.conviction_score}</span>
-              <div class="up" style="font-weight:700;margin-top:4px">${esc(hl.expected_move_text)}</div>`
+              ${stars(hl.star_rating)} <span style="font-weight:800">${hl.conviction_score != null ? hl.conviction_score : "—"}</span>
+              ${hl.expected_move_text ? `<div class="up" style="font-weight:700;margin-top:4px">${esc(hl.expected_move_text)}</div>` : ""}`
             : `<div class="empty-note" style="margin-top:8px">No high-conviction long today.</div>`}
           </section>
         </div>
@@ -281,13 +347,15 @@
             <ul class="risk-list">${B.market_risks.map((x) => `<li><span class="sev sev-${x.severity}"></span>${esc(x.label)}</li>`).join("")}</ul>
           </section>
           <section class="panel mini">
-            <span class="panel-eyebrow"><span class="section-num">8</span> Portfolio Exposure ${exp.freshness.is_stale ? `<span class="meta-chip stale">${esc(exp.freshness.label)}</span>` : ""}</span>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
-              ${donut(exp.segments)}
-              <div style="flex:1">
-                ${exp.segments.map((e) => `<div class="exposure-row"><span class="dot" style="background:${e.color}"></span>${esc(e.label)}<span class="exp-pct">${e.pct}%</span></div>`).join("")}
-              </div>
-            </div>
+            <span class="panel-eyebrow"><span class="section-num">8</span> Portfolio Exposure ${exp.freshness && exp.freshness.is_stale ? `<span class="meta-chip stale">${esc(exp.freshness.label)}</span>` : ""}</span>
+            ${exp.segments && exp.segments.length
+              ? `<div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+                  ${donut(exp.segments)}
+                  <div style="flex:1">
+                    ${exp.segments.map((e) => `<div class="exposure-row"><span class="dot" style="background:${e.color}"></span>${esc(e.label)}<span class="exp-pct">${e.pct}%</span></div>`).join("")}
+                  </div>
+                </div>`
+              : `<div class="empty-note" style="margin-top:8px">${esc(exp.note || "Not available yet.")}</div>`}
           </section>
           <section class="panel mini" data-goto-queue>
             <span class="panel-eyebrow"><span class="section-num">9</span> Pending Approvals</span>
@@ -334,6 +402,19 @@
   }
 
   function renderDetail() {
+    // Screen B is NOT wired to live data. When the opportunity came from a live
+    // Screen-A card that has no mock counterpart, show an honest placeholder
+    // rather than faking detail data.
+    if (state.detailPlaceholder) {
+      return `
+        <header class="detail-head">
+          <button class="back-btn" data-goto="brief">‹ Back</button>
+          <span class="spacer"></span><span class="detail-title">Opportunity</span><span class="spacer"></span>
+        </header>
+        <div class="content"><div class="empty-note" style="margin-top:60px">
+          Live detail endpoint not implemented yet. Opportunity detail is only available in mock mode.
+        </div></div>${tabbar("opp")}`;
+    }
     const d = detail(state.currentOppId);
     if (!d) return `<div class="content"><div class="empty-note" style="margin-top:60px">Opportunity not found.</div></div>${tabbar("opp")}`;
     const hd = d.header, c = d.conviction, t = d.thesis, ai = d.ai_explanation;
@@ -423,6 +504,21 @@
 
   /* ---------------- Screen C: Approval Queue ---------------- */
   function renderQueue() {
+    // Screen C is NOT wired to live data. In live mode, show an honest
+    // placeholder instead of mixing the mock approval cards with the live
+    // pending counts from Screen A.
+    if (dataMode === "live") {
+      return `
+        ${queueHeader(0, B.pending_approvals.total, 0)}
+        <div class="queue-done">
+          <div class="big">🚧</div>
+          <h3>Approval queue unavailable in live mode</h3>
+          <p>Live approval queue is not implemented yet. Screen A is using live briefing data only.</p>
+          <button class="btn btn-explain" data-goto="brief" style="display:inline-flex;margin-top:10px">Back to Brief</button>
+        </div>
+        <div class="bottom-spacer"></div>
+        ${tabbar("watch")}`;
+    }
     const total = B.pending_approvals.total;
     const reviewed = state.queueIndex;
     const pct = Math.round((reviewed / total) * 100);
@@ -608,7 +704,15 @@
   }
 
   /* ---------------- actions (INERT — no network, no mutation) ---------------- */
-  function openDetail(id) { state.currentOppId = id; state.screen = "detail"; render(); app.scrollTop = 0; }
+  function openDetail(id) {
+    state.currentOppId = id;
+    state.screen = "detail";
+    // In live mode, only mock idea_ids have detail data; everything else gets the
+    // honest "not implemented" placeholder instead of faked detail.
+    state.detailPlaceholder = dataMode === "live" && !R.get_opportunity(id);
+    render();
+    app.scrollTop = 0;
+  }
   function openSheet(id) { state.sheet.oppId = id; state.sheet.open = true; state.sheet.tab = "ai"; render(); }
   function closeSheet() { state.sheet.open = false; render(); }
 
@@ -684,5 +788,22 @@
     if (od && !e.target.closest("[data-stop]")) { openDetail(Number(od.dataset.openDetail)); return; }
   });
 
-  render();
+  // Bootstrap: mock by default. In live mode, paint mock immediately (never a
+  // blank screen), then attempt the read-only GET and swap in validated live
+  // data — or fall back to mock with a visible warning on any failure.
+  async function boot() {
+    if (parseDataMode() !== "live") { dataMode = "mock"; B = R.briefing; render(); return; }
+    render(); // immediate mock paint while the fetch is in flight
+    try {
+      const payload = await loadLiveBriefing();
+      const problem = validateBriefing(payload);
+      if (problem) throw new Error(problem);
+      B = payload; dataMode = "live"; dataWarning = "";
+    } catch (err) {
+      B = R.briefing; dataMode = "mock";
+      dataWarning = "Live data unavailable (" + (err && err.message ? err.message : "fetch failed") + ") — showing mock data.";
+    }
+    render();
+  }
+  boot();
 })();

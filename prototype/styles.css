@@ -406,6 +406,21 @@ html, body {
 .sev-low { background: var(--green); }
 .sev-medium { background: var(--amber); }
 .sev-high { background: var(--red); }
+.sev-unknown { background: var(--muted-2); }
+
+/* Mock/Live data source indicator + fallback warning (live wiring) */
+.data-badge {
+  display: inline-flex; align-items: center; border-radius: 999px;
+  padding: 2px 9px; font-size: 10px; font-weight: 800; letter-spacing: .04em;
+  text-transform: uppercase; vertical-align: middle;
+}
+.data-badge.mock { background: var(--panel-2); border: 1px solid var(--panel-line); color: var(--muted); }
+.data-badge.live { background: var(--green-soft); border: 1px solid #2a5a36; color: var(--green); }
+.data-warning {
+  margin-bottom: 12px; background: #3a2f12; border: 1px solid #6a571f;
+  border-radius: var(--radius-sm); padding: 9px 12px;
+  color: var(--amber); font-size: 12px; font-weight: 600; line-height: 1.45;
+}
 
 .chip.src { background: var(--panel); border-color: var(--panel-line); color: var(--muted); }
 
