@@ -929,6 +929,23 @@ class AlphaLabService:
             self._log_execution_attempt(idea_id, decision, dry_run=dry_run)
             return decision
 
+        eligibility_error = self._paper_order_eligibility_error(decision)
+        if eligibility_error:
+            decision["paper_eligible"] = False
+            decision["paper_eligibility_reason"] = eligibility_error["reasons"][0]
+            if not dry_run:
+                result = {**decision, **eligibility_error}
+                with connect(self.db_path) as conn:
+                    AlphaLabRepository(conn).update_idea_status(
+                        idea_id,
+                        "rejected",
+                        result["paper_eligibility_reason"],
+                    )
+                self._log_execution_attempt(idea_id, result, dry_run=dry_run)
+                return result
+        else:
+            decision["paper_eligible"] = True
+
         broker = self._broker(dry_run=dry_run)
         order_payload = decision["order_payload"]
         try:
@@ -1490,6 +1507,36 @@ class AlphaLabService:
             if dry_run:
                 return SimulatedPaperBroker()
             raise
+
+    def _paper_order_eligibility_error(self, decision: dict[str, Any]) -> dict[str, Any] | None:
+        alpha = decision.get("alpha") or {}
+        tier = str(alpha.get("tier") or "").strip()
+        composite = alpha.get("composite_score")
+        reasons: list[str] = []
+        if tier not in {"high_conviction", "tradeable"}:
+            reasons.append(
+                "alpha_tier must be high_conviction or tradeable before Alpaca paper execution"
+                + (f" (got {tier or 'missing'})")
+            )
+        try:
+            composite_value = float(composite)
+        except (TypeError, ValueError):
+            composite_value = None
+        if composite_value is None or composite_value < 70:
+            reasons.append(
+                "alpha_composite must be >= 70 before Alpaca paper execution"
+                + (f" (got {composite if composite is not None else 'missing'})")
+            )
+        if not reasons:
+            return None
+        return {
+            "accepted": False,
+            "action": "paper_execution_blocked",
+            "reasons": reasons,
+            "order_response": {"submitted": False, "message": "No Alpaca paper order was placed."},
+            "paper_eligible": False,
+            "paper_eligibility_reason": "; ".join(reasons),
+        }
 
     def _regular_equity_session_open(self) -> bool:
         now = datetime.now(ZoneInfo("America/New_York"))

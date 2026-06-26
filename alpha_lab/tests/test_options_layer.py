@@ -62,11 +62,41 @@ PUT_SELECTION = {
 }
 
 
+class _Dump:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def model_dump(self) -> dict:
+        return self.payload
+
+
+def _force_tradeable_alpha(lab, monkeypatch):
+    monkeypatch.setattr(
+        lab,
+        "_score_idea",
+        lambda idea: (
+            _Dump({
+                "tier": "tradeable",
+                "composite_score": 72.0,
+                "confirmed": True,
+                "gate_applied": False,
+                "catalyst_score": 80.0,
+                "price_volume_score": 72.0,
+                "narrative_score": 75.0,
+                "macro_score": 62.2,
+            }),
+            _Dump({"options_score": 0, "component_score": 50.0, "bias": "neutral"}),
+            _Dump({"institutional_score": 0, "component_score": 50.0, "bias": "neutral"}),
+        ),
+    )
+
+
 def _stub_lab(tmp_path, monkeypatch, selection, market_open=True):
     monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
     lab = service(tmp_path)
     monkeypatch.setattr(lab, "_select_option_contract", lambda idea: selection)
     monkeypatch.setattr(lab, "_broker", lambda dry_run=True: SimulatedPaperBroker(market_open=market_open))
+    _force_tradeable_alpha(lab, monkeypatch)
     return lab
 
 
@@ -137,6 +167,7 @@ def test_full_lifecycle_fill_position_close_and_outcome_linkage(tmp_path, monkey
     lab = service(tmp_path)
     monkeypatch.setattr(lab, "_select_option_contract", lambda idea: CALL_SELECTION)
     monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    _force_tradeable_alpha(lab, monkeypatch)
 
     idea = lab.create_idea(idea_payload())
 

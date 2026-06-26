@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from alpha_lab.database import connect, init_db
 from alpha_lab.options_flow import OptionsFlowInputs
 from alpha_lab.repository import AlphaLabRepository
 from alpha_lab.service import AlphaLabService
+from paper_trader.simulated_broker import SimulatedPaperBroker
 
 
 def service(tmp_path: Path) -> AlphaLabService:
@@ -25,6 +28,36 @@ def idea_payload():
         "timestamp": "2026-06-04T13:00:00Z",
         "strategy_tags": ["AI bottleneck", "breakout"],
     }
+
+
+class _Dump:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def model_dump(self) -> dict:
+        return self.payload
+
+
+def force_alpha(lab: AlphaLabService, monkeypatch, *, tier: str | None, composite: float | None):
+    alpha = {
+        "tier": tier,
+        "composite_score": composite,
+        "confirmed": tier in {"tradeable", "high_conviction"},
+        "gate_applied": False,
+        "catalyst_score": 80.0,
+        "price_volume_score": 72.0,
+        "narrative_score": 75.0,
+        "macro_score": 62.2,
+    }
+    monkeypatch.setattr(
+        lab,
+        "_score_idea",
+        lambda idea: (
+            _Dump(alpha),
+            _Dump({"options_score": 0, "component_score": 50.0, "bias": "neutral"}),
+            _Dump({"institutional_score": 0, "component_score": 50.0, "bias": "neutral"}),
+        ),
+    )
 
 
 def test_create_idea_with_strategy_tags(tmp_path: Path):
@@ -124,6 +157,130 @@ def test_dry_run_trade_creates_trade_without_alpaca_keys(tmp_path: Path):
     assert len(trades) == 1
     assert trades[0]["dry_run"] == 1
     assert lab.list_ideas()[0]["status"] == "tested"
+
+
+def test_ignore_tier_blocks_paper_order(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="ignore", composite=45.0)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is False
+    assert result["action"] == "paper_execution_blocked"
+    assert "alpha_tier must be high_conviction or tradeable" in result["reasons"][0]
+    assert broker.orders == []
+    assert lab.list_trades() == []
+    stored = lab.list_ideas()[0]
+    assert stored["status"] == "rejected"
+    assert "alpha_tier" in stored["rejection_reason"]
+
+
+def test_watchlist_tier_blocks_paper_order(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="watchlist", composite=69.9)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is False
+    assert result["action"] == "paper_execution_blocked"
+    assert any("alpha_composite must be >= 70" in reason for reason in result["reasons"])
+    assert broker.orders == []
+    assert lab.list_trades() == []
+
+
+def test_missing_alpha_tier_blocks_paper_order(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier=None, composite=75.0)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is False
+    assert result["action"] == "paper_execution_blocked"
+    assert "got missing" in result["reasons"][0]
+    assert broker.orders == []
+    assert lab.list_trades() == []
+
+
+def test_tradeable_tier_with_low_composite_blocks_paper_order(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="tradeable", composite=69.0)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is False
+    assert result["action"] == "paper_execution_blocked"
+    assert result["reasons"] == ["alpha_composite must be >= 70 before Alpaca paper execution (got 69.0)"]
+    assert broker.orders == []
+    assert lab.list_trades() == []
+
+
+def test_tradeable_tier_can_submit_paper_order_when_other_gates_pass(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="tradeable", composite=70.0)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is True
+    assert result["paper_eligible"] is True
+    assert result["order_response"]["paper_simulated"] is True
+    assert len(broker.orders) == 1
+    assert lab.list_trades()[0]["dry_run"] == 0
+
+
+def test_high_conviction_tier_can_submit_paper_order_when_other_gates_pass(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="high_conviction", composite=82.0)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is True
+    assert result["paper_eligible"] is True
+    assert result["order_response"]["paper_simulated"] is True
+    assert len(broker.orders) == 1
+    assert lab.list_trades()[0]["dry_run"] == 0
+
+
+def test_dry_run_low_tier_still_simulates_without_broker_order(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="ignore", composite=45.0)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=True)
+
+    assert result["accepted"] is True
+    assert result["action"] == "dry_run"
+    assert result["paper_eligible"] is False
+    assert "alpha_tier must be high_conviction or tradeable" in result["paper_eligibility_reason"]
+    assert broker.orders == []
+    trades = lab.list_trades()
+    assert len(trades) == 1
+    assert trades[0]["dry_run"] == 1
 
 
 def test_neutral_idea_is_rejected_with_reason(tmp_path: Path):

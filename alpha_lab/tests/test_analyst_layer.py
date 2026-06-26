@@ -28,6 +28,35 @@ def idea_payload():
     }
 
 
+class _Dump:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def model_dump(self) -> dict:
+        return self.payload
+
+
+def force_tradeable_alpha(lab: AlphaLabService, monkeypatch):
+    monkeypatch.setattr(
+        lab,
+        "_score_idea",
+        lambda idea: (
+            _Dump({
+                "tier": "tradeable",
+                "composite_score": 72.0,
+                "confirmed": True,
+                "gate_applied": False,
+                "catalyst_score": 80.0,
+                "price_volume_score": 72.0,
+                "narrative_score": 75.0,
+                "macro_score": 62.2,
+            }),
+            _Dump({"options_score": 0, "component_score": 50.0, "bias": "neutral"}),
+            _Dump({"institutional_score": 0, "component_score": 50.0, "bias": "neutral"}),
+        ),
+    )
+
+
 def assisted_explanation(signal, context):
     payload = analyst.build_trade_explanation(signal, context)
     payload["analyst_mode"] = "anthropic"
@@ -166,6 +195,7 @@ def test_paper_automation_can_skip_approval_when_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
     monkeypatch.setattr("alpha_lab.service.build_trade_explanation", assisted_explanation)
     monkeypatch.setattr(lab, "_broker", lambda dry_run=True: SimulatedPaperBroker())
+    force_tradeable_alpha(lab, monkeypatch)
     idea = lab.create_idea(idea_payload())
     result = lab.place_trade(idea["id"], dry_run=False)
     assert result["accepted"] is True
@@ -191,6 +221,7 @@ def test_crypto_idea_skips_approval_when_flag_disabled(tmp_path, monkeypatch):
     monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
     monkeypatch.setattr("alpha_lab.service.build_trade_explanation", assisted_explanation)
     monkeypatch.setattr(lab, "_broker", lambda dry_run=True: SimulatedPaperBroker(market_open=False))
+    force_tradeable_alpha(lab, monkeypatch)
     idea = lab.create_idea({**idea_payload(), "ticker": "BTC/USD", "asset_type": "crypto", "strategy_tags": ["Bitcoin breakout"]})
     result = lab.place_trade(idea["id"], dry_run=False)
     assert result["accepted"] is True
@@ -202,6 +233,7 @@ def test_approved_idea_still_runs_risk_validation(tmp_path, monkeypatch):
     lab = service(tmp_path)
     monkeypatch.setattr("alpha_lab.service.build_trade_explanation", assisted_explanation)
     monkeypatch.setattr(lab, "_broker", lambda dry_run=True: SimulatedPaperBroker())
+    force_tradeable_alpha(lab, monkeypatch)
     idea = lab.create_idea(idea_payload())
     lab.approve_idea_for_execution(idea["id"], "approved for paper test")
     result = lab.place_trade(idea["id"], dry_run=False)
