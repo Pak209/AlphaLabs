@@ -1972,3 +1972,94 @@ Aligned the Mac mini to origin/main c368627. The Mini's local handoff edit was p
 
 ### Next Recommended Task
 Optional housekeeping (on approval): remove the now-unneeded temporary verifier backup and the two handoff backups on the Mini; decide whether the untracked Mini infra docs/scripts should be committed or git-ignored.
+
+
+## 2026-06-25 16:20 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Prototype layout fixes: pinned mobile tabbar/footer across Brief/Detail/Approval, condensed Detail action buttons so all 4 fit, added stock logos (Clearbit + initials fallback).
+
+### Files Modified
+- prototype/styles.css
+- prototype/app.js
+- prototype/data.js
+
+### Commands / Tests Run
+- python3 build_standalone.py
+
+### Results
+- Mobile media query reworked to flex column with fixed 100vh body + internal scroll; tabbar now pins to device bottom (verified tabbar.bottom==812 at full scroll).
+- logo() renders Clearbit img with colored-initials fallback; Detail actions condensed (Watchlist->Watch), bottom-spacer added in queue.
+- Added domain field to all 5 opportunities for logo lookup.
+
+### Risks / Blockers
+- Logos fall back to initials in the no-network preview sandbox; will load in a real browser. Prototype is mock-data only, no API wiring.
+
+### Next Recommended Task
+Await user validation of <5-min review workflow; defer API wiring until approved.
+
+
+## 2026-06-25 22:55 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Prototype Approval-screen redesign: condensed queue into flex column so card + Reject/Watchlist/Approve + NEXT fit with no scroll; removed duplicate approve/reject/watch/explain action buttons from Brief and Detail screens (now only on Approval).
+
+### Files Modified
+- prototype/app.js
+- prototype/styles.css
+
+### Commands / Tests Run
+- python3 build_standalone.py
+
+### Results
+- Removed hero .action-row from renderBrief and .sticky-actions from renderDetail; wrapped queue in .queue-screen flex column, dropped swipe-hint/tap-hint.
+- Added .queue-screen flex layout (height 100%, padding-bottom clears fixed tabbar); swipe-area flex:1 min-height:0; shrank card padding/gaps and swipe circles 60->54px. Verified no scroll, actions above tabbar.
+
+### Risks / Blockers
+- Prototype is mock-data only, no API wiring. Logos fall back to initials in no-network sandbox.
+
+### Next Recommended Task
+Await user validation of condensed Approval workflow; defer API wiring until approved.
+
+
+## 2026-06-25 23:22 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Restructured prototype mock to the proposed review.v1 read-API contract (briefing + opportunity) and wired Screens A/B/C to consume it. Mock-only; no backend, DB, scheduler, or approval endpoints touched.
+
+### Files Modified
+- prototype/data.js
+- prototype/app.js
+- prototype/styles.css
+- prototype/index.html
+
+### Commands / Tests Run
+- n/a (mock fixture)
+- n/a
+- n/a
+- python3 build_standalone.py
+
+### Results
+- REVIEW_MOCK now emits snake_case review.v1 payloads: ResponseMeta envelope (generated_at/schema_version/data_freshness/safety_status), OpportunityCard[], ConfidenceSource[] with availability states, ActionMeta[]. JSDoc typedefs added for schema reference.
+- Render fns read REVIEW_MOCK only; meta chips, confidence rows with null-score unavailable states, historical not_available block. Decision buttons inert: approve/reject console-log a would-POST endpoint (no request sent), watchlist disabled+warns.
+- Added review.v1 classes: .meta-chips/.meta-chip(.stale/.safety), .empty-note, .ev-unavailable/.ev-note, .sev(-low/medium/high), .chip.src, .swipe-btn.disabled.
+- Rebuilt self-contained bundle (85,591 bytes).
+- Verified in preview (mobile 375x812): Screen A renders from briefing (2 meta chips, 5 ranked opps, null highest_conviction_short -> empty-note, market-risk severity dots, no hero action buttons). Screen B (AMD/4825) renders 6 confidence sources with 2 honest unavailable rows (SEC not_implemented, historical_similarity insufficient_data) + historical_setups not_available empty-note, no sticky actions. Screen C swipe buttons: approve/reject enabled, watchlist disabled. Inert handlers confirmed via console: approve logs would-POST, watchlist warns disabled, zero network requests.
+
+### Risks / Blockers
+- UI's 6 confidence sources (News/SEC/Historical Similarity/Options/Technicals/Macro) still do not 1:1 map to backend scoring_engine's 6 components (catalyst/price_volume/narrative/options/institutional/macro) — mapping must be resolved before implementing the real /api/review/briefing.
+
+### Next Recommended Task
+Implement GET /api/review/briefing first (read-only, composes existing alpha_ideas + scoring + futures_snapshots + market_briefings + positions); keep opportunity detail and any mutation endpoints for a later step.

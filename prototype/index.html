@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#090b10" />
+  <title>AlphaLabs &mdash; PM Approval Prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+/* AlphaLabs PM Approval Prototype — styles (mobile-first, dark) */
+:root {
+  --bg: #090b10;
+  --panel: #121722;
+  --panel-2: #0e131c;
+  --panel-line: #1e2633;
+  --text: #eef3f9;
+  --muted: #8a97a8;
+  --muted-2: #5e6b7d;
+  --green: #22c55e;
+  --green-soft: #163326;
+  --red: #ef4455;
+  --red-soft: #321a20;
+  --amber: #f5b53d;
+  --blue: #5aa2ff;
+  --purple: #a855f7;
+  --star: #f5b53d;
+  --radius: 16px;
+  --radius-sm: 11px;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0;
+  background: #05070b;
+  color: var(--text);
+  font-family: "Inter", -apple-system, system-ui, sans-serif;
+}
+
+/* ---------- Prototype chrome ---------- */
+.proto-bar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 18px; background: #0c1018; border-bottom: 1px solid #1a2230;
+  position: sticky; top: 0; z-index: 50; flex-wrap: wrap;
+}
+.proto-brand { font-weight: 700; color: var(--green); font-size: 14px; letter-spacing: .2px; }
+.proto-tabs { display: flex; gap: 8px; }
+.proto-tab {
+  background: #141b27; color: var(--muted); border: 1px solid #232d3c;
+  padding: 6px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: .15s;
+}
+.proto-tab:hover { color: var(--text); }
+.proto-tab.active { background: var(--green); color: #06140c; border-color: var(--green); }
+.proto-note { color: var(--muted-2); font-size: 12px; margin-left: auto; }
+
+/* ---------- Device frame ---------- */
+.stage {
+  display: flex; justify-content: center; padding: 26px 16px 60px;
+}
+.device {
+  position: relative;
+  width: 412px; max-width: 100%;
+  height: 860px; max-height: calc(100vh - 120px);
+  background: var(--bg);
+  border-radius: 38px;
+  border: 10px solid #11151d;
+  box-shadow: 0 24px 60px rgba(0,0,0,.6), inset 0 0 0 2px #000;
+  overflow: hidden;
+  transform: translateZ(0); /* containing block so fixed sheet/toast pin to device viewport */
+}
+.device-notch {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 150px; height: 24px; background: #11151d; border-radius: 0 0 16px 16px; z-index: 30;
+}
+.screen-host {
+  position: relative; height: 100%; width: 100%;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.screen-host::-webkit-scrollbar { display: none; }
+
+/* ---------- Shared layout ---------- */
+.app-header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 16px 10px; background: linear-gradient(#090b10, #090b10ee);
+  backdrop-filter: blur(6px);
+}
+.app-header .icon-btn { color: var(--muted); }
+.brand { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 18px; }
+.brand .logo {
+  width: 22px; height: 22px; border-radius: 6px;
+  background: conic-gradient(from 200deg, #22c55e, #16a34a);
+  display: grid; place-items: center; color: #06140c; font-size: 13px; font-weight: 900;
+}
+.spacer { flex: 1; }
+.icon-btn {
+  background: none; border: none; color: var(--text); cursor: pointer;
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
+}
+.icon-btn:hover { background: #141b27; }
+.bell-wrap { position: relative; }
+.bell-badge {
+  position: absolute; top: 2px; right: 2px; background: var(--green); color: #06140c;
+  font-size: 10px; font-weight: 800; border-radius: 999px; padding: 0 4px; line-height: 14px;
+}
+.date-row { padding: 0 18px 12px; color: var(--muted); font-size: 13px; }
+.content { padding: 0 14px 100px; display: flex; flex-direction: column; gap: 14px; }
+
+.panel {
+  background: var(--panel); border: 1px solid var(--panel-line);
+  border-radius: var(--radius); padding: 14px;
+}
+.panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.panel-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--muted);
+  text-transform: uppercase;
+}
+.section-num {
+  display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%;
+  border: 1px solid var(--panel-line); color: var(--muted); font-size: 10px; font-weight: 700;
+}
+.view-all { margin-left: auto; color: var(--green); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+
+/* ---------- Brand mark / logos ---------- */
+.tkr-logo {
+  position: relative; overflow: hidden;
+  width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center;
+  font-weight: 800; font-size: 13px; color: #fff; flex: none;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+}
+.tkr-logo.sm { width: 30px; height: 30px; border-radius: 8px; font-size: 11px; }
+.tkr-logo.lg { width: 60px; height: 60px; border-radius: 14px; font-size: 16px; }
+.tkr-init { position: absolute; inset: 0; display: grid; place-items: center; }
+.tkr-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  background: #fff; padding: 14%; }
+
+/* ---------- Stars ---------- */
+.stars { display: inline-flex; gap: 2px; color: var(--star); font-size: 15px; line-height: 1; }
+.stars .s-empty { color: #2c3543; }
+
+/* ---------- Market regime ---------- */
+.regime-top { display: flex; gap: 14px; }
+.regime-gauge { flex: none; }
+.regime-meta { display: flex; flex-direction: column; justify-content: center; }
+.regime-label { font-size: 24px; font-weight: 800; color: var(--green); line-height: 1; }
+.regime-conf { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+.futures { margin-left: auto; display: grid; gap: 6px; align-content: center; min-width: 150px; }
+.fut-row { display: flex; justify-content: space-between; font-size: 12.5px; gap: 12px; }
+.fut-row .fn { color: var(--muted); }
+.fut-row .fv { font-weight: 700; font-variant-numeric: tabular-nums; }
+.up { color: var(--green); } .down { color: var(--red); } .flat { color: var(--amber); }
+.lex {
+  margin-top: 12px; background: var(--panel-2); border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm); padding: 11px 12px;
+}
+.lex-title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12.5px; margin-bottom: 5px; }
+.lex-body { color: #cdd6e1; font-size: 12.5px; line-height: 1.5; }
+
+/* ---------- Best opportunity hero ---------- */
+.hero { border: 1px solid #25492f; box-shadow: 0 0 0 1px #16351f inset; }
+.hero-top { display: flex; gap: 14px; align-items: flex-start; }
+.hero-mid { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.hero-score { text-align: right; }
+.score-big { font-size: 30px; font-weight: 800; line-height: 1; }
+.score-big .den { font-size: 14px; color: var(--muted); font-weight: 600; }
+.score-cap { font-size: 10.5px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.tkr-name-lg { font-size: 22px; font-weight: 800; line-height: 1; }
+.tkr-sub { color: var(--muted); font-size: 12px; }
+.pill-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.action-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; margin-top: 14px; }
+.btn {
+  border: 1px solid var(--panel-line); background: var(--panel-2); color: var(--text);
+  border-radius: 11px; padding: 11px 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
+  transition: .12s;
+}
+.btn:active { transform: scale(.97); }
+.btn-approve { background: var(--green); color: #06140c; border-color: var(--green); }
+.btn-reject { background: var(--red-soft); color: var(--red); border-color: #4a2730; }
+.btn-reject.solid { background: var(--red); color: #fff; border-color: var(--red); }
+.btn-watch { background: var(--panel-2); color: var(--amber); border-color: #45381c; }
+.btn-explain { background: #15243b; color: var(--blue); border-color: #24405f; }
+.btn-ghost { color: var(--blue); }
+.btn-icon-only { flex: none; width: 48px; }
+
+/* ---------- Top 5 list ---------- */
+.opp-row {
+  display: flex; align-items: center; gap: 11px; padding: 9px 6px; border-radius: 11px; cursor: pointer;
+}
+.opp-row:hover { background: var(--panel-2); }
+.opp-rank { width: 14px; color: var(--muted-2); font-weight: 700; font-size: 13px; }
+.opp-id { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.opp-tkr { font-weight: 800; font-size: 13.5px; }
+.opp-name { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 96px; }
+.opp-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.opp-score { font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; width: 26px; text-align: right; }
+.divline { height: 1px; background: var(--panel-line); margin: 2px 0; }
+
+/* ---------- mini grid cards ---------- */
+.mini-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.mini { padding: 12px; }
+.mini .panel-eyebrow { font-size: 10px; line-height: 1.3; display: block; margin-bottom: 8px; }
+.mini-big { font-size: 30px; font-weight: 800; line-height: 1; }
+.wl-line { display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 3px 0; }
+.kv { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 5px; }
+.risk-list { margin: 0; padding-left: 16px; color: #cdd6e1; font-size: 12px; line-height: 1.7; }
+.exposure-row { display: flex; align-items: center; gap: 4px; font-size: 11.5px; margin: 2px 0; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.exp-pct { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- Bottom nav ---------- */
+/* fixed so it pins to the device viewport (the .device transform is its
+   containing block) instead of scrolling away with the content */
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 25;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  background: #0b0f16f5; backdrop-filter: blur(10px); border-top: 1px solid var(--panel-line);
+  padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
+}
+.bottom-spacer { height: 88px; }
+.tab {
+  background: none; border: none; cursor: pointer; color: var(--muted-2);
+  display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600;
+}
+.tab.active { color: var(--green); }
+.tab svg { width: 21px; height: 21px; }
+
+/* ---------- Detail screen (B) ---------- */
+.detail-head {
+  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 8px;
+  padding: 16px 12px 12px; background: linear-gradient(#090b10, #090b10ee); backdrop-filter: blur(6px);
+}
+.detail-title { font-weight: 800; font-size: 17px; }
+.back-btn { display: flex; align-items: center; gap: 4px; color: var(--text); background: none; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
+.det-id-row { display: flex; gap: 14px; align-items: center; padding: 2px 4px 4px; }
+.det-id-meta { flex: 1; min-width: 0; }
+.det-name { font-size: 19px; font-weight: 800; }
+.det-chips { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.dir-row { margin-top: 6px; font-size: 13px; }
+.badge-dir { font-weight: 800; }
+.badge-dir.long { color: var(--green); } .badge-dir.short { color: var(--red); }
+.chip {
+  display: inline-block; background: var(--panel-2); border: 1px solid var(--panel-line);
+  border-radius: 999px; padding: 3px 9px; font-size: 11.5px; color: #cdd6e1; font-weight: 600;
+}
+.metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); }
+.metric { text-align: left; padding: 4px 10px; border-left: 1px solid var(--panel-line); }
+.metric:first-child { border-left: none; }
+.metric .ml { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.metric .mv { font-weight: 800; font-size: 15px; margin-top: 3px; }
+
+.bullbear { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.bb-col h4 { margin: 0 0 8px; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; }
+.bb-col.bull h4 { color: var(--green); }
+.bb-col.bear h4 { color: var(--red); }
+.bb-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.bb-list li { font-size: 12.5px; color: #d3dbe5; display: flex; gap: 7px; align-items: flex-start; line-height: 1.35; }
+.bb-list.bull li::before { content: "✓"; color: var(--green); font-weight: 800; }
+.bb-list.bear li::before { content: "•"; color: var(--red); font-weight: 800; }
+
+.why-body { color: #cdd6e1; font-size: 13px; line-height: 1.55; }
+
+.evidence-list { display: flex; flex-direction: column; gap: 11px; }
+.ev-row { display: grid; grid-template-columns: 150px 1fr 40px; align-items: center; gap: 10px; }
+.ev-label { font-size: 12.5px; color: #cfd7e2; display: flex; align-items: center; gap: 7px; }
+.ev-bar { height: 7px; background: #1b2331; border-radius: 999px; overflow: hidden; }
+.ev-fill { height: 100%; border-radius: 999px; }
+.ev-pct { font-size: 12.5px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.ev-dot { width: 14px; height: 14px; color: var(--muted); }
+
+.chips-wrap { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.hist-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.hist-card { background: var(--panel-2); border: 1px solid var(--panel-line); border-radius: 12px; padding: 10px; }
+.hist-label { font-size: 11px; color: #cdd6e1; line-height: 1.3; min-height: 28px; }
+.hist-ret { font-weight: 800; font-size: 14px; margin-top: 6px; }
+
+.ai-list { margin: 0; padding-left: 18px; color: #d3dbe5; font-size: 13px; line-height: 1.7; }
+.prob-line { margin-top: 10px; font-size: 13px; font-weight: 600; }
+.prob-line b { color: var(--green); }
+
+.sticky-actions {
+  position: sticky; bottom: 0; z-index: 22; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px;
+  padding: 12px 10px calc(12px + env(safe-area-inset-bottom));
+  background: #0b0f16f5; backdrop-filter: blur(10px); border-top: 1px solid var(--panel-line);
+}
+.sticky-actions .btn { padding: 11px 4px; font-size: 12px; gap: 5px; min-width: 0; }
+.sticky-actions .btn svg { width: 15px; height: 15px; flex: none; }
+
+/* ---------- Approval queue (C) ---------- */
+.queue-head { padding: 16px 16px 6px; display: flex; align-items: center; gap: 8px; }
+.queue-title { font-weight: 800; font-size: 17px; display: flex; align-items: center; gap: 7px; }
+.queue-progress { padding: 6px 18px 4px; }
+.qp-top { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); margin-bottom: 7px; }
+.qp-top b { color: var(--text); }
+.qp-bar { height: 6px; background: #1b2331; border-radius: 999px; overflow: hidden; }
+.qp-fill { height: 100%; background: var(--green); border-radius: 999px; transition: width .3s; }
+
+.queue-screen {
+  display: flex; flex-direction: column; height: 100%;
+  padding-bottom: calc(60px + env(safe-area-inset-bottom)); /* clear fixed tabbar */
+}
+.swipe-area { position: relative; padding: 12px 14px; flex: 1 1 auto; min-height: 0; }
+.swipe-stack { position: relative; height: 100%; }
+.q-card {
+  position: absolute; inset: 0;
+  background: var(--panel); border: 1px solid var(--panel-line); border-radius: 20px; padding: 14px;
+  display: flex; flex-direction: column; gap: 9px;
+  box-shadow: 0 18px 40px rgba(0,0,0,.5);
+  transition: transform .35s cubic-bezier(.2,.7,.3,1), opacity .35s;
+  cursor: pointer;
+}
+.q-card.behind-1 { transform: scale(.94) translateY(14px); opacity: .55; z-index: 1; }
+.q-card.behind-2 { transform: scale(.88) translateY(28px); opacity: .3; z-index: 0; }
+.q-card.front { z-index: 3; }
+.q-card.leaving-right { transform: translateX(120%) rotate(8deg); opacity: 0; }
+.q-card.leaving-left { transform: translateX(-120%) rotate(-8deg); opacity: 0; }
+.q-card.leaving-up { transform: translateY(-120%); opacity: 0; }
+.q-top { display: flex; justify-content: space-between; align-items: center; }
+.q-dir { font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+.q-id { display: flex; gap: 12px; align-items: center; }
+.q-name { font-size: 22px; font-weight: 800; line-height: 1; }
+.q-sub { color: var(--muted); font-size: 12.5px; }
+.q-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.q-metric { background: var(--panel-2); border: 1px solid var(--panel-line); border-radius: 12px; padding: 8px 10px; }
+.q-metric .ml { font-size: 11px; color: var(--muted); }
+.q-metric .mv { font-size: 16px; font-weight: 800; margin-top: 2px; }
+.q-chips { display: flex; gap: 8px; }
+.q-reasons-title { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.q-reason { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 3px 0; }
+.q-mini-ev { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: auto; padding-top: 6px; border-top: 1px solid var(--panel-line); }
+.q-mini-ev b { color: var(--text); }
+
+.swipe-actions { display: flex; justify-content: center; gap: 30px; padding: 10px 0 8px; flex: none; }
+.swipe-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; background: none; border: none; color: var(--muted); font-size: 12px; font-weight: 600; }
+.swipe-circle { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; border: 2px solid; transition: .12s; }
+.swipe-btn:active .swipe-circle { transform: scale(.9); }
+.sc-reject { border-color: var(--red); color: var(--red); }
+.sc-watch { border-color: var(--amber); color: var(--amber); }
+.sc-approve { border-color: var(--green); color: var(--green); }
+.next-up { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--panel-line); font-size: 12.5px; color: var(--muted); flex: none; }
+.next-up b { color: var(--text); }
+.queue-done { text-align: center; padding: 60px 24px; color: var(--muted); }
+.queue-done .big { font-size: 44px; }
+
+/* ---------- Explain sheet (D) ---------- */
+.sheet-backdrop {
+  position: fixed; inset: 0; z-index: 40; background: rgba(2,4,8,.6);
+  display: flex; align-items: flex-end; opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+.sheet-backdrop.open { opacity: 1; pointer-events: auto; }
+.sheet {
+  width: 100%; max-height: 92%; background: var(--bg);
+  border-radius: 22px 22px 0 0; border-top: 1px solid var(--panel-line);
+  transform: translateY(100%); transition: transform .3s cubic-bezier(.2,.7,.3,1);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.sheet-backdrop.open .sheet { transform: translateY(0); }
+.sheet-grab { width: 40px; height: 4px; border-radius: 999px; background: #2c3645; margin: 10px auto 6px; }
+.sheet-head { display: flex; align-items: center; gap: 12px; padding: 6px 16px 12px; }
+.sheet-scroll { overflow-y: auto; padding: 0 16px 16px; scrollbar-width: none; }
+.sheet-scroll::-webkit-scrollbar { display: none; }
+.tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--panel-line); padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab-btn {
+  background: none; border: none; color: var(--muted); font-size: 12px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; padding: 12px 0; cursor: pointer; white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+.tab-btn.active { color: var(--green); border-bottom-color: var(--green); }
+.sheet-section-title { font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 18px 0 10px; }
+.follow-up { display: flex; gap: 8px; margin-top: 8px; }
+.follow-up input {
+  flex: 1; background: var(--panel); border: 1px solid var(--panel-line); border-radius: 12px;
+  padding: 12px 14px; color: var(--text); font-size: 13px; font-family: inherit;
+}
+.follow-up input::placeholder { color: var(--muted-2); }
+.fu-send { width: 46px; border-radius: 12px; background: #15243b; border: 1px solid #24405f; color: var(--blue); cursor: pointer; display: grid; place-items: center; }
+.disclaimer { text-align: center; color: var(--muted-2); font-size: 11.5px; margin: 16px 0 10px; }
+.sheet-close { margin: 0 16px 16px; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--panel-line); color: var(--text); font-weight: 700; font-size: 14px; cursor: pointer; }
+
+/* toast for prototype feedback on decisions */
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%) translateY(20px);
+  background: #16351f; border: 1px solid #2a5a36; color: #b7f5cd; padding: 10px 16px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; z-index: 60; opacity: 0; transition: .25s; pointer-events: none; white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.reject { background: #321a20; border-color: #5a2a33; color: #f7b7c1; }
+.toast.watch { background: #3a2f12; border-color: #6a571f; color: #f5dca0; }
+
+/* ---------- review.v1 meta / unavailable states ---------- */
+.meta-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 10px; }
+.meta-chip {
+  display: inline-flex; align-items: center; gap: 5px; background: var(--panel-2);
+  border: 1px solid var(--panel-line); border-radius: 999px; padding: 3px 9px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .02em; color: var(--muted);
+}
+.meta-chip.stale { background: #3a2f12; border-color: #6a571f; color: var(--amber); }
+.meta-chip.safety { background: var(--green-soft); border-color: #2a5a36; color: var(--green); }
+
+.empty-note {
+  color: var(--muted-2); font-size: 12.5px; line-height: 1.5; font-style: italic;
+  background: var(--panel-2); border: 1px dashed var(--panel-line);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+
+.ev-row.ev-unavailable { opacity: .55; }
+.ev-row.ev-unavailable .ev-bar { background: #161c27; }
+.ev-note { grid-column: 1 / -1; font-size: 11px; color: var(--muted-2); margin-top: -4px; }
+
+.sev { width: 8px; height: 8px; border-radius: 999px; display: inline-block; flex: 0 0 auto; }
+.sev-low { background: var(--green); }
+.sev-medium { background: var(--amber); }
+.sev-high { background: var(--red); }
+
+.chip.src { background: var(--panel); border-color: var(--panel-line); color: var(--muted); }
+
+.swipe-btn.disabled { opacity: .4; cursor: not-allowed; }
+.swipe-btn.disabled:active .swipe-circle { transform: none; }
+
+@media (max-width: 460px) {
+  .proto-note { display: none; }
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  .stage { flex: 1 1 auto; min-height: 0; padding: 0; align-items: stretch; }
+  .device { border-radius: 0; border-width: 0; height: 100%; max-height: none; }
+}
+
+  </style>
+</head>
+<body>
+  <!-- Prototype chrome: screen switcher (not part of the product UI) -->
+  <div class="proto-bar">
+    <span class="proto-brand">AlphaLabs Prototype</span>
+    <div class="proto-tabs">
+      <button data-goto="brief" class="proto-tab active">A &middot; Brief</button>
+      <button data-goto="detail" class="proto-tab">B &middot; Detail</button>
+      <button data-goto="queue" class="proto-tab">C &middot; Approval</button>
+      <button data-goto="explain" class="proto-tab">D &middot; Explain</button>
+    </div>
+    <span class="proto-note">Mock data &middot; no APIs</span>
+  </div>
+
+  <div class="stage">
+    <div class="device">
+      <div class="device-notch"></div>
+      <div id="app" class="screen-host"></div>
+    </div>
+  </div>
+
+  <script>
+// AlphaLabs PM Approval Prototype — MOCK DATA shaped to the review.v1 API contract.
+// MOCK ONLY: no API wiring, no mutations, no backend. These payloads are fabricated
+// to validate the proposed read endpoints through the existing prototype UI:
+//   GET /api/review/briefing                 -> REVIEW_MOCK.briefing
+//   GET /api/review/opportunity/{idea_id}    -> REVIEW_MOCK.opportunities[idea_id]
+//
+// Convention: snake_case everywhere (matches the Python backend + existing /api/* routes).
+//
+// ---------------------------------------------------------------------------
+// review.v1 schema reference (JSDoc typedefs — vanilla JS friendly, no TS build)
+// ---------------------------------------------------------------------------
+/**
+ * @typedef {Object} DataFreshness
+ * @property {"fresh"|"recent"|"stale"|"unknown"} level
+ * @property {string|null} as_of            ISO-8601 UTC
+ * @property {number|null} age_seconds
+ * @property {string} label                 human-readable, e.g. "Updated 12 min ago"
+ * @property {boolean} is_stale
+ *
+ * @typedef {Object} SafetyStatus
+ * @property {"dry_run"|"paper"|"live"|"unknown"} posture
+ * @property {boolean} armed
+ * @property {boolean} reviewable
+ * @property {string} label
+ *
+ * @typedef {Object} ResponseMeta
+ * @property {string} generated_at          ISO-8601 UTC
+ * @property {string} schema_version        "review.v1"
+ * @property {DataFreshness} data_freshness
+ * @property {SafetyStatus} safety_status
+ *
+ * @typedef {Object} ActionMeta
+ * @property {"approve"|"reject"|"watchlist"|"explain"} action
+ * @property {string} label
+ * @property {"POST"|"GET"} method
+ * @property {string} endpoint              fully-formed path incl. idea_id
+ * @property {boolean} enabled
+ * @property {"primary"|"danger"|"neutral"|"ghost"} style
+ * @property {("not_implemented"|"not_reviewable"|"already_decided")=} unavailable_reason
+ *
+ * @typedef {Object} OpportunityCard
+ * @property {number} idea_id
+ * @property {string} ticker
+ * @property {string} name
+ * @property {string|null} logo_domain
+ * @property {"LONG"|"SHORT"} direction
+ * @property {number} conviction_score      0-100 integer
+ * @property {number} star_rating           1-5, half-steps allowed
+ * @property {string} star_display          "★★★★½"
+ * @property {string} expected_move_text
+ * @property {string} hold_period_text
+ * @property {"Day Trade"|"Swing"|"LEAPS"} strategy
+ * @property {number[]} trend_spark
+ * @property {"up"|"down"|"flat"} trend_direction
+ * @property {"high_conviction"|"tradeable"|"watchlist"|"ignore"} tier
+ * @property {ActionMeta[]} actions
+ *
+ * @typedef {Object} ConfidenceSource
+ * @property {"news"|"sec"|"historical_similarity"|"options"|"technicals"|"macro"} key
+ * @property {string} label
+ * @property {number|null} score            0-100, or null if unavailable
+ * @property {string} score_text            "70%" or "—"
+ * @property {"available"|"no_entitlement"|"not_implemented"|"insufficient_data"} availability
+ * @property {string|null} note
+ */
+
+window.REVIEW_MOCK = (function () {
+  const SCHEMA = "review.v1";
+  const TREND_LABELS = ["Thu", "Fri", "Mon", "Tue", "Wed", "Thu", "Today"];
+
+  // Shared response envelope. In a real endpoint each response is stamped fresh;
+  // here the values are fixed so the prototype renders deterministically.
+  function meta(genIso) {
+    return {
+      generated_at: genIso,
+      schema_version: SCHEMA,
+      data_freshness: {
+        level: "recent",
+        as_of: "2026-06-25T13:30:00Z",
+        age_seconds: 720,
+        label: "Updated 12 min ago",
+        is_stale: false,
+      },
+      safety_status: {
+        posture: "paper",
+        armed: false,
+        reviewable: true,
+        label: "Paper · disarmed",
+      },
+    };
+  }
+
+  // Read endpoints never mutate. They only describe which buttons to show and
+  // which OTHER endpoint the UI would call. watchlist has no endpoint yet, so it
+  // is returned disabled + not_implemented rather than faked.
+  function actions(ideaId) {
+    return [
+      { action: "approve",   label: "Approve",   method: "POST", endpoint: `/api/ideas/${ideaId}/approval/approve`, enabled: true,  style: "primary" },
+      { action: "reject",    label: "Reject",    method: "POST", endpoint: `/api/ideas/${ideaId}/approval/reject`,  enabled: true,  style: "danger" },
+      { action: "watchlist", label: "Watchlist", method: "POST", endpoint: `/api/ideas/${ideaId}/watchlist`,        enabled: false, style: "neutral", unavailable_reason: "not_implemented" },
+      { action: "explain",   label: "Explain",   method: "GET",  endpoint: `/api/ideas/${ideaId}/explanation`,      enabled: true,  style: "ghost" },
+    ];
+  }
+
+  // ---- Opportunity detail objects (GET /api/review/opportunity/{idea_id}) ----
+  // Each is a full review.v1 OpportunityDetailResponse. The briefing cards below
+  // are derived from these so the mock stays internally consistent.
+  const DETAILS = {
+    4821: {
+      meta: meta("2026-06-25T13:42:10Z"),
+      header: { idea_id: 4821, ticker: "ORCL", name: "Oracle Corporation", logo_domain: "oracle.com", chips: ["AI Infrastructure", "Mega Cap"], direction: "LONG", strategy: "Swing" },
+      conviction: {
+        score: 92, tier: "high_conviction", tier_text: "High Conviction",
+        star_rating: 5, star_display: "★★★★★",
+        trend_series: [25, 44, 56, 54, 72, 84, 92], trend_labels: TREND_LABELS,
+        trend_direction: "up", trend_text: "Improving",
+        expected_move_text: "+3–5%", risk_level: "Medium", hold_period_text: "2–7 Days",
+        win_probability: 68, snapshotted_at: "2026-06-25T13:30:00Z",
+      },
+      thesis: {
+        why_this_matters:
+          "Oracle is positioned at the center of enterprise AI adoption. New cloud " +
+          "contracts and AI partnerships are driving strong revenue visibility and " +
+          "accelerating data center demand.",
+        bull_case: ["AI demand accelerating", "Cloud backlog expanding", "Positive options positioning", "Institutional accumulation"],
+        bear_case: ["Near technical resistance", "Valuation premium", "Earnings in 3 weeks"],
+      },
+      confidence_breakdown: [
+        { key: "news", label: "News", score: 92, score_text: "92%", availability: "available", note: null },
+        { key: "sec", label: "SEC Filings", score: null, score_text: "—", availability: "not_implemented", note: "Filing analysis not yet available" },
+        { key: "historical_similarity", label: "Historical Similarity", score: 90, score_text: "90%", availability: "available", note: null },
+        { key: "options", label: "Options Activity", score: null, score_text: "—", availability: "no_entitlement", note: "No options entitlement for this symbol" },
+        { key: "technicals", label: "Technicals", score: 67, score_text: "67%", availability: "available", note: null },
+        { key: "macro", label: "Macro Environment", score: 81, score_text: "81%", availability: "available", note: null },
+      ],
+      supporting_evidence: [
+        { label: "Multi-year OCI capacity deal", kind: "news" },
+        { label: "Backlog +29% YoY", kind: "filing" },
+        { label: "3 analyst upgrades (7d)", kind: "analyst" },
+        { label: "Call/put ratio 2.4", kind: "flow" },
+      ],
+      historical_setups: {
+        status: "available",
+        summary_text: "When similar catalysts occurred in comparable conditions, returns were positive in 7 of 10 instances.",
+        setups: [
+          { label: "2024 NVDA AI Partnership", return_text: "+8.2%", positive: true },
+          { label: "2025 AVGO Cloud Expansion", return_text: "+5.9%", positive: true },
+          { label: "2023 SMCI AI Order Surge", return_text: "+11.4%", positive: true },
+        ],
+      },
+      ai_explanation: {
+        bullets: [
+          "Strong AI partnership announcements",
+          "Rapid cloud backlog and data center expansion",
+          "Positive news sentiment and analyst upgrades",
+          "Institutional accumulation detected",
+          "Similar historical setups produced avg +7.2%",
+        ],
+        probability: 68,
+        disclaimer: "AlphaLabs AI may make mistakes. Verify before acting.",
+        generated_at: "2026-06-25T13:31:00Z", source: "cached",
+      },
+      key_risks: ["Broad tech drawdown on rate surprise", "Resistance rejection near prior high", "Earnings volatility in ~3 weeks"],
+      source_refs: [
+        { id: "cat_9912", kind: "catalyst", label: "OCI deal · 2026-06-24", url: "/api/catalysts/9912" },
+        { id: "trade_5510", kind: "trade", label: "Score snapshot", url: null },
+      ],
+      actions: actions(4821),
+    },
+
+    4822: {
+      meta: meta("2026-06-25T13:42:11Z"),
+      header: { idea_id: 4822, ticker: "NVDA", name: "NVIDIA Corporation", logo_domain: "nvidia.com", chips: ["Semiconductors", "Mega Cap"], direction: "LONG", strategy: "Swing" },
+      conviction: {
+        score: 88, tier: "high_conviction", tier_text: "High Conviction",
+        star_rating: 4.5, star_display: "★★★★½",
+        trend_series: [40, 52, 50, 61, 70, 80, 88], trend_labels: TREND_LABELS,
+        trend_direction: "up", trend_text: "Improving",
+        expected_move_text: "+4–7%", risk_level: "Medium", hold_period_text: "3–7 Days",
+        win_probability: 65, snapshotted_at: "2026-06-25T13:30:00Z",
+      },
+      thesis: {
+        why_this_matters:
+          "NVIDIA remains the core AI compute supplier. Channel checks point to " +
+          "sustained datacenter GPU demand with improving supply throughput.",
+        bull_case: ["Datacenter demand surging", "Supply easing", "Strong relative strength", "Options skew bullish"],
+        bear_case: ["Crowded long", "High beta to macro", "Valuation extended"],
+      },
+      confidence_breakdown: [
+        { key: "news", label: "News", score: 88, score_text: "88%", availability: "available", note: null },
+        { key: "sec", label: "SEC Filings", score: null, score_text: "—", availability: "not_implemented", note: "Filing analysis not yet available" },
+        { key: "historical_similarity", label: "Historical Similarity", score: 84, score_text: "84%", availability: "available", note: null },
+        { key: "options", label: "Options Activity", score: 79, score_text: "79%", availability: "available", note: null },
+        { key: "technicals", label: "Technicals", score: 74, score_text: "74%", availability: "available", note: null },
+        { key: "macro", label: "Macro Environment", score: 78, score_text: "78%", availability: "available", note: null },
+      ],
+      supporting_evidence: [
+        { label: "Hyperscaler capex guides up", kind: "news" },
+        { label: "Blackwell ramp on track", kind: "news" },
+        { label: "Unusual call sweeps", kind: "flow" },
+      ],
+      historical_setups: {
+        status: "available",
+        summary_text: "Comparable AI-demand catalysts produced positive 7-day returns in 6 of 9 instances.",
+        setups: [
+          { label: "2024 AVGO AI Ramp", return_text: "+6.1%", positive: true },
+          { label: "2023 AMD MI300 Launch", return_text: "+9.3%", positive: true },
+          { label: "2025 MU HBM Surge", return_text: "+7.7%", positive: true },
+        ],
+      },
+      ai_explanation: {
+        bullets: [
+          "Datacenter GPU demand remains supply-constrained",
+          "Hyperscaler capex revised higher",
+          "Positive options flow and dealer positioning",
+          "Strong relative strength vs. semis",
+        ],
+        probability: 65,
+        disclaimer: "AlphaLabs AI may make mistakes. Verify before acting.",
+        generated_at: "2026-06-25T13:31:00Z", source: "cached",
+      },
+      key_risks: ["Crowded positioning unwind", "Macro risk-off", "Headline supply-chain shocks"],
+      source_refs: [
+        { id: "cat_9881", kind: "catalyst", label: "Capex guide · 2026-06-23", url: "/api/catalysts/9881" },
+      ],
+      actions: actions(4822),
+    },
+
+    4823: {
+      meta: meta("2026-06-25T13:42:12Z"),
+      header: { idea_id: 4823, ticker: "MU", name: "Micron Technology", logo_domain: "micron.com", chips: ["Semiconductors", "Large Cap"], direction: "LONG", strategy: "Swing" },
+      conviction: {
+        score: 85, tier: "high_conviction", tier_text: "High Conviction",
+        star_rating: 4, star_display: "★★★★",
+        trend_series: [30, 38, 48, 55, 66, 74, 85], trend_labels: TREND_LABELS,
+        trend_direction: "up", trend_text: "Improving",
+        expected_move_text: "+5–8%", risk_level: "High", hold_period_text: "3–10 Days",
+        win_probability: 61, snapshotted_at: "2026-06-25T13:30:00Z",
+      },
+      thesis: {
+        why_this_matters:
+          "Micron benefits directly from AI memory demand. HBM is sold out through " +
+          "next year and pricing momentum is strengthening across DRAM.",
+        bull_case: ["HBM pricing power", "Memory cycle turning", "AI mix improving", "Capacity sold out"],
+        bear_case: ["Cyclical sensitivity", "Inventory risk", "China exposure"],
+      },
+      confidence_breakdown: [
+        { key: "news", label: "News", score: 84, score_text: "84%", availability: "available", note: null },
+        { key: "sec", label: "SEC Filings", score: null, score_text: "—", availability: "not_implemented", note: "Filing analysis not yet available" },
+        { key: "historical_similarity", label: "Historical Similarity", score: 80, score_text: "80%", availability: "available", note: null },
+        { key: "options", label: "Options Activity", score: 66, score_text: "66%", availability: "available", note: null },
+        { key: "technicals", label: "Technicals", score: 71, score_text: "71%", availability: "available", note: null },
+        { key: "macro", label: "Macro Environment", score: 75, score_text: "75%", availability: "available", note: null },
+      ],
+      supporting_evidence: [
+        { label: "HBM sold out FY", kind: "news" },
+        { label: "DRAM ASPs rising", kind: "news" },
+        { label: "Positive preannounce", kind: "filing" },
+      ],
+      historical_setups: {
+        status: "available",
+        summary_text: "Memory up-cycle catalysts delivered positive returns in 6 of 10 comparable setups.",
+        setups: [
+          { label: "2017 DRAM Up-cycle", return_text: "+10.5%", positive: true },
+          { label: "2024 SK Hynix HBM", return_text: "+6.8%", positive: true },
+          { label: "2023 WDC Recovery", return_text: "+4.2%", positive: true },
+        ],
+      },
+      ai_explanation: {
+        bullets: [
+          "AI memory demand outstripping supply",
+          "HBM capacity pre-sold",
+          "DRAM pricing inflecting higher",
+          "Improving gross-margin trajectory",
+        ],
+        probability: 61,
+        disclaimer: "AlphaLabs AI may make mistakes. Verify before acting.",
+        generated_at: "2026-06-25T13:31:00Z", source: "cached",
+      },
+      key_risks: ["Cyclical reversal", "Inventory correction", "Geopolitical/China headlines"],
+      source_refs: [
+        { id: "cat_9850", kind: "catalyst", label: "HBM preannounce · 2026-06-22", url: "/api/catalysts/9850" },
+      ],
+      actions: actions(4823),
+    },
+
+    4824: {
+      meta: meta("2026-06-25T13:42:13Z"),
+      header: { idea_id: 4824, ticker: "ASML", name: "ASML Holding", logo_domain: "asml.com", chips: ["Semiconductors", "Mega Cap"], direction: "LONG", strategy: "Swing" },
+      conviction: {
+        score: 81, tier: "high_conviction", tier_text: "High Conviction",
+        star_rating: 4, star_display: "★★★★",
+        trend_series: [44, 48, 52, 58, 64, 72, 81], trend_labels: TREND_LABELS,
+        trend_direction: "up", trend_text: "Improving",
+        expected_move_text: "+3–6%", risk_level: "Medium", hold_period_text: "5–10 Days",
+        win_probability: 60, snapshotted_at: "2026-06-25T13:30:00Z",
+      },
+      thesis: {
+        why_this_matters:
+          "ASML is the sole supplier of EUV lithography, the bottleneck for leading-edge " +
+          "AI chips. Bookings are recovering as foundries expand capacity.",
+        bull_case: ["EUV monopoly", "Order book recovery", "Leading-edge capex", "Service revenue sticky"],
+        bear_case: ["Export controls", "Lumpy bookings", "EU macro drag"],
+      },
+      confidence_breakdown: [
+        { key: "news", label: "News", score: 79, score_text: "79%", availability: "available", note: null },
+        { key: "sec", label: "SEC Filings", score: null, score_text: "—", availability: "not_implemented", note: "Filing analysis not yet available" },
+        { key: "historical_similarity", label: "Historical Similarity", score: 78, score_text: "78%", availability: "available", note: null },
+        { key: "options", label: "Options Activity", score: null, score_text: "—", availability: "no_entitlement", note: "No options entitlement for this symbol" },
+        { key: "technicals", label: "Technicals", score: 69, score_text: "69%", availability: "available", note: null },
+        { key: "macro", label: "Macro Environment", score: 72, score_text: "72%", availability: "available", note: null },
+      ],
+      supporting_evidence: [
+        { label: "Bookings rebound", kind: "filing" },
+        { label: "High-NA shipments", kind: "news" },
+        { label: "Foundry capex up", kind: "news" },
+      ],
+      historical_setups: {
+        status: "available",
+        summary_text: "Bookings-recovery catalysts produced positive returns in 6 of 10 instances.",
+        setups: [
+          { label: "2023 Foundry Capex", return_text: "+5.2%", positive: true },
+          { label: "2024 High-NA Ship", return_text: "+4.6%", positive: true },
+          { label: "2021 EUV Demand", return_text: "+8.9%", positive: true },
+        ],
+      },
+      ai_explanation: {
+        bullets: [
+          "Sole EUV supplier for leading-edge nodes",
+          "Order book inflecting positively",
+          "Foundry capacity expansion underway",
+          "Sticky high-margin service revenue",
+        ],
+        probability: 60,
+        disclaimer: "AlphaLabs AI may make mistakes. Verify before acting.",
+        generated_at: "2026-06-25T13:31:00Z", source: "cached",
+      },
+      key_risks: ["New export-control rules", "Bookings timing", "European macro weakness"],
+      source_refs: [
+        { id: "cat_9799", kind: "catalyst", label: "Bookings update · 2026-06-20", url: "/api/catalysts/9799" },
+      ],
+      actions: actions(4824),
+    },
+
+    4825: {
+      meta: meta("2026-06-25T13:42:14Z"),
+      header: { idea_id: 4825, ticker: "AMD", name: "Advanced Micro Devices", logo_domain: "amd.com", chips: ["Semiconductors", "Large Cap"], direction: "LONG", strategy: "Day Trade" },
+      conviction: {
+        score: 69, tier: "watchlist", tier_text: "Watchlist",
+        star_rating: 3.5, star_display: "★★★½",
+        trend_series: [60, 56, 58, 52, 55, 62, 69], trend_labels: TREND_LABELS,
+        trend_direction: "flat", trend_text: "Flat",
+        expected_move_text: "+2–4%", risk_level: "High", hold_period_text: "1–3 Days",
+        win_probability: 54, snapshotted_at: "2026-06-25T13:30:00Z",
+      },
+      thesis: {
+        why_this_matters:
+          "AMD is the credible #2 in AI accelerators. MI300 traction could drive share " +
+          "gains, but execution and competitive intensity keep conviction moderate.",
+        bull_case: ["MI300 momentum", "Share gains", "AI TAM expansion"],
+        bear_case: ["Execution risk", "NVDA dominance", "Margin pressure", "Choppy tape"],
+      },
+      confidence_breakdown: [
+        { key: "news", label: "News", score: 70, score_text: "70%", availability: "available", note: null },
+        { key: "sec", label: "SEC Filings", score: null, score_text: "—", availability: "not_implemented", note: "Filing analysis not yet available" },
+        // Demonstrates a numeric source that is genuinely thin, not a faked 0.
+        { key: "historical_similarity", label: "Historical Similarity", score: null, score_text: "—", availability: "insufficient_data", note: "Too few comparable setups to score" },
+        { key: "options", label: "Options Activity", score: 58, score_text: "58%", availability: "available", note: null },
+        { key: "technicals", label: "Technicals", score: 55, score_text: "55%", availability: "available", note: null },
+        { key: "macro", label: "Macro Environment", score: 71, score_text: "71%", availability: "available", note: null },
+      ],
+      supporting_evidence: [
+        { label: "MI300 design wins", kind: "news" },
+        { label: "Cloud adoption", kind: "news" },
+        { label: "Improving software stack", kind: "analyst" },
+      ],
+      // Demonstrates the not_available empty state (similarity engine not built yet).
+      historical_setups: { status: "not_available", summary_text: null, setups: [] },
+      ai_explanation: {
+        bullets: [
+          "MI300 gaining design-win traction",
+          "Potential accelerator share gains",
+          "Software ecosystem maturing",
+          "Moderate conviction — watch execution",
+        ],
+        probability: 54,
+        disclaimer: "AlphaLabs AI may make mistakes. Verify before acting.",
+        generated_at: "2026-06-25T13:31:00Z", source: "cached",
+      },
+      key_risks: ["Execution slippage", "NVDA competitive moat", "Gross-margin pressure"],
+      source_refs: [
+        { id: "cat_9740", kind: "catalyst", label: "MI300 win · 2026-06-19", url: "/api/catalysts/9740" },
+      ],
+      actions: actions(4825),
+    },
+  };
+
+  // Derive a briefing OpportunityCard from a full detail object (keeps mock DRY
+  // while the emitted briefing payload stays literal review.v1 shape).
+  function cardFrom(d) {
+    return {
+      idea_id: d.header.idea_id,
+      ticker: d.header.ticker,
+      name: d.header.name,
+      logo_domain: d.header.logo_domain,
+      direction: d.header.direction,
+      conviction_score: d.conviction.score,
+      star_rating: d.conviction.star_rating,
+      star_display: d.conviction.star_display,
+      expected_move_text: d.conviction.expected_move_text,
+      hold_period_text: d.conviction.hold_period_text,
+      strategy: d.header.strategy,
+      trend_spark: d.conviction.trend_series,
+      trend_direction: d.conviction.trend_direction,
+      tier: d.conviction.tier,
+      actions: d.actions,
+    };
+  }
+
+  const order = [4821, 4822, 4823, 4824, 4825];
+  const cards = order.map((id) => cardFrom(DETAILS[id]));
+
+  // ---- Briefing payload (GET /api/review/briefing) ----
+  const briefing = {
+    meta: meta("2026-06-25T13:42:00Z"),
+    market_regime: {
+      label: "BULLISH", direction: "bullish", confidence: 84, confidence_text: "High confidence",
+      futures: [
+        { name: "S&P Futures", value_text: "+0.68%", change_pct: 0.68, direction: "up" },
+        { name: "NASDAQ Futures", value_text: "+1.02%", change_pct: 1.02, direction: "up" },
+        { name: "VIX", value_text: "-4.1%", change_pct: -4.1, direction: "down" },
+        { name: "BTCUSD", value_text: "+2.7%", change_pct: 2.7, direction: "up" },
+      ],
+      freshness: { level: "fresh", as_of: "2026-06-25T13:30:00Z", age_seconds: 720, label: "12 min ago", is_stale: false },
+    },
+    lex_summary: {
+      text:
+        "The market remains constructive. AI infrastructure continues leading. " +
+        "Highest conviction today is Oracle. No high-conviction short setup.",
+      generated_at: "2026-06-25T13:31:00Z", source: "cached",
+    },
+    best_opportunity: cards[0],
+    top_opportunities: cards,
+    // null demonstrates the graceful "no high-conviction short" empty state.
+    highest_conviction_short: null,
+    highest_conviction_long: cards[0],
+    watchlist_changes: {
+      added: 4, removed: 2,
+      freshness: { level: "recent", as_of: "2026-06-25T13:00:00Z", age_seconds: 2520, label: "42 min ago", is_stale: false },
+    },
+    market_risks: [
+      { label: "Inflation Data Tomorrow", severity: "high" },
+      { label: "Earnings Season", severity: "medium" },
+      { label: "Bond Auction", severity: "low" },
+      { label: "Geopolitical Tension", severity: "medium" },
+    ],
+    portfolio_exposure: {
+      segments: [
+        { label: "AI", pct: 42, color: "#22c55e" },
+        { label: "Semiconductors", pct: 28, color: "#3b82f6" },
+        { label: "Software", pct: 16, color: "#a855f7" },
+        { label: "Crypto", pct: 8, color: "#f59e0b" },
+        { label: "Cash", pct: 6, color: "#64748b" },
+      ],
+      // Demonstrates a stale section badge (positions synced hours ago).
+      freshness: { level: "stale", as_of: "2026-06-25T09:05:00Z", age_seconds: 16620, label: "Synced 4.6 hrs ago", is_stale: true },
+    },
+    pending_approvals: { total: 38, high_conviction: 7, needs_review: 31 },
+  };
+
+  return {
+    schema_version: SCHEMA,
+    briefing,
+    opportunities: DETAILS,
+    order,
+    get_opportunity: (id) => DETAILS[id] || null,
+  };
+})();
+
+// AlphaLabs PM Approval Prototype — view logic.
+// Consumes the review.v1 mock contract ONLY (window.REVIEW_MOCK). No live API
+// calls, no mutations. Decision buttons are inert: they console.log the endpoint
+// they WOULD call and show a local toast, but never hit the network.
+(function () {
+  const R = window.REVIEW_MOCK;
+  const B = R.briefing;                 // GET /api/review/briefing
+  const detail = (id) => R.get_opportunity(id); // GET /api/review/opportunity/{id}
+  const app = document.getElementById("app");
+
+  const state = {
+    screen: "brief",                    // brief | detail | queue
+    currentOppId: R.order[0],
+    queueIndex: 0,
+    queueOrder: R.order.slice(),
+    sheet: { open: false, tab: "ai", oppId: R.order[0] },
+  };
+
+  /* ---------------- small helpers ---------------- */
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  // Logo tile background is a pure presentation concern (not part of the API
+  // contract), so the color lives client-side keyed by ticker.
+  const LOGO_COLORS = { ORCL: "#e8442a", NVDA: "#76b900", MU: "#0a4d8c", ASML: "#1f6fb2", AMD: "#231f20" };
+
+  // Accepts any object exposing { ticker, logo_domain }.
+  function logo(o, cls = "") {
+    const ticker = o.ticker;
+    const initials = ticker.slice(0, 2);
+    const bg = LOGO_COLORS[ticker] || "#334155";
+    const src = o.logo_domain ? `https://logo.clearbit.com/${o.logo_domain}?size=128` : "";
+    return `<div class="tkr-logo ${cls}" style="background:${bg}">
+      <span class="tkr-init">${initials}</span>
+      ${src ? `<img class="tkr-img" src="${src}" alt="${ticker}" loading="lazy" onerror="this.remove()" />` : ""}
+    </div>`;
+  }
+
+  function stars(value) {
+    let out = "";
+    for (let i = 1; i <= 5; i++) {
+      if (value >= i) out += "★";
+      else if (value >= i - 0.5) out += '<span style="position:relative"><span class="s-empty">★</span><span style="position:absolute;left:0;width:50%;overflow:hidden">★</span></span>';
+      else out += '<span class="s-empty">★</span>';
+    }
+    return `<span class="stars">${out}</span>`;
+  }
+
+  function evColor(v) { return v >= 80 ? "var(--green)" : v >= 68 ? "var(--green)" : "var(--amber)"; }
+  function sparkColor(dir) { return dir === "down" ? "#ef4455" : dir === "flat" ? "#f5b53d" : "#22c55e"; }
+
+  // SVG circular conviction gauge
+  function gauge(score, size = 92, cap = "AI Conviction") {
+    const r = size / 2 - 7, c = 2 * Math.PI * r, off = c * (1 - score / 100);
+    return `
+      <div class="regime-gauge" style="text-align:center">
+        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+          <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#1b2331" stroke-width="7"/>
+          <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#22c55e" stroke-width="7"
+            stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}"
+            transform="rotate(-90 ${size/2} ${size/2})"/>
+          <text x="50%" y="48%" text-anchor="middle" fill="#eef3f9" font-size="${size*0.26}" font-weight="800">${score}</text>
+          <text x="50%" y="66%" text-anchor="middle" fill="#8a97a8" font-size="${size*0.12}" font-weight="600">/100</text>
+        </svg>
+        ${cap ? `<div class="score-cap">${cap}</div>` : ""}
+      </div>`;
+  }
+
+  function regimeIcon() {
+    return `<svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+      <circle cx="28" cy="28" r="26" stroke="#22c55e" stroke-width="2" opacity=".5"/>
+      <path d="M18 34c2-6 6-9 10-9s8 3 10 9" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M16 22l3 3M40 22l-3 3" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="23" cy="29" r="1.8" fill="#22c55e"/><circle cx="33" cy="29" r="1.8" fill="#22c55e"/>
+    </svg>`;
+  }
+
+  function lineChart(data, labels, w = 360, hgt = 150) {
+    const pad = 26, max = 100, min = 0;
+    const innerW = w - pad * 2, innerH = hgt - 34;
+    const pts = data.map((v, i) => {
+      const x = pad + (innerW * i) / (data.length - 1);
+      const y = 8 + innerH * (1 - (v - min) / (max - min));
+      return [x, y];
+    });
+    const path = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+    const area = `M${pts[0][0]} ${8 + innerH} ` + pts.map((p) => `L${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ") + ` L${pts[pts.length-1][0]} ${8 + innerH} Z`;
+    const grid = [0, 25, 50, 75, 100].map((g) => {
+      const y = 8 + innerH * (1 - g / 100);
+      return `<line x1="${pad}" y1="${y}" x2="${w-6}" y2="${y}" stroke="#1a2230" stroke-width="1"/>
+              <text x="6" y="${y+3}" fill="#5e6b7d" font-size="9">${g}</text>`;
+    }).join("");
+    const xlabels = labels.map((l, i) => {
+      const x = pad + (innerW * i) / (labels.length - 1);
+      return `<text x="${x}" y="${hgt-4}" fill="#8a97a8" font-size="9.5" text-anchor="middle">${l}</text>`;
+    }).join("");
+    const last = pts[pts.length - 1];
+    return `<svg width="100%" viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="none" style="display:block">
+      ${grid}
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#22c55e" stop-opacity=".28"/>
+        <stop offset="1" stop-color="#22c55e" stop-opacity="0"/></linearGradient></defs>
+      <path d="${area}" fill="url(#lg)"/>
+      <path d="${path}" fill="none" stroke="#22c55e" stroke-width="2.4" stroke-linejoin="round"/>
+      ${pts.map((p) => `<circle cx="${p[0]}" cy="${p[1]}" r="2.6" fill="#22c55e"/>`).join("")}
+      <circle cx="${last[0]}" cy="${last[1]}" r="4.5" fill="#22c55e" stroke="#0c1b12" stroke-width="2"/>
+      ${xlabels}
+    </svg>`;
+  }
+
+  function sparkline(data, color = "#22c55e", w = 54, hgt = 22) {
+    const max = Math.max(...data), min = Math.min(...data);
+    const pts = data.map((v, i) => {
+      const x = (w * i) / (data.length - 1);
+      const y = 3 + (hgt - 6) * (1 - (v - min) / (max - min || 1));
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    return `<svg width="${w}" height="${hgt}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+
+  function donut(segments, size = 78) {
+    const r = size / 2 - 8, c = 2 * Math.PI * r;
+    let acc = 0;
+    const segs = segments.map((d) => {
+      const len = (c * d.pct) / 100;
+      const seg = `<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${d.color}" stroke-width="9"
+        stroke-dasharray="${len} ${c - len}" stroke-dashoffset="${-acc}"
+        transform="rotate(-90 ${size/2} ${size/2})"/>`;
+      acc += len;
+      return seg;
+    }).join("");
+    return `<svg width="${size}" height="${size}">${segs}</svg>`;
+  }
+
+  const ICN = {
+    bell: '<svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 003.4 0" stroke-linecap="round"/></svg>',
+    refresh: '<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    menu: '<svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18" stroke-linecap="round"/></svg>',
+    star: '<svg width="20" height="20" fill="#f5b53d" viewBox="0 0 24 24"><path d="M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z"/></svg>',
+    dots: '<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+    check: '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    x: '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/></svg>',
+    starline: '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z" stroke-linejoin="round"/></svg>',
+    explain: '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .3c0 1.7-2.5 2-2.5 3.7M12 17h.01" stroke-linecap="round"/></svg>',
+    info: '<svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01" stroke-linecap="round"/></svg>',
+    filter: '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4-2v-4z" stroke-linejoin="round"/></svg>',
+    send: '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z" stroke-linejoin="round"/></svg>',
+    nav: {
+      brief: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z" stroke-linejoin="round"/></svg>',
+      opp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>',
+      watch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z" stroke-linejoin="round"/></svg>',
+      port: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7h18v13H3zM8 7V4h8v3" stroke-linejoin="round"/></svg>',
+      more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/></svg>',
+    },
+  };
+
+  function tabbar(active) {
+    const items = [
+      ["brief", "Brief"], ["opp", "Opportunities"], ["watch", "Watchlist"], ["port", "Portfolio"], ["more", "More"],
+    ];
+    return `<nav class="tabbar">${items.map(([k, label]) =>
+      `<button class="tab ${active === k ? "active" : ""}" data-tab="${k}">${ICN.nav[k]}<span>${label}</span></button>`
+    ).join("")}</nav>`;
+  }
+
+  // Renders the meta envelope (data_freshness + safety_status) as compact chips.
+  function metaChips(m) {
+    const f = m.data_freshness, s = m.safety_status;
+    return `<div class="meta-chips">
+      <span class="meta-chip ${f.is_stale ? "stale" : ""}">${esc(f.label)}</span>
+      <span class="meta-chip safety">${esc(s.label)}</span>
+    </div>`;
+  }
+
+  /* ---------------- Screen A: Morning Brief ---------------- */
+  function renderBrief() {
+    const r = B.market_regime;
+    const best = B.best_opportunity;
+    const top = B.top_opportunities;
+    const wl = B.watchlist_changes, hs = B.highest_conviction_short, hl = B.highest_conviction_long;
+    const pa = B.pending_approvals;
+    const exp = B.portfolio_exposure;
+
+    return `
+      <header class="app-header">
+        <button class="icon-btn">${ICN.menu}</button>
+        <div class="brand"><span class="logo">A</span>AlphaLabs</div>
+        <span class="spacer"></span>
+        <button class="icon-btn bell-wrap">${ICN.bell}<span class="bell-badge">2</span></button>
+        <button class="icon-btn">${ICN.refresh}</button>
+      </header>
+      <div class="date-row">Thu, Jun 25, 2026 · 6:42 AM PT ${metaChips(B.meta)}</div>
+      <div class="content">
+
+        <section class="panel">
+          <div class="panel-head"><span class="section-num">1</span><span class="panel-eyebrow">Market Regime</span></div>
+          <div class="regime-top">
+            <div class="regime-gauge">${regimeIcon()}</div>
+            <div class="regime-meta">
+              <div class="regime-label">${esc(r.label)}</div>
+              <div class="regime-conf">${esc(r.confidence_text)} · ${r.confidence}%</div>
+            </div>
+            <div class="futures">
+              ${r.futures.map((f) => `<div class="fut-row"><span class="fn">${esc(f.name)}</span><span class="fv ${f.direction}">${esc(f.value_text)}</span></div>`).join("")}
+            </div>
+          </div>
+          <div class="lex">
+            <div class="lex-title">💬 Lex Summary</div>
+            <div class="lex-body">${esc(B.lex_summary.text)}</div>
+          </div>
+        </section>
+
+        ${best ? `
+        <section class="panel hero" data-open-detail="${best.idea_id}">
+          <div class="panel-head"><span class="section-num">2</span><span class="panel-eyebrow">Today's Best Opportunity</span></div>
+          <div class="hero-top">
+            ${logo(best, "lg")}
+            <div class="hero-mid">
+              ${stars(best.star_rating)}
+              <div class="tkr-name-lg">${esc(best.ticker)}</div>
+              <div class="tkr-sub">${esc(best.name)}</div>
+              <div class="pill-row">${esc(best.strategy)} · ${esc(best.expected_move_text)} · ${esc(best.hold_period_text)}</div>
+            </div>
+            <div class="hero-score">
+              <div class="score-big">${best.conviction_score}<span class="den">/100</span></div>
+              <div class="score-cap">AI Conviction</div>
+            </div>
+          </div>
+        </section>` : `
+        <section class="panel"><div class="panel-head"><span class="section-num">2</span><span class="panel-eyebrow">Today's Best Opportunity</span></div>
+          <div class="empty-note">No opportunities in today's review queue.</div></section>`}
+
+        <section class="panel">
+          <div class="panel-head"><span class="section-num">3</span><span class="panel-eyebrow">Top 5 Opportunities</span><span class="view-all">View All</span></div>
+          ${top.map((o, i) => `
+            <div class="opp-row" data-open-detail="${o.idea_id}">
+              <span class="opp-rank">${i + 1}</span>
+              ${logo(o, "sm")}
+              <div class="opp-id">
+                <div>
+                  <div class="opp-tkr">${esc(o.ticker)}</div>
+                  <div class="opp-name">${esc(o.name)}</div>
+                </div>
+              </div>
+              <div class="opp-right">
+                ${stars(o.star_rating)}
+                <span class="opp-score">${o.conviction_score}</span>
+                ${sparkline(o.trend_spark, sparkColor(o.trend_direction))}
+              </div>
+            </div>
+            ${i < top.length - 1 ? '<div class="divline"></div>' : ""}
+          `).join("")}
+        </section>
+
+        <div class="mini-grid">
+          <section class="panel mini">
+            <span class="panel-eyebrow"><span class="section-num">4</span> Watchlist Changes</span>
+            <div class="wl-line"><span class="up">↑</span> ${wl.added} Added</div>
+            <div class="wl-line"><span class="down">↓</span> ${wl.removed} Removed</div>
+          </section>
+          <section class="panel mini">
+            <span class="panel-eyebrow"><span class="section-num">5</span> Highest Conviction Short</span>
+            ${hs ? `
+              <div style="font-weight:800;margin:6px 0 2px">🔻 ${esc(hs.ticker)}</div>
+              ${stars(hs.star_rating)} <span style="font-weight:800">${hs.conviction_score}</span>
+              <div class="down" style="font-weight:700;margin-top:4px">${esc(hs.expected_move_text)}</div>`
+            : `<div class="empty-note" style="margin-top:8px">No high-conviction short today.</div>`}
+          </section>
+          <section class="panel mini">
+            <span class="panel-eyebrow"><span class="section-num">6</span> Highest Conviction Long</span>
+            ${hl ? `
+              <div style="font-weight:800;margin:6px 0 2px">🔺 ${esc(hl.ticker)}</div>
+              ${stars(hl.star_rating)} <span style="font-weight:800">${hl.conviction_score}</span>
+              <div class="up" style="font-weight:700;margin-top:4px">${esc(hl.expected_move_text)}</div>`
+            : `<div class="empty-note" style="margin-top:8px">No high-conviction long today.</div>`}
+          </section>
+        </div>
+
+        <div class="mini-grid">
+          <section class="panel mini">
+            <span class="panel-eyebrow"><span class="section-num">7</span> Market Risks</span>
+            <ul class="risk-list">${B.market_risks.map((x) => `<li><span class="sev sev-${x.severity}"></span>${esc(x.label)}</li>`).join("")}</ul>
+          </section>
+          <section class="panel mini">
+            <span class="panel-eyebrow"><span class="section-num">8</span> Portfolio Exposure ${exp.freshness.is_stale ? `<span class="meta-chip stale">${esc(exp.freshness.label)}</span>` : ""}</span>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+              ${donut(exp.segments)}
+              <div style="flex:1">
+                ${exp.segments.map((e) => `<div class="exposure-row"><span class="dot" style="background:${e.color}"></span>${esc(e.label)}<span class="exp-pct">${e.pct}%</span></div>`).join("")}
+              </div>
+            </div>
+          </section>
+          <section class="panel mini" data-goto-queue>
+            <span class="panel-eyebrow"><span class="section-num">9</span> Pending Approvals</span>
+            <div class="mini-big">${pa.total}</div>
+            <div class="kv"><span>High Conviction</span><b style="color:var(--green)">${pa.high_conviction}</b></div>
+            <div class="kv"><span>Needs Review</span><b>${pa.needs_review}</b></div>
+          </section>
+        </div>
+
+      </div>
+      ${tabbar("brief")}
+    `;
+  }
+
+  /* ---------------- Screen B: Opportunity Detail ---------------- */
+  function confidenceRows(sources) {
+    return sources.map((s) => {
+      const unavailable = s.score === null;
+      const fillStyle = unavailable
+        ? "width:100%;background:#222a36"
+        : `width:${s.score}%;background:${evColor(s.score)}`;
+      return `
+        <div class="ev-row ${unavailable ? "ev-unavailable" : ""}">
+          <span class="ev-label">${esc(s.label)}</span>
+          <span class="ev-bar"><span class="ev-fill" style="${fillStyle}"></span></span>
+          <span class="ev-pct">${esc(s.score_text)}</span>
+        </div>
+        ${unavailable && s.note ? `<div class="ev-note">${esc(s.note)}</div>` : ""}`;
+    }).join("");
+  }
+
+  function historicalBlock(hs) {
+    if (!hs || hs.status === "not_available") {
+      return `<div class="empty-note">Historical similarity matching isn't available yet for this setup.</div>`;
+    }
+    return `
+      ${hs.summary_text ? `<p class="why-body" style="margin-bottom:10px">${esc(hs.summary_text)}</p>` : ""}
+      <div class="hist-grid">${hs.setups.map((h) => `
+        <div class="hist-card">
+          <div class="hist-label">${esc(h.label)}</div>
+          ${sparkline([3,5,4,7,6,9,12], h.positive ? "#22c55e" : "#ef4455", 64, 24)}
+          <div class="hist-ret ${h.positive ? "up" : "down"}">${esc(h.return_text)}</div>
+        </div>`).join("")}</div>`;
+  }
+
+  function renderDetail() {
+    const d = detail(state.currentOppId);
+    if (!d) return `<div class="content"><div class="empty-note" style="margin-top:60px">Opportunity not found.</div></div>${tabbar("opp")}`;
+    const hd = d.header, c = d.conviction, t = d.thesis, ai = d.ai_explanation;
+
+    return `
+      <header class="detail-head">
+        <button class="back-btn" data-goto="brief">‹ Back</button>
+        <span class="spacer"></span>
+        <span class="detail-title">${esc(hd.ticker)}</span>
+        <span class="spacer"></span>
+        <button class="icon-btn">${ICN.star}</button>
+        <button class="icon-btn">${ICN.dots}</button>
+      </header>
+      <div class="content" style="padding-bottom:24px">
+
+        <div class="det-id-row">
+          ${logo(hd, "")}
+          <div class="det-id-meta">
+            <div class="det-name">${esc(hd.name)}</div>
+            <div class="det-chips">${esc(hd.ticker)} · ${hd.chips.map(esc).join(" · ")}</div>
+            <div class="dir-row">Direction: <span class="badge-dir ${hd.direction === "LONG" ? "long" : "short"}">${hd.direction} ${hd.direction === "LONG" ? "↑" : "↓"}</span> &nbsp; <span class="chip">${esc(hd.strategy)}</span></div>
+          </div>
+          ${gauge(c.score, 78)}
+        </div>
+
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">Conviction Trend (7 Days)</span><span class="view-all" style="cursor:default">${esc(c.trend_text)} ${c.trend_direction === "up" ? "↗" : c.trend_direction === "down" ? "↘" : "→"}</span></div>
+          ${lineChart(c.trend_series, c.trend_labels)}
+        </section>
+
+        <section class="panel" style="padding:0">
+          <div class="metrics-row">
+            <div class="metric"><div class="ml">Expected Move</div><div class="mv up">${esc(c.expected_move_text)}</div></div>
+            <div class="metric"><div class="ml">Risk Level</div><div class="mv" style="color:var(--amber)">${esc(c.risk_level)}</div></div>
+            <div class="metric"><div class="ml">Hold Period</div><div class="mv">${esc(c.hold_period_text)}</div></div>
+            <div class="metric"><div class="ml">Win Prob</div><div class="mv">${c.win_probability}%</div></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="bullbear">
+            <div class="bb-col bull"><h4>Bull Case</h4><ul class="bb-list bull">${t.bull_case.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+            <div class="bb-col bear"><h4>Bear Case</h4><ul class="bb-list bear">${t.bear_case.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">Why This Matters</span></div>
+          <div class="why-body">${esc(t.why_this_matters)}</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">Confidence Breakdown</span></div>
+          <div class="evidence-list">${confidenceRows(d.confidence_breakdown)}</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">Supporting Evidence</span></div>
+          <div class="chips-wrap">${d.supporting_evidence.map((s) => `<span class="chip">${esc(s.label)}</span>`).join("")}</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">Historical Similar Setups</span></div>
+          ${historicalBlock(d.historical_setups)}
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">AI Explanation</span></div>
+          <ul class="ai-list">${ai.bullets.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          <div class="prob-line">Estimated probability of success: <b>${ai.probability}%</b></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">Key Risks</span></div>
+          <ul class="risk-list">${d.key_risks.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+        </section>
+
+        ${d.source_refs && d.source_refs.length ? `
+        <section class="panel">
+          <div class="panel-head"><span class="panel-eyebrow">Sources</span></div>
+          <div class="chips-wrap">${d.source_refs.map((s) => `<span class="chip src">${esc(s.label)}</span>`).join("")}</div>
+        </section>` : ""}
+
+      </div>
+    `;
+  }
+
+  /* ---------------- Screen C: Approval Queue ---------------- */
+  function renderQueue() {
+    const total = B.pending_approvals.total;
+    const reviewed = state.queueIndex;
+    const pct = Math.round((reviewed / total) * 100);
+    const order = state.queueOrder;
+    const idx = state.queueIndex;
+
+    if (idx >= order.length) {
+      return `
+        ${queueHeader(reviewed, total, pct)}
+        <div class="queue-done">
+          <div class="big">🎉</div>
+          <h3>Queue cleared for this batch</h3>
+          <p>You reviewed ${order.length} candidates. ${total - order.length} lower-priority items remain in Needs Review.</p>
+          <button class="btn btn-explain" data-goto="brief" style="display:inline-flex;margin-top:10px">Back to Brief</button>
+        </div>
+        <div class="bottom-spacer"></div>
+        ${tabbar("watch")}`;
+    }
+
+    const cards = order.slice(idx, idx + 3).map((id, i) => {
+      const d = detail(id);
+      const c = d.conviction, hd = d.header;
+      const find = (k) => d.confidence_breakdown.find((s) => s.key === k);
+      const cls = i === 0 ? "front" : i === 1 ? "behind-1" : "behind-2";
+      return `
+        <div class="q-card ${cls}" data-card-idx="${i}" ${i === 0 ? `data-open-detail="${id}"` : ""}>
+          <div class="q-top">
+            <span class="q-dir ${hd.direction === "LONG" ? "up" : "down"}">${hd.direction}</span>
+            <span class="score-big" style="font-size:20px">${c.score}<span class="den">/100</span></span>
+          </div>
+          <div class="q-id">${logo(hd, "")}<div><div class="q-name">${esc(hd.ticker)}</div><div class="q-sub">${esc(hd.name)}</div></div></div>
+          <div>${stars(c.star_rating)}</div>
+          <div class="q-metrics">
+            <div class="q-metric"><div class="ml">Expected Move</div><div class="mv up">${esc(c.expected_move_text)}</div></div>
+            <div class="q-metric"><div class="ml">Win Probability</div><div class="mv">${c.win_probability}%</div></div>
+          </div>
+          ${sparkline(c.trend_series, "#22c55e", 320, 46)}
+          <div class="q-chips"><span class="chip">${esc(hd.strategy)}</span><span class="chip">${esc(c.hold_period_text)}</span></div>
+          <div>
+            <div class="q-reasons-title">Top Reasons</div>
+            ${d.thesis.bull_case.slice(0, 3).map((rs) => `<div class="q-reason">✅ ${esc(rs)}</div>`).join("")}
+          </div>
+          <div class="q-mini-ev">
+            <span>News <b>${find("news").score_text}</b></span>
+            <span>SEC <b>${find("sec").score_text}</b></span>
+            <span>Hist <b>${find("historical_similarity").score_text}</b></span>
+          </div>
+        </div>`;
+    }).reverse().join("");
+
+    const nextId = order[idx + 1];
+    const next = nextId ? detail(nextId) : null;
+    // Drive the swipe buttons from the front card's action metadata.
+    const frontActions = detail(order[idx]).actions;
+    const act = (name) => frontActions.find((a) => a.action === name) || { enabled: false };
+
+    return `
+      <div class="queue-screen">
+        ${queueHeader(reviewed, total, pct)}
+        <div class="swipe-area"><div class="swipe-stack">${cards}</div></div>
+        <div class="swipe-actions">
+          ${swipeBtn("reject", "Reject", "sc-reject", ICN.x, act("reject"))}
+          ${swipeBtn("watchlist", "Watchlist", "sc-watch", ICN.starline, act("watchlist"))}
+          ${swipeBtn("approve", "Approve", "sc-approve", ICN.check, act("approve"))}
+        </div>
+        ${next ? `<div class="next-up">NEXT: <b>${esc(next.header.ticker)}</b> ${esc(next.header.name)} <span class="spacer" style="flex:1"></span> ${next.conviction.score}/100</div>` : ""}
+      </div>
+      ${tabbar("watch")}
+    `;
+  }
+
+  function swipeBtn(action, label, circleCls, icon, meta) {
+    const disabled = !meta.enabled;
+    return `<button class="swipe-btn ${disabled ? "disabled" : ""}" data-swipe="${action}"
+      data-enabled="${meta.enabled}" data-endpoint="${meta.endpoint || ""}"
+      ${meta.unavailable_reason ? `title="${esc(meta.unavailable_reason)}"` : ""}>
+      <span class="swipe-circle ${circleCls}">${icon}</span>${label}</button>`;
+  }
+
+  function queueHeader(reviewed, total, pct) {
+    return `
+      <div class="queue-head">
+        <button class="back-btn" data-goto="brief">‹</button>
+        <span class="queue-title">Approval Queue ${ICN.info}</span>
+        <span class="spacer"></span>
+        <button class="icon-btn">${ICN.filter}</button>
+      </div>
+      <div class="queue-progress">
+        <div class="qp-top"><span><b>${reviewed}</b> / ${total} Reviewed</span><span>${pct}%</span></div>
+        <div class="qp-bar"><div class="qp-fill" style="width:${pct}%"></div></div>
+      </div>`;
+  }
+
+  /* ---------------- Screen D: Explain sheet ---------------- */
+  // Static illustrative talking points per source (the API note carries the
+  // honest availability message; these bullets are presentation flavor).
+  const SOURCE_POINTS = {
+    news: ["Analyst upgrades and positive coverage in last 48h", "Partnership/contract headlines driving sentiment", "Elevated news volume vs. 30-day baseline"],
+    sec: ["Recent 8-K disclosures reviewed", "No adverse insider-selling clusters detected", "Backlog/guidance language constructive"],
+    options: ["Call/put ratio skewed bullish", "Unusual call sweeps near-dated", "Rising open interest at higher strikes"],
+    technicals: ["Above rising 20/50-day moving averages", "Relative strength vs. sector positive", "Approaching prior resistance — watch for breakout"],
+    macro: ["Regime supportive (risk-on)", "Rate path neutral-to-dovish", "Liquidity conditions stable"],
+  };
+
+  function explainSheet() {
+    const d = detail(state.sheet.oppId);
+    const tabs = [["ai", "AI Explanation"], ["news", "News"], ["sec", "SEC"], ["options", "Options"], ["technicals", "Techs"], ["macro", "Macro"]];
+    const body = explainTabBody(d, state.sheet.tab);
+    return `
+      <div class="sheet-backdrop ${state.sheet.open ? "open" : ""}" data-sheet-backdrop>
+        <div class="sheet" data-stop>
+          <div class="sheet-grab"></div>
+          <div class="sheet-head">
+            ${logo(d.header, "")}
+            <div style="flex:1"><div style="font-weight:800;font-size:16px">${esc(d.header.ticker)}</div><div class="tkr-sub">${esc(d.header.name)}</div></div>
+            ${gauge(d.conviction.score, 64, "")}
+          </div>
+          <div class="tabs">
+            ${tabs.map(([k, l]) => `<button class="tab-btn ${state.sheet.tab === k ? "active" : ""}" data-sheet-tab="${k}">${l}</button>`).join("")}
+          </div>
+          <div class="sheet-scroll">${body}</div>
+          <button class="sheet-close" data-sheet-close>Close</button>
+        </div>
+      </div>`;
+  }
+
+  function explainTabBody(d, tab) {
+    const ai = d.ai_explanation;
+    if (tab === "ai") {
+      return `
+        <div class="sheet-section-title">AI Explanation</div>
+        <p class="why-body">${esc(d.header.name)} has one of today's highest conviction scores because multiple independent signals align:</p>
+        <ul class="ai-list">${ai.bullets.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+        <div class="prob-line">Estimated probability of success: <b>${ai.probability}%</b></div>
+        <div class="sheet-section-title">Historical Insight</div>
+        ${historicalBlock(d.historical_setups)}
+        <div class="sheet-section-title">Follow-up Question</div>
+        <div class="follow-up">
+          <input placeholder="Ask AlphaLabs for more detail about this opportunity…" />
+          <button class="fu-send">${ICN.send}</button>
+        </div>
+        <div class="disclaimer">${esc(ai.disclaimer)}</div>`;
+    }
+    const src = d.confidence_breakdown.find((s) => s.key === tab);
+    const points = SOURCE_POINTS[tab] || [];
+    const unavailable = src.score === null;
+    return `
+      <div class="sheet-section-title">${esc(src.label)} — ${unavailable ? "unavailable" : src.score + "% confidence"}</div>
+      ${unavailable
+        ? `<div class="empty-note" style="margin-bottom:14px">${esc(src.note || "Not available for this symbol.")}</div>`
+        : `<div class="ev-row" style="grid-template-columns:1fr 50px;margin-bottom:14px">
+            <span class="ev-bar"><span class="ev-fill" style="width:${src.score}%;background:${evColor(src.score)}"></span></span>
+            <span class="ev-pct">${src.score}%</span>
+          </div>
+          <ul class="ai-list">${points.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`}
+      <div class="disclaimer">AlphaLabs AI may make mistakes. Verify before acting.</div>`;
+  }
+
+  /* ---------------- render root ---------------- */
+  function render() {
+    let screenHTML = "";
+    if (state.screen === "brief") screenHTML = renderBrief();
+    else if (state.screen === "detail") screenHTML = renderDetail();
+    else if (state.screen === "queue") screenHTML = renderQueue();
+    app.innerHTML = screenHTML + explainSheet() + `<div class="toast" id="toast"></div>`;
+    syncProtoTabs();
+  }
+
+  function syncProtoTabs() {
+    const map = { brief: "brief", detail: "detail", queue: "queue" };
+    document.querySelectorAll(".proto-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.goto === (state.sheet.open ? "explain" : map[state.screen]));
+    });
+  }
+
+  let toastTimer;
+  function toast(msg, kind = "") {
+    const t = document.getElementById("toast");
+    if (!t) return;
+    t.textContent = msg; t.className = "toast show " + kind;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.className = "toast " + kind), 1500);
+  }
+
+  /* ---------------- actions (INERT — no network, no mutation) ---------------- */
+  function openDetail(id) { state.currentOppId = id; state.screen = "detail"; render(); app.scrollTop = 0; }
+  function openSheet(id) { state.sheet.oppId = id; state.sheet.open = true; state.sheet.tab = "ai"; render(); }
+  function closeSheet() { state.sheet.open = false; render(); }
+
+  // Logs the endpoint the real app WOULD call; performs no request.
+  function decide(action, id, endpoint) {
+    const d = detail(id);
+    const tkr = d ? d.header.ticker : id;
+    // eslint-disable-next-line no-console
+    console.log(`[review.v1 mock] ${action} ${tkr} → would POST ${endpoint || "(no endpoint)"} (inert: no request sent)`);
+    const labels = { approve: ["✓ Approved " + tkr + " (mock)", ""], reject: ["✗ Rejected " + tkr + " (mock)", "reject"], watchlist: ["☆ Watchlist " + tkr + " (mock)", "watch"] };
+    const [msg, kind] = labels[action] || ["", ""];
+    toast(msg, kind);
+  }
+
+  function advanceQueue(action, endpoint) {
+    const id = state.queueOrder[state.queueIndex];
+    const front = app.querySelector(".q-card.front");
+    if (front) front.classList.add(action === "reject" ? "leaving-left" : action === "watchlist" ? "leaving-up" : "leaving-right");
+    decide(action, id, endpoint);
+    setTimeout(() => { state.queueIndex++; render(); }, 320);
+  }
+
+  /* ---------------- events ---------------- */
+  document.addEventListener("click", (e) => {
+    // prototype top switcher
+    const proto = e.target.closest(".proto-tab");
+    if (proto) {
+      const g = proto.dataset.goto;
+      if (g === "explain") { state.screen = "detail"; openSheet(state.currentOppId); }
+      else { state.sheet.open = false; state.screen = g === "detail" ? "detail" : g === "queue" ? "queue" : "brief"; render(); app.scrollTop = 0; }
+      return;
+    }
+
+    // sheet interactions
+    if (e.target.closest("[data-sheet-close]")) return closeSheet();
+    const sheetTab = e.target.closest("[data-sheet-tab]");
+    if (sheetTab) { state.sheet.tab = sheetTab.dataset.sheetTab; render(); return; }
+    if (e.target.closest("[data-sheet-backdrop]") && !e.target.closest("[data-stop]")) return closeSheet();
+
+    // swipe buttons (Approval screen) — read action metadata, stay inert
+    const sw = e.target.closest("[data-swipe]");
+    if (sw) {
+      const enabled = sw.dataset.enabled === "true";
+      const action = sw.dataset.swipe;
+      if (!enabled) {
+        // eslint-disable-next-line no-console
+        console.warn(`[review.v1 mock] ${action} is disabled (action.enabled=false) — no endpoint yet`);
+        toast(action + " unavailable", "");
+        return;
+      }
+      advanceQueue(action, sw.dataset.endpoint);
+      return;
+    }
+
+    // nav: bottom tabbar
+    const tab = e.target.closest("[data-tab]");
+    if (tab) {
+      const k = tab.dataset.tab;
+      if (k === "brief") { state.screen = "brief"; render(); app.scrollTop = 0; }
+      else if (k === "watch") { state.screen = "queue"; render(); app.scrollTop = 0; }
+      else if (k === "opp") { openDetail(state.currentOppId); }
+      else toast("'" + k + "' not in prototype");
+      return;
+    }
+
+    // goto handlers
+    const goto = e.target.closest("[data-goto]");
+    if (goto) { state.screen = goto.dataset.goto; render(); app.scrollTop = 0; return; }
+    if (e.target.closest("[data-goto-queue]")) { state.screen = "queue"; render(); app.scrollTop = 0; return; }
+
+    // open detail (cards / rows)
+    const od = e.target.closest("[data-open-detail]");
+    if (od && !e.target.closest("[data-stop]")) { openDetail(Number(od.dataset.openDetail)); return; }
+  });
+
+  render();
+})();
+
+  </script>
+</body>
+</html>
