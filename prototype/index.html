@@ -948,14 +948,17 @@ window.REVIEW_MOCK = (function () {
 })();
 
 // AlphaLabs PM Approval Prototype — view logic.
-// Data source: live is the DEFAULT (a single read-only GET to /api/review/briefing
-// drives Screen A; window.REVIEW_MOCK is the review.v1 fallback dataset). Mock is an
-// explicit dev override via a query flag (?review_data=mock or #/review?data=mock),
-// and is also the automatic fallback whenever the live fetch or schema validation
-// fails (a visible warning is shown). It never mutates. Decision buttons remain
-// inert: they console.log the endpoint they WOULD call and show a local toast, but
-// never POST or hit the network. Screens B/C have no live wiring and show honest
-// placeholders in live mode rather than mixing mock data with live briefing counts.
+// Data source: live is the DEFAULT. Screen A is driven by a single read-only GET
+// to /api/review/briefing; Screen B (Opportunity Detail) is driven by a read-only
+// GET /api/review/opportunity/{idea_id} fetched on tap. window.REVIEW_MOCK is the
+// review.v1 fallback dataset. Mock is an explicit dev override via a query flag
+// (?review_data=mock or #/review?data=mock), and Screen A also falls back to mock
+// automatically whenever the live briefing fetch or schema validation fails (a
+// visible warning is shown). Screen B never falls back to mock in live mode: a
+// failed/absent detail shows an honest loading / not-found / unavailable state.
+// Nothing mutates. Decision buttons remain inert: they console.log the endpoint
+// they WOULD call and show a local toast, but never POST or hit the network.
+// Screen C (approval queue) has no live wiring and shows an honest placeholder.
 (function () {
   const R = window.REVIEW_MOCK;
   // Active Screen-A briefing. Defaults to the mock contract; in live mode it is
@@ -973,11 +976,30 @@ window.REVIEW_MOCK = (function () {
     queueIndex: 0,
     queueOrder: R.order.slice(),
     sheet: { open: false, tab: "ai", oppId: R.order[0] },
-    detailPlaceholder: false,           // true when a live card has no mock detail
+    // Screen B live wiring (read-only). In live mode Screen B fetches
+    // GET /api/review/opportunity/{idea_id}; these track that request without
+    // ever falling back to mock detail while in live mode.
+    detailLoading: false,               // live fetch in flight
+    detailError: "",                    // "" | "not_found" | human-readable warning
+    liveDetail: null,                   // validated review.v1 detail for currentOppId
   };
 
   /* ---------------- small helpers ---------------- */
   const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  // Escaped value, or an em-dash when null/undefined/empty (honest "no value").
+  const orDash = (v) => (v === null || v === undefined || v === "") ? "—" : esc(v);
+
+  // Resolve the detail object for an idea_id. In mock mode this is the mock
+  // dataset; in live mode it is the validated payload already fetched for the
+  // current opportunity (never the mock — live mode must not show mock detail).
+  function resolveDetail(id) {
+    if (dataMode === "live") {
+      const d = state.liveDetail;
+      if (d && d.header && Number(d.header.idea_id) === Number(id)) return d;
+      return null;
+    }
+    return R.get_opportunity(id);
+  }
 
   // Logo tile background is a pure presentation concern (not part of the API
   // contract), so the color lives client-side keyed by ticker.
@@ -1186,6 +1208,34 @@ window.REVIEW_MOCK = (function () {
     return res.json();
   }
 
+  // Structural validation for an OpportunityDetail payload. Returns "" when the
+  // payload is review.v1 and carries the sections Screen B renders; otherwise a
+  // human-readable reason. Sections are allowed to be empty/null (honest
+  // unavailable states) — only the top-level shape is required here.
+  function validateOpportunity(p) {
+    if (!p || typeof p !== "object") return "response was not a JSON object";
+    const m = p.meta;
+    if (!m || typeof m !== "object") return "response is missing meta envelope";
+    if (m.schema_version !== "review.v1") return "unexpected schema_version (need review.v1)";
+    if (!m.data_freshness || !m.safety_status) return "meta is missing freshness/safety status";
+    if (!p.header || typeof p.header !== "object") return "missing header";
+    if (!p.conviction || typeof p.conviction !== "object") return "missing conviction";
+    if (!p.thesis || typeof p.thesis !== "object") return "missing thesis";
+    if (!Array.isArray(p.confidence_breakdown)) return "missing confidence_breakdown";
+    if (!p.ai_explanation || typeof p.ai_explanation !== "object") return "missing ai_explanation";
+    return "";
+  }
+
+  // Read-only GET for a single opportunity. Never mutates, never POSTs. A 404 is
+  // surfaced distinctly so Screen B can show an honest "not found" state.
+  async function loadLiveOpportunity(id) {
+    const res = await fetch("/api/review/opportunity/" + encodeURIComponent(id),
+      { method: "GET", headers: { Accept: "application/json" } });
+    if (res.status === 404) { const e = new Error("not_found"); e.notFound = true; throw e; }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
   /* ---------------- Screen A: Morning Brief ---------------- */
   function renderBrief() {
     const r = B.market_regime;
@@ -1340,8 +1390,10 @@ window.REVIEW_MOCK = (function () {
   }
 
   function historicalBlock(hs) {
-    if (!hs || hs.status === "not_available") {
-      return `<div class="empty-note">Historical similarity matching isn't available yet for this setup.</div>`;
+    // Only render setups when explicitly available with data. Every other state
+    // (not_available, not_implemented, missing, empty) is an honest empty note.
+    if (!hs || hs.status !== "available" || !Array.isArray(hs.setups) || !hs.setups.length) {
+      return `<div class="empty-note">${esc((hs && hs.note) || "Historical similarity matching isn't available yet for this setup.")}</div>`;
     }
     return `
       ${hs.summary_text ? `<p class="why-body" style="margin-bottom:10px">${esc(hs.summary_text)}</p>` : ""}
@@ -1353,23 +1405,50 @@ window.REVIEW_MOCK = (function () {
         </div>`).join("")}</div>`;
   }
 
+  // Minimal header used by Screen B status states (loading / not found / error).
+  function detailStateShell(title, bodyHTML) {
+    return `
+      <header class="detail-head">
+        <button class="back-btn" data-goto="brief">‹ Back</button>
+        <span class="spacer"></span><span class="detail-title">${esc(title)}</span><span class="spacer"></span>
+      </header>
+      <div class="content">${bodyHTML}</div>${tabbar("opp")}`;
+  }
+
   function renderDetail() {
-    // Screen B is NOT wired to live data. When the opportunity came from a live
-    // Screen-A card that has no mock counterpart, show an honest placeholder
-    // rather than faking detail data.
-    if (state.detailPlaceholder) {
-      return `
-        <header class="detail-head">
-          <button class="back-btn" data-goto="brief">‹ Back</button>
-          <span class="spacer"></span><span class="detail-title">Opportunity</span><span class="spacer"></span>
-        </header>
-        <div class="content"><div class="empty-note" style="margin-top:60px">
-          Live detail endpoint not implemented yet. Opportunity detail is only available in mock mode.
-        </div></div>${tabbar("opp")}`;
+    // Live mode: Screen B is driven by GET /api/review/opportunity/{idea_id}.
+    // Show honest loading / 404 / error states and never fall back to mock detail.
+    if (dataMode === "live") {
+      if (state.detailLoading) {
+        return detailStateShell("Opportunity",
+          `<div class="empty-note" style="margin-top:60px">Loading opportunity…</div>`);
+      }
+      if (state.detailError === "not_found") {
+        return detailStateShell("Opportunity",
+          `<div class="empty-note" style="margin-top:60px">Opportunity not found.</div>`);
+      }
+      if (state.detailError) {
+        return detailStateShell("Opportunity",
+          `<div class="data-warning" style="margin-top:24px">⚠ ${esc(state.detailError)}</div>
+           <div class="empty-note" style="margin-top:18px">Live opportunity detail is unavailable right now.</div>`);
+      }
     }
-    const d = detail(state.currentOppId);
-    if (!d) return `<div class="content"><div class="empty-note" style="margin-top:60px">Opportunity not found.</div></div>${tabbar("opp")}`;
+
+    const d = resolveDetail(state.currentOppId);
+    if (!d) return detailStateShell("Opportunity",
+      `<div class="empty-note" style="margin-top:60px">Opportunity not found.</div>`);
     const hd = d.header, c = d.conviction, t = d.thesis, ai = d.ai_explanation;
+
+    // Null-safe view fields (live payloads legitimately omit these).
+    const chips = Array.isArray(hd.chips) ? hd.chips : [];
+    const hasTrend = Array.isArray(c.trend_series) && c.trend_series.length >= 2
+      && Array.isArray(c.trend_labels) && c.trend_labels.length === c.trend_series.length;
+    const trendArrow = c.trend_direction === "up" ? "↗" : c.trend_direction === "down" ? "↘" : "→";
+    const bull = Array.isArray(t.bull_case) ? t.bull_case : [];
+    const bear = Array.isArray(t.bear_case) ? t.bear_case : [];
+    const evidence = Array.isArray(d.supporting_evidence) ? d.supporting_evidence : [];
+    const aiBullets = Array.isArray(ai.bullets) ? ai.bullets : [];
+    const risks = Array.isArray(d.key_risks) ? d.key_risks : [];
 
     return `
       <header class="detail-head">
@@ -1386,36 +1465,39 @@ window.REVIEW_MOCK = (function () {
           ${logo(hd, "")}
           <div class="det-id-meta">
             <div class="det-name">${esc(hd.name)}</div>
-            <div class="det-chips">${esc(hd.ticker)} · ${hd.chips.map(esc).join(" · ")}</div>
-            <div class="dir-row">Direction: <span class="badge-dir ${hd.direction === "LONG" ? "long" : "short"}">${hd.direction} ${hd.direction === "LONG" ? "↑" : "↓"}</span> &nbsp; <span class="chip">${esc(hd.strategy)}</span></div>
+            <div class="det-chips">${[esc(hd.ticker)].concat(chips.map(esc)).join(" · ")}</div>
+            <div class="dir-row">Direction: <span class="badge-dir ${hd.direction === "LONG" ? "long" : "short"}">${esc(hd.direction)} ${hd.direction === "LONG" ? "↑" : "↓"}</span> &nbsp; <span class="chip">${orDash(hd.strategy)}</span></div>
           </div>
           ${gauge(c.score, 78)}
         </div>
 
         <section class="panel">
-          <div class="panel-head"><span class="panel-eyebrow">Conviction Trend (7 Days)</span><span class="view-all" style="cursor:default">${esc(c.trend_text)} ${c.trend_direction === "up" ? "↗" : c.trend_direction === "down" ? "↘" : "→"}</span></div>
-          ${lineChart(c.trend_series, c.trend_labels)}
+          <div class="panel-head"><span class="panel-eyebrow">Conviction Trend (7 Days)</span>${hasTrend && c.trend_text ? `<span class="view-all" style="cursor:default">${esc(c.trend_text)} ${trendArrow}</span>` : ""}</div>
+          ${hasTrend
+            ? lineChart(c.trend_series, c.trend_labels)
+            : `<div class="empty-note">Conviction history isn't available yet for this idea.</div>`}
         </section>
 
         <section class="panel" style="padding:0">
           <div class="metrics-row">
-            <div class="metric"><div class="ml">Expected Move</div><div class="mv up">${esc(c.expected_move_text)}</div></div>
-            <div class="metric"><div class="ml">Risk Level</div><div class="mv" style="color:var(--amber)">${esc(c.risk_level)}</div></div>
-            <div class="metric"><div class="ml">Hold Period</div><div class="mv">${esc(c.hold_period_text)}</div></div>
-            <div class="metric"><div class="ml">Win Prob</div><div class="mv">${c.win_probability}%</div></div>
+            <div class="metric"><div class="ml">Expected Move</div><div class="mv up">${orDash(c.expected_move_text)}</div></div>
+            <div class="metric"><div class="ml">Risk Level</div><div class="mv" style="color:var(--amber)">${orDash(c.risk_level)}</div></div>
+            <div class="metric"><div class="ml">Hold Period</div><div class="mv">${orDash(c.hold_period_text)}</div></div>
+            <div class="metric"><div class="ml">Win Prob</div><div class="mv">${c.win_probability != null ? esc(c.win_probability) + "%" : "—"}</div></div>
           </div>
         </section>
 
+        ${(bull.length || bear.length) ? `
         <section class="panel">
           <div class="bullbear">
-            <div class="bb-col bull"><h4>Bull Case</h4><ul class="bb-list bull">${t.bull_case.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
-            <div class="bb-col bear"><h4>Bear Case</h4><ul class="bb-list bear">${t.bear_case.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+            <div class="bb-col bull"><h4>Bull Case</h4><ul class="bb-list bull">${bull.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+            <div class="bb-col bear"><h4>Bear Case</h4><ul class="bb-list bear">${bear.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
           </div>
-        </section>
+        </section>` : ""}
 
         <section class="panel">
           <div class="panel-head"><span class="panel-eyebrow">Why This Matters</span></div>
-          <div class="why-body">${esc(t.why_this_matters)}</div>
+          <div class="why-body">${t.why_this_matters ? esc(t.why_this_matters) : esc((t.note) || "No thesis text available yet.")}</div>
         </section>
 
         <section class="panel">
@@ -1425,7 +1507,9 @@ window.REVIEW_MOCK = (function () {
 
         <section class="panel">
           <div class="panel-head"><span class="panel-eyebrow">Supporting Evidence</span></div>
-          <div class="chips-wrap">${d.supporting_evidence.map((s) => `<span class="chip">${esc(s.label)}</span>`).join("")}</div>
+          ${evidence.length
+            ? `<div class="chips-wrap">${evidence.map((s) => `<span class="chip">${esc(s.label)}</span>`).join("")}</div>`
+            : `<div class="empty-note">No supporting evidence recorded yet.</div>`}
         </section>
 
         <section class="panel">
@@ -1435,13 +1519,17 @@ window.REVIEW_MOCK = (function () {
 
         <section class="panel">
           <div class="panel-head"><span class="panel-eyebrow">AI Explanation</span></div>
-          <ul class="ai-list">${ai.bullets.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-          <div class="prob-line">Estimated probability of success: <b>${ai.probability}%</b></div>
+          ${aiBullets.length
+            ? `<ul class="ai-list">${aiBullets.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`
+            : `<div class="empty-note">${esc(ai.availability === "insufficient_data" ? "No AI explanation available for this idea yet." : "AI explanation unavailable.")}</div>`}
+          ${ai.probability != null ? `<div class="prob-line">Estimated probability of success: <b>${esc(ai.probability)}%</b></div>` : ""}
         </section>
 
         <section class="panel">
           <div class="panel-head"><span class="panel-eyebrow">Key Risks</span></div>
-          <ul class="risk-list">${d.key_risks.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          ${risks.length
+            ? `<ul class="risk-list">${risks.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`
+            : `<div class="empty-note">No key risks recorded yet.</div>`}
         </section>
 
         ${d.source_refs && d.source_refs.length ? `
@@ -1576,7 +1664,20 @@ window.REVIEW_MOCK = (function () {
   };
 
   function explainSheet() {
-    const d = detail(state.sheet.oppId);
+    const d = resolveDetail(state.sheet.oppId);
+    // No detail available (e.g. live mode before/without a loaded opportunity).
+    // Render an inert, schema-free shell so backdrop handlers exist without
+    // fabricating mock data.
+    if (!d) {
+      return `
+        <div class="sheet-backdrop ${state.sheet.open ? "open" : ""}" data-sheet-backdrop>
+          <div class="sheet" data-stop>
+            <div class="sheet-grab"></div>
+            <div class="sheet-scroll"><div class="empty-note" style="margin-top:24px">Detail unavailable.</div></div>
+            <button class="sheet-close" data-sheet-close>Close</button>
+          </div>
+        </div>`;
+    }
     const tabs = [["ai", "AI Explanation"], ["news", "News"], ["sec", "SEC"], ["options", "Options"], ["technicals", "Techs"], ["macro", "Macro"]];
     const body = explainTabBody(d, state.sheet.tab);
     return `
@@ -1600,11 +1701,14 @@ window.REVIEW_MOCK = (function () {
   function explainTabBody(d, tab) {
     const ai = d.ai_explanation;
     if (tab === "ai") {
+      const aiBullets = Array.isArray(ai.bullets) ? ai.bullets : [];
       return `
         <div class="sheet-section-title">AI Explanation</div>
         <p class="why-body">${esc(d.header.name)} has one of today's highest conviction scores because multiple independent signals align:</p>
-        <ul class="ai-list">${ai.bullets.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-        <div class="prob-line">Estimated probability of success: <b>${ai.probability}%</b></div>
+        ${aiBullets.length
+          ? `<ul class="ai-list">${aiBullets.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`
+          : `<div class="empty-note">No AI explanation available for this idea yet.</div>`}
+        ${ai.probability != null ? `<div class="prob-line">Estimated probability of success: <b>${esc(ai.probability)}%</b></div>` : ""}
         <div class="sheet-section-title">Historical Insight</div>
         ${historicalBlock(d.historical_setups)}
         <div class="sheet-section-title">Follow-up Question</div>
@@ -1656,14 +1760,43 @@ window.REVIEW_MOCK = (function () {
   }
 
   /* ---------------- actions (INERT — no network, no mutation) ---------------- */
-  function openDetail(id) {
+  async function openDetail(id) {
     state.currentOppId = id;
     state.screen = "detail";
-    // In live mode, only mock idea_ids have detail data; everything else gets the
-    // honest "not implemented" placeholder instead of faked detail.
-    state.detailPlaceholder = dataMode === "live" && !R.get_opportunity(id);
+    state.detailError = "";
+    if (dataMode !== "live") {
+      // Mock mode: detail comes straight from the mock dataset (synchronous).
+      state.liveDetail = null;
+      state.detailLoading = false;
+      render();
+      app.scrollTop = 0;
+      return;
+    }
+    // Live mode: read-only fetch of GET /api/review/opportunity/{id}. Paint a
+    // loading state first, then swap in the validated payload — or an honest
+    // not_found / error state. Never falls back to mock detail in live mode.
+    state.liveDetail = null;
+    state.detailLoading = true;
     render();
     app.scrollTop = 0;
+    try {
+      const payload = await loadLiveOpportunity(id);
+      const problem = validateOpportunity(payload);
+      if (problem) throw new Error(problem);
+      if (state.screen !== "detail" || Number(state.currentOppId) !== Number(id)) return; // user navigated away
+      state.liveDetail = payload;
+      state.detailError = "";
+    } catch (err) {
+      if (state.screen !== "detail" || Number(state.currentOppId) !== Number(id)) return;
+      state.liveDetail = null;
+      state.detailError = err && err.notFound ? "not_found"
+        : "Live opportunity unavailable (" + (err && err.message ? err.message : "fetch failed") + ").";
+    } finally {
+      if (state.screen === "detail" && Number(state.currentOppId) === Number(id)) {
+        state.detailLoading = false;
+        render();
+      }
+    }
   }
   function openSheet(id) { state.sheet.oppId = id; state.sheet.open = true; state.sheet.tab = "ai"; render(); }
   function closeSheet() { state.sheet.open = false; render(); }

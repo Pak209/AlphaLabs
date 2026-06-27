@@ -2337,3 +2337,30 @@ Implemented read-only review.v1 Screen B endpoint GET /api/review/opportunity/{i
 
 ### Next Recommended Task
 Human review + approve commit, then decide whether to wire prototype Screen B to live endpoint
+
+
+## 2026-06-26 23:17 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Wired prototype Screen B (Opportunity Detail) to the read-only GET /api/review/opportunity/{idea_id} in live mode. Frontend-only; no backend/scheduler/trading/.env/db changes. Mock mode unchanged. Approve/reject/watchlist remain inert (no POST). Live Screen C still placeholder. Uncommitted, awaiting human approval; not deployed to Mini.
+
+### Files Modified
+- prototype/app.js
+- prototype/index.html
+
+### Commands / Tests Run
+- verified in browser preview against a fetch-shim serving real backend payloads
+
+### Results
+- live Screen A renders real cards; tapping a card fetches /api/review/opportunity/{id}; null-safe guards fire (empty trend, dash metrics, 6 not_implemented confidence rows, omitted bull/bear); 404 -> 'Opportunity not found.'; explain sheet + per-source tabs render unavailable cleanly; live Screen C placeholder intact; zero non-GET requests; no console errors
+- rebuilt self-contained bundle via build_standalone.py
+
+### Risks / Blockers
+- End-to-end browser->FastAPI not exercisable in preview sandbox (no network); verified via captured real payloads + curl on a local seeded instance instead
+
+### Next Recommended Task
+Human review/approve commit of prototype Screen B wiring; then decide on Mini deploy
