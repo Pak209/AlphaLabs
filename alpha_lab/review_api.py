@@ -417,3 +417,267 @@ def build_review_briefing(
                                "note": "Sector exposure computation not implemented in the read API."},
         "pending_approvals": _pending_approvals(pending_approvals),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Opportunity detail (Screen B) — read-only shaping
+# --------------------------------------------------------------------------- #
+_AI_DISCLAIMER = "AlphaLabs AI may make mistakes. Verify before acting. Paper research only — not financial advice."
+
+# Canonical six-source confidence breakdown shown on Screen B. Per-source scoring
+# is NOT computed in this read path, so every source is returned not_implemented
+# with a null score rather than a fabricated number.
+_CONFIDENCE_SOURCES = [
+    ("news", "News"),
+    ("sec", "SEC Filings"),
+    ("historical_similarity", "Historical Similarity"),
+    ("options", "Options Activity"),
+    ("technicals", "Technicals"),
+    ("macro", "Macro Environment"),
+]
+
+
+def _tier_text(tier: str) -> str:
+    return {
+        "high_conviction": "High Conviction",
+        "tradeable": "Tradeable",
+        "watchlist": "Watchlist",
+        "ignore": "Ignore",
+    }.get(tier, "Unknown")
+
+
+def _chips(idea: dict[str, Any]) -> list[str]:
+    """Presentation chips derived from real idea attributes (theme/sector/catalyst
+    type). De-duplicated, blanks dropped, order preserved."""
+    chips: list[str] = []
+    for value in (idea.get("theme"), idea.get("sector"), idea.get("catalyst_type")):
+        text = str(value or "").strip()
+        if text and text not in chips:
+            chips.append(text)
+    return chips
+
+
+def _detail_actions(idea_id: int, status: Optional[str]) -> list[dict[str, Any]]:
+    """Status-aware action metadata. The read endpoint NEVER mutates; it only
+    describes which buttons to show and which OTHER endpoint the UI would call.
+    approve/reject are enabled only while the idea is still reviewable; once
+    decided they are disabled with an honest reason. watchlist has no backend yet."""
+    state = str(status or "").strip().lower()
+    reviewable = state in _REVIEWABLE_STATUSES
+    if reviewable:
+        decided_reason = None
+    elif state in {"approved", "rejected", "expired"}:
+        decided_reason = "already_decided"
+    else:
+        decided_reason = "not_reviewable"
+
+    def decision(action: str, label: str, endpoint: str, style: str) -> dict[str, Any]:
+        meta = {"action": action, "label": label, "method": "POST",
+                "endpoint": endpoint, "enabled": reviewable, "style": style}
+        if not reviewable:
+            meta["unavailable_reason"] = decided_reason
+        return meta
+
+    return [
+        decision("approve", "Approve", f"/api/ideas/{idea_id}/approval/approve", "primary"),
+        decision("reject", "Reject", f"/api/ideas/{idea_id}/approval/reject", "danger"),
+        {"action": "watchlist", "label": "Watchlist", "method": "POST",
+         "endpoint": f"/api/ideas/{idea_id}/watchlist", "enabled": False, "style": "neutral",
+         "unavailable_reason": "not_implemented"},
+        {"action": "explain", "label": "Explain", "method": "GET",
+         "endpoint": f"/api/ideas/{idea_id}/explanation", "enabled": True, "style": "ghost"},
+    ]
+
+
+def _confidence_breakdown() -> list[dict[str, Any]]:
+    return [
+        {"key": key, "label": label, "score": None, "score_text": "—",
+         "availability": "not_implemented",
+         "note": "Per-source confidence breakdown not computed in the read API."}
+        for key, label in _CONFIDENCE_SOURCES
+    ]
+
+
+def _opportunity_thesis(idea: dict[str, Any], expl: dict[str, Any]) -> dict[str, Any]:
+    """Thesis text from the analyst explanation (preferred) or the idea's stored
+    thesis. Structured bull/bear decomposition is not modeled, so those lists are
+    honestly empty rather than fabricated."""
+    why = (str(expl.get("why_this_matters") or "").strip()
+           or str(idea.get("thesis") or "").strip()
+           or str(expl.get("thesis_summary") or "").strip())
+    return {
+        "availability": "available" if why else "insufficient_data",
+        "why_this_matters": why or None,
+        "bull_case": [],
+        "bear_case": [],
+        "note": "Structured bull/bear decomposition is not modeled; see thesis text and key risks.",
+    }
+
+
+def _ai_explanation(expl: dict[str, Any], expl_generated_at: Optional[str]) -> dict[str, Any]:
+    """Screen B AI explanation, drawn from the persisted analyst explanation. When
+    no explanation exists the section is honestly insufficient_data, never faked."""
+    if not expl:
+        return {"availability": "insufficient_data", "bullets": [], "probability": None,
+                "disclaimer": _AI_DISCLAIMER, "generated_at": None, "source": None}
+    bullets: list[str] = []
+    for field in ("thesis_summary", "why_this_matters", "catalyst", "setup_type", "market_context"):
+        text = str(expl.get(field) or "").strip()
+        if text and text not in bullets:
+            bullets.append(text)
+    probability = _normalize_confidence(expl.get("confidence_score"))
+    return {
+        "availability": "available",
+        "bullets": bullets,
+        "probability": probability,
+        "disclaimer": _AI_DISCLAIMER,
+        "generated_at": expl_generated_at or expl.get("created_at"),
+        "source": "stored_explanation",
+    }
+
+
+def _key_risks(expl: dict[str, Any]) -> list[str]:
+    risks = expl.get("risk_factors")
+    if isinstance(risks, str):
+        risks = [risks]
+    if not isinstance(risks, list):
+        return []
+    return [str(r).strip() for r in risks if str(r).strip()]
+
+
+def _normalize_refs(refs: Any) -> list[Any]:
+    return refs if isinstance(refs, list) else []
+
+
+def _supporting_evidence(idea: dict[str, Any], expl: dict[str, Any]) -> list[dict[str, Any]]:
+    """Evidence chips from the real catalyst text + explanation source refs. De-duped
+    by label; empty when nothing is stored (no fabricated evidence)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(label: str, kind: str) -> None:
+        text = str(label or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append({"label": text, "kind": kind})
+
+    catalyst = str(idea.get("catalyst") or "").strip()
+    if catalyst:
+        add(catalyst, str(idea.get("catalyst_type") or "catalyst").strip() or "catalyst")
+    for ref in _normalize_refs(expl.get("source_refs")):
+        if isinstance(ref, dict):
+            add(ref.get("label") or ref.get("url") or "", "reference")
+        else:
+            add(str(ref), "reference")
+    return out
+
+
+def _opportunity_source_refs(idea: dict[str, Any], expl: dict[str, Any]) -> list[dict[str, Any]]:
+    """Structured source references. The catalyst event (if linked) resolves to a
+    real /api/catalysts/{id} URL; explanation refs are passed through honestly."""
+    out: list[dict[str, Any]] = []
+    event_id = idea.get("catalyst_event_id")
+    if event_id is not None:
+        ctype = str(idea.get("catalyst_type") or "catalyst").strip() or "catalyst"
+        out.append({"id": f"cat_{event_id}", "kind": "catalyst",
+                    "label": f"{ctype} · {idea.get('ticker')}",
+                    "url": f"/api/catalysts/{event_id}"})
+    for ref in _normalize_refs(expl.get("source_refs")):
+        if isinstance(ref, dict):
+            out.append({"id": None, "kind": "reference",
+                        "label": ref.get("label") or ref.get("url") or "reference",
+                        "url": ref.get("url")})
+        else:
+            out.append({"id": None, "kind": "reference", "label": str(ref), "url": None})
+    return out
+
+
+def build_review_opportunity(
+    *,
+    idea: dict[str, Any],
+    explanation: Optional[dict[str, Any]],
+    safety: dict[str, Any],
+    now: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """Shape one already-fetched alpha idea (+ its analyst explanation) into the
+    review.v1 Screen B OpportunityDetail contract.
+
+    Pure: no I/O, no mutation, no side effects. ``idea`` is a row dict from the
+    repository (already carrying ``trade_explanation`` and ``strategies``);
+    ``explanation`` is the full trade_explanation row (or None). Fields the backend
+    cannot compute are returned with honest availability states and null values.
+    """
+    now = now or datetime.now(timezone.utc)
+
+    # Inner explanation dict: prefer the full row's parsed explanation, fall back
+    # to the copy the repository attached to the idea.
+    expl = {}
+    expl_generated_at = None
+    if explanation:
+        expl = explanation.get("explanation") or {}
+        expl_generated_at = explanation.get("created_at")
+    if not expl:
+        expl = idea.get("trade_explanation") or {}
+
+    idea_id = int(idea["id"])
+    score = _conviction_from_idea(idea)
+    tier = _tier(score)
+    rating = _star_rating(score)
+    status = idea.get("status")
+
+    # as_of = when the idea record was last produced/touched (real timestamp).
+    as_of = idea.get("updated_at") or idea.get("created_at")
+
+    meta = {
+        "generated_at": _iso(now),
+        "schema_version": SCHEMA_VERSION,
+        "data_freshness": _freshness(as_of, now),
+        "safety_status": _safety_block(safety),
+    }
+
+    header = {
+        "idea_id": idea_id,
+        "ticker": idea.get("ticker"),
+        "name": idea.get("ticker"),  # company name not stored server-side -> ticker
+        "logo_domain": None,          # presentation-only; not stored
+        "chips": _chips(idea),
+        "direction": _direction(idea.get("bias")),
+        "strategy": _strategy(idea.get("timeframe")),
+    }
+
+    conviction = {
+        "score": score,
+        "tier": tier,
+        "tier_text": _tier_text(tier),
+        "star_rating": rating,
+        "star_display": _star_display(rating),
+        # No per-idea conviction history persisted yet -> honest empty trend.
+        "trend_series": [],
+        "trend_labels": [],
+        "trend_direction": "flat",
+        "trend_text": None,
+        # Expected move %, modeled risk level, and a distinct win probability are
+        # not stored on a pending idea -> honest nulls rather than fabricated values.
+        "expected_move_text": None,
+        "risk_level": None,
+        "hold_period_text": _hold_period_text(idea.get("timeframe")),
+        "win_probability": None,
+        "snapshotted_at": idea.get("created_at"),
+    }
+
+    return {
+        "meta": meta,
+        "header": header,
+        "conviction": conviction,
+        "thesis": _opportunity_thesis(idea, expl),
+        "confidence_breakdown": _confidence_breakdown(),
+        "supporting_evidence": _supporting_evidence(idea, expl),
+        # Historical similarity matching is not wired into this read path.
+        "historical_setups": {"status": "not_implemented", "summary_text": None, "setups": [],
+                              "note": "Historical similarity matching not implemented in the read API."},
+        "ai_explanation": _ai_explanation(expl, expl_generated_at),
+        "key_risks": _key_risks(expl),
+        "source_refs": _opportunity_source_refs(idea, expl),
+        # Action metadata only — the read endpoint performs no approve/reject/watchlist.
+        "actions": _detail_actions(idea_id, status),
+    }

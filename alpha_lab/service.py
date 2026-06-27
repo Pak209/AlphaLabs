@@ -24,7 +24,7 @@ from .daily_brief import build_daily_market_brief
 from .live_sources import fetch_polygon_intraday, fetch_yahoo_price
 from .market_data import CRYPTO_COINS, build_trending_stock_signals, get_bitcoin_market, get_crypto_market, get_business_brief, get_liquidity_flows
 from .repository import AlphaLabRepository
-from .review_api import build_review_briefing
+from .review_api import build_review_briefing, build_review_opportunity
 from .performance import build_performance_report
 from .scoring_engine import (
     composite, score_catalyst, score_narrative, score_macro, score_price_volume,
@@ -690,6 +690,22 @@ class AlphaLabService:
             market_briefings=market_briefings,
             ideas=ideas,
             pending_approvals=pending,
+        )
+
+    def review_opportunity(self, idea_id: int) -> dict[str, Any]:
+        """Read-only review.v1 Screen B detail for a single idea: fetch the idea
+        and its latest analyst explanation and shape them into the OpportunityDetail
+        contract. Never mutates state or places a trade. Raises KeyError if the idea
+        does not exist (the API layer maps that to a 404)."""
+        from .scheduler import scheduler_safety_status  # local import avoids service<->scheduler cycle
+        with connect(self.db_path) as conn:
+            repo = AlphaLabRepository(conn)
+            idea = repo.get_idea(idea_id)  # raises KeyError if missing
+            explanation = repo.get_trade_explanation(idea_id)  # None when absent
+        return build_review_opportunity(
+            idea=idea,
+            explanation=explanation,
+            safety=scheduler_safety_status(),
         )
 
     def import_daily_brief_and_test(self, dry_run: bool = True, live_catalysts: bool = True) -> dict[str, Any]:

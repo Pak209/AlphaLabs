@@ -254,6 +254,14 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
         # Read-only review.v1 briefing for the PM Approval UX. Never mutates or trades.
         return lab.review_briefing(limit)
 
+    @app.get("/api/review/opportunity/{idea_id}")
+    def review_opportunity(idea_id: int) -> dict[str, Any]:
+        # Read-only review.v1 Screen B detail. Never mutates or trades; unknown idea -> 404.
+        try:
+            return lab.review_opportunity(idea_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/api/ideas")
     def submit_idea(payload: dict[str, Any]) -> dict[str, Any]:
         try:

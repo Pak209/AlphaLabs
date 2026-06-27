@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from alpha_lab.api import create_app
-from alpha_lab.review_api import build_review_briefing
+from alpha_lab.review_api import build_review_briefing, build_review_opportunity
 from alpha_lab.service import AlphaLabService
 
 NOW = datetime(2026, 6, 25, 14, 0, 0, tzinfo=timezone.utc)
@@ -226,6 +226,170 @@ def test_no_short_returns_null():
     )
     assert out["highest_conviction_short"] is None  # graceful empty state
     assert out["highest_conviction_long"]["ticker"] == "AAA"
+
+
+# --------------------------------------------------------------------------- #
+# Opportunity detail (Screen B) builder + endpoint
+# --------------------------------------------------------------------------- #
+OPPORTUNITY_KEYS = {
+    "meta", "header", "conviction", "thesis", "confidence_breakdown",
+    "supporting_evidence", "historical_setups", "ai_explanation", "key_risks",
+    "source_refs", "actions",
+}
+
+
+def test_opportunity_builder_shapes_real_idea_and_explanation():
+    idea = {
+        "id": 4821, "ticker": "ORCL", "bias": "bullish", "confidence": 0.92,
+        "timeframe": "swing", "status": "needs_review", "theme": "AI infrastructure",
+        "sector": "Technology", "catalyst": "Cloud backlog acceleration",
+        "catalyst_type": "earnings", "catalyst_event_id": 77,
+        "thesis": "Backlog implies durable cloud growth.",
+        "created_at": "2026-06-25T13:42:00Z", "updated_at": "2026-06-25T13:50:00Z",
+    }
+    explanation = {
+        "created_at": "2026-06-25T13:45:00Z",
+        "explanation": {
+            "thesis_summary": "OCI backlog up sharply.",
+            "why_this_matters": "Backlog converts to high-margin cloud revenue.",
+            "catalyst": "Earnings beat with raised guide.",
+            "setup_type": "Breakout continuation.",
+            "market_context": "Risk-on tech tape.",
+            "confidence_score": 0.92,
+            "risk_factors": ["Capex execution risk", "Valuation rich"],
+            "source_refs": [{"label": "Q3 10-Q", "url": "https://example.com/10q"}],
+        },
+    }
+
+    out = build_review_opportunity(idea=idea, explanation=explanation, safety=SAFE, now=NOW)
+
+    assert set(out.keys()) == OPPORTUNITY_KEYS
+    assert out["meta"]["schema_version"] == "review.v1"
+    assert out["meta"]["safety_status"]["reviewable"] is True
+
+    # Header populated from real attributes; chips deduped/ordered.
+    assert out["header"]["idea_id"] == 4821
+    assert out["header"]["ticker"] == "ORCL"
+    assert out["header"]["direction"] == "LONG"
+    assert out["header"]["strategy"] == "Swing"
+    assert out["header"]["chips"] == ["AI infrastructure", "Technology", "earnings"]
+
+    # Conviction from confidence; honest nulls for unmodeled fields.
+    assert out["conviction"]["score"] == 92
+    assert out["conviction"]["tier"] == "high_conviction"
+    assert out["conviction"]["expected_move_text"] is None
+    assert out["conviction"]["win_probability"] is None
+    assert out["conviction"]["trend_series"] == []
+
+    # Thesis text from explanation; bull/bear honestly empty.
+    assert out["thesis"]["availability"] == "available"
+    assert "high-margin" in out["thesis"]["why_this_matters"]
+    assert out["thesis"]["bull_case"] == []
+
+    # Confidence breakdown: all six sources honest not_implemented.
+    assert len(out["confidence_breakdown"]) == 6
+    assert all(s["availability"] == "not_implemented" for s in out["confidence_breakdown"])
+    assert all(s["score"] is None for s in out["confidence_breakdown"])
+
+    # AI explanation bullets drawn from stored explanation fields.
+    ai = out["ai_explanation"]
+    assert ai["availability"] == "available"
+    assert "OCI backlog up sharply." in ai["bullets"]
+    assert ai["probability"] == 92
+    assert ai["source"] == "stored_explanation"
+
+    assert out["key_risks"] == ["Capex execution risk", "Valuation rich"]
+
+    # Supporting evidence: catalyst chip + explanation ref.
+    evidence_labels = {e["label"] for e in out["supporting_evidence"]}
+    assert "Cloud backlog acceleration" in evidence_labels
+    assert "Q3 10-Q" in evidence_labels
+
+    # Source refs: linked catalyst event resolves to a real URL.
+    cat_ref = next(r for r in out["source_refs"] if r["kind"] == "catalyst")
+    assert cat_ref["url"] == "/api/catalysts/77"
+
+    # historical setups honestly not implemented.
+    assert out["historical_setups"]["status"] == "not_implemented"
+
+    # Actions: approve/reject enabled while reviewable; watchlist not_implemented.
+    by_action = {a["action"]: a for a in out["actions"]}
+    assert by_action["approve"]["enabled"] is True
+    assert by_action["reject"]["enabled"] is True
+    assert by_action["watchlist"]["enabled"] is False
+    assert by_action["watchlist"]["unavailable_reason"] == "not_implemented"
+    assert by_action["explain"]["enabled"] is True
+
+
+def test_opportunity_builder_without_explanation_is_insufficient_data():
+    idea = {
+        "id": 5, "ticker": "AAA", "bias": "bearish", "confidence": 0.71,
+        "timeframe": "intraday", "status": "new", "created_at": "2026-06-25T13:00:00Z",
+    }
+    out = build_review_opportunity(idea=idea, explanation=None, safety=SAFE, now=NOW)
+
+    assert out["header"]["direction"] == "SHORT"
+    assert out["header"]["strategy"] == "Day Trade"
+    assert out["header"]["chips"] == []
+    assert out["ai_explanation"]["availability"] == "insufficient_data"
+    assert out["ai_explanation"]["bullets"] == []
+    assert out["ai_explanation"]["probability"] is None
+    assert out["thesis"]["availability"] == "insufficient_data"
+    assert out["thesis"]["why_this_matters"] is None
+    assert out["key_risks"] == []
+    assert out["supporting_evidence"] == []
+    assert out["source_refs"] == []
+
+
+def test_opportunity_actions_disabled_once_decided():
+    idea = {
+        "id": 6, "ticker": "BBB", "bias": "bullish", "confidence": 0.88,
+        "timeframe": "swing", "status": "approved", "created_at": "2026-06-25T13:00:00Z",
+    }
+    out = build_review_opportunity(idea=idea, explanation=None, safety=SAFE, now=NOW)
+    by_action = {a["action"]: a for a in out["actions"]}
+    assert by_action["approve"]["enabled"] is False
+    assert by_action["approve"]["unavailable_reason"] == "already_decided"
+    assert by_action["reject"]["enabled"] is False
+
+
+def test_opportunity_endpoint_smoke_and_404(tmp_path: Path):
+    lab = AlphaLabService(
+        db_path=str(tmp_path / "opp.sqlite3"),
+        risk_config_path="alpha_lab/config.example.json",
+        audit_log_path=str(tmp_path / "audit.jsonl"),
+    )
+    client = TestClient(create_app(lab))
+
+    created = client.post("/api/ideas", json={
+        "ticker": "NVDA", "bias": "bullish", "confidence": 0.82, "timeframe": "intraday",
+        "thesis": "AI infrastructure momentum.", "source": "test",
+        "timestamp": "2026-06-25T13:00:00Z", "strategy_tags": ["AI"],
+    })
+    assert created.status_code == 200
+    idea_id = created.json()["id"]
+
+    res = client.get(f"/api/review/opportunity/{idea_id}")
+    assert res.status_code == 200
+    body = res.json()
+    assert set(body.keys()) == OPPORTUNITY_KEYS
+    assert body["meta"]["schema_version"] == "review.v1"
+    assert body["header"]["ticker"] == "NVDA"
+    assert body["header"]["idea_id"] == idea_id
+    assert body["conviction"]["score"] == 82
+    # thesis text comes through (from the generated explanation or stored thesis).
+    assert body["thesis"]["availability"] == "available"
+    assert body["thesis"]["why_this_matters"]
+    # AI explanation is populated from the auto-generated analyst explanation.
+    assert body["ai_explanation"]["availability"] == "available"
+
+    # Unknown idea -> honest 404, never a fabricated detail.
+    missing = client.get("/api/review/opportunity/999999")
+    assert missing.status_code == 404
+
+    # Dashboard endpoint unchanged.
+    dash = client.get("/api/dashboard")
+    assert dash.status_code == 200
 
 
 def test_endpoint_smoke_and_dashboard_unaffected(tmp_path: Path):

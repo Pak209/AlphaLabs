@@ -2306,3 +2306,34 @@ Exposed the Mac mini dashboard privately over Tailscale Serve so /review is reac
 
 ### Next Recommended Task
 Phone spot-check of https://dans-mac-mini.tailc4ac76.ts.net/review (expect Live Data badge); device must be on the tailnet (Tailscale app connected).
+
+
+## 2026-06-26 22:54 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Implemented read-only review.v1 Screen B endpoint GET /api/review/opportunity/{idea_id}: pure builder build_review_opportunity in review_api.py, service.review_opportunity (fetch idea+latest explanation), API route with KeyError->404. No mutations, no DB migration, no scheduler/trading/.env changes. Uncommitted, awaiting human approval.
+
+### Files Modified
+- alpha_lab/review_api.py
+- alpha_lab/service.py
+- alpha_lab/api.py
+- alpha_lab/tests/test_review_api.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_review_api.py -q
+
+### Results
+- 13 passed
+- Added review_opportunity service method
+- Added GET /api/review/opportunity/{idea_id} route, 404 on unknown idea
+- Added 4 tests (builder real/empty, decided-actions, endpoint smoke+404)
+
+### Risks / Blockers
+- Frontend not wired yet; several Screen B sections honestly not_implemented/null (confidence_breakdown, historical_setups, conviction trend/expected_move/win_probability)
+
+### Next Recommended Task
+Human review + approve commit, then decide whether to wire prototype Screen B to live endpoint
