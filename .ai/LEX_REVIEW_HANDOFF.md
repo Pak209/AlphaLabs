@@ -2277,3 +2277,32 @@ Deployed hidden /review live Morning Brief route to the Mac mini (pak@dans-mac-m
 
 ### Next Recommended Task
 Phone/PWA spot-check of https://<mini-tailscale>/review (Live Data badge). Later implement /api/review/opportunity/{idea_id} for Screen B/C.
+
+
+## 2026-06-26 22:25 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Exposed the Mac mini dashboard privately over Tailscale Serve so /review is reachable from the phone on the tailnet only. Configured HTTPS proxy https://dans-mac-mini.tailc4ac76.ts.net/ -> http://127.0.0.1:8787 (tailnet only, not public). No Cloudflare change, no dashboard bind-address change, no reboot, no scheduler/trading/broker/.env/launchd change, CodexPro/MCP tunnel untouched.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ssh pak@dans-mac-mini: tailscale serve --bg http://127.0.0.1:8787
+- verify over https://dans-mac-mini.tailc4ac76.ts.net
+- safety check over tailnet URL
+
+### Results
+- Serve started in background; status shows / proxy http://127.0.0.1:8787 (tailnet only).
+- PASS: / 200 (Alpha Lab dashboard), /review 200, /api/review/briefing 200 review.v1; /review live-default + mock override present; only GET fetch (no POST).
+- Unchanged: scheduler_mode=dry_run, automation_paper_trading_armed=false, safe_stabilization_mode=true.
+
+### Risks / Blockers
+- Dashboard is now reachable from any device on the tailnet (read-only review route; write actions still token-gated). Tailnet-scoped only, not public. Disable with: tailscale serve --https=443 off.
+
+### Next Recommended Task
+Phone spot-check of https://dans-mac-mini.tailc4ac76.ts.net/review (expect Live Data badge); device must be on the tailnet (Tailscale app connected).
