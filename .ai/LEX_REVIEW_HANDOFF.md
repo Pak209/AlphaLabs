@@ -2364,3 +2364,34 @@ Wired prototype Screen B (Opportunity Detail) to the read-only GET /api/review/o
 
 ### Next Recommended Task
 Human review/approve commit of prototype Screen B wiring; then decide on Mini deploy
+
+
+## 2026-06-28 21:52 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Deployed commit 46910fe (read-only review opportunity endpoint + live Screen B wiring) to the Mac mini. Fast-forward only 7d2c9d1->46910fe; restarted ONLY the dashboard daemon (TERM -> LaunchDaemon KeepAlive respawn, PID 69011->19817); scheduler untouched (PID 62393 unchanged). No code/.env/scheduler/launchd/Tailscale changes.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ssh mini: git merge --ff-only 46910fe
+- ssh mini: kill -TERM 69011 (dashboard respawn via KeepAlive)
+- localhost curl verification on 127.0.0.1:8787
+- safety re-verify (authoritative + dashboard)
+
+### Results
+- Mini HEAD now 46910fe (FF, no merge commit)
+- dashboard PID 69011->19817; /api/health 200; scheduler PID 62393 unchanged
+- /review 200; /api/review/briefing 200 schema review.v1; /api/review/opportunity/737 200 schema review.v1 (HYPE/USD, status-aware actions approve/reject disabled=already_decided); /api/review/opportunity/999999 404; / 200 dashboard ideas_today=132
+- dry_run, automation_paper_trading_armed=false, safe_stabilization_mode=true (both authoritative scheduler_safety_status and restarted-dashboard /api/safety-status agree)
+
+### Risks / Blockers
+- Briefing currently has 0 reviewable cards (no new/needs_review ideas on Mini), so a live tap from Screen A is not data-exercisable right now though the detail endpoint itself is confirmed 200; Mini dashboard is loopback-only and preview sandbox has no network, so frontend runtime confirmed via served-bundle inspection (contains live wiring, GET-only fetches) plus prior in-browser verification of this exact commit
+
+### Next Recommended Task
+Optionally seed/await a reviewable idea to exercise live Screen A->B tap end-to-end on the Mini; otherwise no further deploy action
