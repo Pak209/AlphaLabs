@@ -2395,3 +2395,58 @@ Deployed commit 46910fe (read-only review opportunity endpoint + live Screen B w
 
 ### Next Recommended Task
 Optionally seed/await a reviewable idea to exercise live Screen A->B tap end-to-end on the Mini; otherwise no further deploy action
+
+
+## 2026-06-28 22:08 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Created a clearly-marked review-only TEST idea (id=741, NVDA, source=review-ui-test, status=needs_review) on the Mac mini so the live /review Screen A->B flow can be verified from mobile. Used the documented safe POST /api/ideas path (DB insert + signal eval + explanation only) — NO trade placed, NO broker order, NO approve, NO scheduler/mode/.env changes.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- authenticated localhost POST /api/ideas on Mini (token read from .env into shell var, never printed)
+- verify on Mini 127.0.0.1:8787
+
+### Results
+- HTTP 200, idea id=741 NVDA status=needs_review
+- /api/review/briefing now has 1 top_opportunity (741 NVDA score 75 tier tradeable); /review 200 with tappable card wiring; /api/review/opportunity/741 200 schema review.v1; actions are metadata-only (approve/reject enabled flag true because reviewable, watchlist not_implemented)
+
+### Risks / Blockers
+- approve/reject action METADATA shows enabled=true (idea is reviewable) but the deployed frontend keeps these inert (console-log+toast, zero POST — confirmed in 46910fe bundle); test idea persists in the Mini production DB until manually removed/expired
+
+### Next Recommended Task
+User to verify on phone at https://dans-mac-mini.tailc4ac76.ts.net/review; afterward optionally expire/delete test idea 741
+
+
+## 2026-06-29 22:42 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Fixed raw Python list/dict leakage in the review.v1 Morning Brief Lex Summary; now renders clean prose with honest fallback.
+
+### Files Modified
+- alpha_lab/review_api.py
+- alpha_lab/tests/test_review_api.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_review_api.py -q
+- manual builder check on reported-bug list/dict payload
+
+### Results
+- 17 passed (13 prior + 4 new lex_summary tests)
+- lex_summary.text is clean prose; missing payload returns 'No market summary available yet.'
+
+### Risks / Blockers
+- Live read-only Approval Queue intentionally untouched (deferred to a separate task). No scheduler/trading/broker/.env changes.
+
+### Next Recommended Task
+Build live read-only Approval Queue (Screen C) and deploy Lex Summary fix to the Mac mini after approval.

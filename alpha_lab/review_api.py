@@ -292,26 +292,68 @@ def _market_regime(snapshot: Optional[dict[str, Any]], now: datetime) -> dict[st
     }
 
 
+_LEX_FALLBACK = "No market summary available yet."
+
+
+def _flatten_text(value: Any) -> str:
+    """Collapse a str/list/dict briefing field into clean human-readable prose.
+
+    Lists/tuples become a readable clause joined with '; '; dicts use a label-like
+    field (or 'key: value' clauses); strings pass through. This guarantees we never
+    stringify a raw Python literal such as "['Crypto Majors: ...', 'AI Stocks: ...']"
+    into the rendered Lex Summary.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        parts = [p for p in (_flatten_text(v) for v in value) if p]
+        return "; ".join(parts)
+    if isinstance(value, dict):
+        for key in ("label", "name", "text", "summary"):
+            if value.get(key):
+                return _flatten_text(value[key])
+        parts = []
+        for k, v in value.items():
+            text = _flatten_text(v)
+            if text:
+                parts.append(f"{str(k).replace('_', ' ').strip()}: {text}")
+        return "; ".join(parts)
+    return str(value).strip()
+
+
+def _as_sentence(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return ""
+    if text[-1] not in ".!?":
+        text += "."
+    return text
+
+
 def _lex_summary(briefing: Optional[dict[str, Any]]) -> dict[str, Any]:
     if not briefing:
-        return {"availability": "unavailable", "text": None, "generated_at": None, "source": None,
-                "note": "No stored market briefing yet."}
+        return {"availability": "unavailable", "text": _LEX_FALLBACK, "generated_at": None,
+                "source": None, "note": "No stored market briefing yet."}
     payload = briefing.get("payload") or {}
-    tone = payload.get("broad_market_tone") or "mixed"
-    sector = payload.get("major_indexes_sector_movement")
-    themes = payload.get("themes") or []
+    tone = _flatten_text(payload.get("broad_market_tone")) or "mixed"
+    sector = _flatten_text(payload.get("major_indexes_sector_movement"))
+    themes = payload.get("themes")
     theme_text = ""
     if themes:
-        first = themes[0]
-        theme_text = first if isinstance(first, str) else (first.get("label") or first.get("name") or "")
-    parts = [f"Broad market tone is {tone}."]
+        first = themes[0] if isinstance(themes, (list, tuple)) else themes
+        theme_text = _flatten_text(first)
+
+    sentences = [_as_sentence(f"Broad market tone is {tone}")]
     if sector:
-        parts.append(str(sector))
+        sentences.append(_as_sentence(sector))
     if theme_text:
-        parts.append(f"Leading theme: {theme_text}.")
+        sentences.append(_as_sentence(f"Leading theme: {theme_text}"))
+
     return {
         "availability": "available",
-        "text": " ".join(parts),
+        "text": " ".join(s for s in sentences if s),
         "generated_at": briefing.get("generated_at") or payload.get("generated_at"),
         "source": "stored_briefing",
     }
