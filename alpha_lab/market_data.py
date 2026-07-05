@@ -5,18 +5,45 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-# Alpaca-tradeable crypto we generate ideas for. Crypto is long-only on Alpaca
-# (no shorting), so this universe is restricted to coins Alpaca actually lists.
+# Alpaca-tradeable crypto we generate ideas for in dry-run only. Crypto is
+# long-only on Alpaca (no shorting), so this universe is restricted to coins
+# Alpaca actually lists and that AlphaLab explicitly allowlists.
 # Each entry maps the Alpaca ticker to its CoinGecko id + display labels.
 CRYPTO_COINS: dict[str, dict[str, str]] = {
     "BTC/USD": {"coingecko_id": "bitcoin", "name": "Bitcoin", "symbol": "BTC"},
+    "ETH/USD": {"coingecko_id": "ethereum", "name": "Ethereum", "symbol": "ETH"},
+    "SOL/USD": {"coingecko_id": "solana", "name": "Solana", "symbol": "SOL"},
     "LINK/USD": {"coingecko_id": "chainlink", "name": "Chainlink", "symbol": "LINK"},
     "HYPE/USD": {"coingecko_id": "hyperliquid", "name": "Hyperliquid", "symbol": "HYPE"},
+    "DOGE/USD": {"coingecko_id": "dogecoin", "name": "Dogecoin", "symbol": "DOGE"},
 }
+CRYPTO_ALLOWLIST = tuple(CRYPTO_COINS.keys())
+_CRYPTO_ALIASES = {
+    alias: canonical
+    for canonical in CRYPTO_ALLOWLIST
+    for alias in {
+        canonical,
+        canonical.lower(),
+        canonical.replace("/", ""),
+        canonical.replace("/", "").lower(),
+        canonical.split("/")[0],
+        canonical.split("/")[0].lower(),
+    }
+}
+
+
+def normalize_crypto_symbol(ticker: str) -> str:
+    normalized = str(ticker or "").strip()
+    key = normalized.upper()
+    key = key.replace("-", "/")
+    if "/" not in key and key.endswith("USD"):
+        key = f"{key[:-3]}/USD"
+    return _CRYPTO_ALIASES.get(key, _CRYPTO_ALIASES.get(key.replace("/", ""), normalized.upper()))
 
 
 def _coingecko_markets_url(coingecko_id: str) -> str:
@@ -872,6 +899,7 @@ def get_bitcoin_market() -> dict[str, Any]:
 
 
 def get_crypto_market(ticker: str = "BTC/USD") -> dict[str, Any]:
+    ticker = normalize_crypto_symbol(ticker)
     coin = CRYPTO_COINS.get(ticker)
     if coin is None:
         raise ValueError(f"unsupported crypto ticker {ticker!r}; supported: {', '.join(CRYPTO_COINS)}")
@@ -926,21 +954,35 @@ def get_crypto_market(ticker: str = "BTC/USD") -> dict[str, Any]:
 # blanking the UI.
 _HTTP_CACHE: dict[str, tuple[float, Any]] = {}
 _HTTP_CACHE_TTL_SECONDS = 90.0
+_HTTP_BACKOFF_UNTIL: dict[str, float] = {}
+_HTTP_429_BACKOFF_SECONDS = 300.0
 
 
 def _fetch_json(url: str) -> Any:
     now = time.monotonic()
     cached = _HTTP_CACHE.get(url)
+    backoff_until = _HTTP_BACKOFF_UNTIL.get(url, 0.0)
+    if now < backoff_until:
+        if cached is not None:
+            return cached[1]
+        raise RuntimeError("CoinGecko rate limited; backing off before retry")
     if cached is not None and (now - cached[0]) < _HTTP_CACHE_TTL_SECONDS:
         return cached[1]
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "AlphaLab/0.1 local research app"})
     try:
         with urlopen(request, timeout=12) as response:
             data = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code == 429:
+            _HTTP_BACKOFF_UNTIL[url] = now + _HTTP_429_BACKOFF_SECONDS
+        if cached is not None:
+            return cached[1]
+        raise
     except Exception:
         if cached is not None:
             return cached[1]
         raise
+    _HTTP_BACKOFF_UNTIL.pop(url, None)
     _HTTP_CACHE[url] = (now, data)
     return data
 

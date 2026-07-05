@@ -22,7 +22,16 @@ from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .daily_brief import build_daily_market_brief
 from .live_sources import fetch_polygon_intraday, fetch_yahoo_price
-from .market_data import CRYPTO_COINS, build_trending_stock_signals, get_bitcoin_market, get_crypto_market, get_business_brief, get_liquidity_flows
+from .market_data import (
+    CRYPTO_ALLOWLIST,
+    CRYPTO_COINS,
+    build_trending_stock_signals,
+    get_bitcoin_market,
+    get_crypto_market,
+    get_business_brief,
+    get_liquidity_flows,
+    normalize_crypto_symbol,
+)
 from .repository import AlphaLabRepository
 from .review_api import build_review_briefing, build_review_opportunity
 from .performance import build_performance_report
@@ -51,6 +60,9 @@ FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 
 
 class AlphaLabService:
+    _CRYPTO_SCAN_COOLDOWN_MINUTES = 30
+    _MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY = 24
+
     def __init__(
         self,
         db_path: str | None = None,
@@ -745,63 +757,141 @@ class AlphaLabService:
         )
         return {**brief, "signals": signals, "test_result": result}
 
-    def poll_weekend_crypto(self, dry_run: bool = True) -> dict[str, Any]:
-        """Weekend-safe, crypto-ONLY idea poll.
-
-        Equities/options markets are closed on weekends, so the regular catalyst
-        and daily-brief jobs run mon-fri only. This keeps the 24/7 crypto path
-        alive: build a fresh BTC setup from live market data, dedupe against
-        recent after-hours BTC theses so it won't spam an idea every few minutes,
-        then score/test it. It never imports an equity signal.
-        """
-        if not dry_run and os.getenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "").lower() != "true":
-            raise ValueError("automation paper trading is disabled; set ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES=true to enable")
+    def poll_crypto_24_7(self) -> dict[str, Any]:
+        """Dry-run-only crypto scanner that is independent from equity hours."""
         recent = self._recent_crypto_theses()
+        cooldown = self._crypto_symbols_in_cooldown()
+        open_positions = self._open_crypto_position_symbols()
+        ideas_today = self._crypto_ideas_created_today()
         signals: list[dict[str, Any]] = []
+        signal_logs: list[dict[str, Any]] = []
         unavailable = 0
         duplicates = 0
-        for ticker in CRYPTO_COINS:
+        skipped = 0
+        daily_cap_skips = 0
+        cooldown_skips = 0
+        duplicate_position_skips = 0
+        no_short_skips = 0
+        for ticker in CRYPTO_ALLOWLIST:
+            canonical = normalize_crypto_symbol(ticker)
+            if ideas_today >= self._MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY:
+                daily_cap_skips += 1
+                skipped += 1
+                signal_logs.append(self._crypto_signal_log(canonical, reason="max simulated crypto ideas per day reached"))
+                continue
+            if canonical in open_positions:
+                duplicate_position_skips += 1
+                skipped += 1
+                signal_logs.append(self._crypto_signal_log(canonical, reason="duplicate open crypto position"))
+                continue
+            if canonical in cooldown:
+                cooldown_skips += 1
+                skipped += 1
+                signal_logs.append(self._crypto_signal_log(canonical, reason="per-symbol cooldown active"))
+                continue
             market = self._safe_market_payload(lambda t=ticker: get_crypto_market(t))
             if market.get("status") not in {None, "ok"}:
                 unavailable += 1
+                signal_logs.append(
+                    self._crypto_signal_log(
+                        canonical,
+                        reason=market.get("error") or "crypto market data unavailable",
+                        freshness=market.get("last_updated") or market.get("fetched_at"),
+                    )
+                )
                 continue
             signal = self._btc_signal_from_market(market)
+            signal["ticker"] = canonical
             if signal.get("thesis") in recent:
                 duplicates += 1
+                skipped += 1
+                signal_logs.append(
+                    self._crypto_signal_log(
+                        canonical,
+                        signal=signal,
+                        reason="duplicate thesis",
+                        freshness=market.get("last_updated") or market.get("fetched_at"),
+                    )
+                )
+                continue
+            if signal.get("bias") == "bearish":
+                no_short_skips += 1
+                skipped += 1
+                signal_logs.append(
+                    self._crypto_signal_log(
+                        canonical,
+                        signal=signal,
+                        reason="no shorts: Alpaca crypto is long-only",
+                        freshness=market.get("last_updated") or market.get("fetched_at"),
+                    )
+                )
                 continue
             signals.append(signal)
+            signal_logs.append(
+                self._crypto_signal_log(
+                    canonical,
+                    signal=signal,
+                    reason="queued for dry-run simulation",
+                    freshness=market.get("last_updated") or market.get("fetched_at"),
+                )
+            )
+            ideas_today += 1
         if not signals:
             note = "no new crypto signal" if (duplicates or not unavailable) else "crypto market data unavailable"
             status = "unavailable" if unavailable and not duplicates else "ok"
-            self._record_scanner_run(
-                "after_hours_btc",
-                "weekend_crypto",
-                self._scanner_summary(
-                    candidates_found=len(CRYPTO_COINS) - unavailable,
-                    ideas_persisted=0,
-                    rejected=unavailable,
-                    skipped=duplicates,
-                    reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
-                    dry_run=dry_run,
-                    note=note,
-                ),
+            summary = self._crypto_scanner_summary(
+                candidates_found=len(CRYPTO_ALLOWLIST) - unavailable,
+                ideas_persisted=0,
+                rejected=unavailable + no_short_skips + duplicate_position_skips + daily_cap_skips,
+                skipped=skipped,
+                reasons={
+                    "duplicate thesis": duplicates,
+                    "crypto market data unavailable": unavailable,
+                    "per-symbol cooldown active": cooldown_skips,
+                    "duplicate open crypto position": duplicate_position_skips,
+                    "max simulated crypto ideas per day reached": daily_cap_skips,
+                    "no shorts: Alpaca crypto is long-only": no_short_skips,
+                },
+                note=note,
+                signal_logs=signal_logs,
             )
+            self._record_scanner_run("crypto_24_7", "dry_run_scan", summary)
             return {"status": status, "asset_type": "crypto", "signals": [],
-                    "test_result": {"dry_run": dry_run, "results": [], "note": note}}
-        result = self.import_and_test({"signals": signals, "execution_mode": "dry_run" if dry_run else "paper"})
-        self._record_scanner_run(
-            "after_hours_btc",
-            "weekend_crypto",
-            self._scanner_summary(
+                    "test_result": {"dry_run": True, "results": [], "note": note}, "signal_logs": signal_logs}
+        result = self.import_and_test({"signals": signals, "execution_mode": "dry_run"})
+        for item in result.get("results") or []:
+            idea = item.get("idea") or {}
+            test_result = item.get("test_result") or {}
+            symbol = normalize_crypto_symbol(str(idea.get("ticker") or ""))
+            for log in signal_logs:
+                if log.get("symbol") == symbol:
+                    alpha = test_result.get("alpha") or {}
+                    log["alpha_tier"] = alpha.get("tier")
+                    log["alpha_composite"] = alpha.get("composite_score")
+                    log["paper_eligible"] = bool(test_result.get("paper_eligible"))
+                    log["paper_eligibility_reason"] = test_result.get("paper_eligibility_reason") or "; ".join(test_result.get("reasons") or [])
+                    log["dry_run_action"] = test_result.get("action")
+                    break
+        summary = self._crypto_scanner_summary(
                 candidates_found=len(signals),
                 ideas_persisted=len(result.get("results") or []),
-                rejected=unavailable,
-                skipped=duplicates,
-                reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
-                dry_run=dry_run,
-            ),
+                rejected=unavailable + no_short_skips + duplicate_position_skips + daily_cap_skips,
+                skipped=skipped,
+                reasons={
+                    "duplicate thesis": duplicates,
+                    "crypto market data unavailable": unavailable,
+                    "per-symbol cooldown active": cooldown_skips,
+                    "duplicate open crypto position": duplicate_position_skips,
+                    "max simulated crypto ideas per day reached": daily_cap_skips,
+                    "no shorts: Alpaca crypto is long-only": no_short_skips,
+                },
+                signal_logs=signal_logs,
         )
-        return {"status": "ok", "asset_type": "crypto", "signals": signals, "test_result": result}
+        self._record_scanner_run("crypto_24_7", "dry_run_scan", summary)
+        return {"status": "ok", "asset_type": "crypto", "signals": signals, "test_result": result, "signal_logs": signal_logs}
+
+    def poll_weekend_crypto(self, dry_run: bool = True) -> dict[str, Any]:
+        return self.poll_crypto_24_7()
 
     def analyst_chat(self, message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
         """Advisory markets chat grounded in current AlphaLab data (read-only).
@@ -1374,6 +1464,105 @@ class AlphaLabService:
                 AlphaLabRepository(conn).log_scanner_run(source, run_type, summary)
         except Exception:
             return
+
+    def _crypto_scanner_summary(
+        self,
+        *,
+        candidates_found: int,
+        ideas_persisted: int,
+        rejected: int,
+        skipped: int,
+        reasons: dict[str, int],
+        signal_logs: list[dict[str, Any]],
+        note: str = "",
+    ) -> dict[str, Any]:
+        summary = self._scanner_summary(
+            candidates_found=candidates_found,
+            ideas_persisted=ideas_persisted,
+            rejected=rejected,
+            skipped=skipped,
+            reasons=reasons,
+            dry_run=True,
+            note=note,
+        )
+        summary.update(
+            {
+                "crypto_signal_logs": signal_logs,
+                "allowlist": list(CRYPTO_ALLOWLIST),
+                "cooldown_minutes": self._CRYPTO_SCAN_COOLDOWN_MINUTES,
+                "max_simulated_crypto_ideas_per_day": self._MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY,
+                "safety_gates": {
+                    "dry_run_only": True,
+                    "paper_orders_allowed": False,
+                    "no_shorts": True,
+                    "no_leverage": True,
+                    "duplicate_open_position_check": True,
+                    "per_symbol_cooldown": True,
+                    "max_simulated_crypto_ideas_per_day": self._MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY,
+                },
+            }
+        )
+        return summary
+
+    def _crypto_signal_log(
+        self,
+        symbol: str,
+        *,
+        signal: dict[str, Any] | None = None,
+        reason: str,
+        freshness: str | None = None,
+    ) -> dict[str, Any]:
+        signal = signal or {}
+        return {
+            "symbol": normalize_crypto_symbol(symbol),
+            "catalyst_or_technical_reason": signal.get("catalyst") or signal.get("reason") or reason,
+            "alpha_tier": None,
+            "alpha_composite": None,
+            "source_data_freshness": freshness or signal.get("timestamp") or "",
+            "paper_eligible": False,
+            "paper_eligibility_reason": reason,
+            "safety_reason": reason,
+        }
+
+    def _open_crypto_position_symbols(self) -> set[str]:
+        try:
+            positions = self._broker(dry_run=True).get_positions()
+        except Exception:
+            return set()
+        symbols = set()
+        for position in positions:
+            raw = str(position.get("symbol") or "")
+            canonical = normalize_crypto_symbol(raw)
+            if canonical in CRYPTO_ALLOWLIST:
+                symbols.add(canonical)
+        return symbols
+
+    def _crypto_symbols_in_cooldown(self) -> set[str]:
+        with connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT ticker FROM alpha_ideas
+                WHERE lower(COALESCE(asset_type, '')) = 'crypto'
+                  AND datetime(created_at) >= datetime('now', ?)
+                """,
+                (f"-{self._CRYPTO_SCAN_COOLDOWN_MINUTES} minutes",),
+            ).fetchall()
+        return {
+            canonical
+            for row in rows
+            if (canonical := normalize_crypto_symbol(str(row["ticker"]))) in CRYPTO_ALLOWLIST
+        }
+
+    def _crypto_ideas_created_today(self) -> int:
+        with connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM alpha_ideas
+                WHERE lower(COALESCE(asset_type, '')) = 'crypto'
+                  AND date(created_at) = date('now')
+                """
+            ).fetchone()
+        return int(row["c"] or 0)
 
     def _alpha_iq_context(self, repo: AlphaLabRepository) -> dict[str, Any]:
         futures = {"available": False, "regime": "unknown", "latest_at": ""}

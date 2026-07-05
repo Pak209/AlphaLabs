@@ -30,6 +30,22 @@ def idea_payload():
     }
 
 
+def crypto_payload(ticker: str = "BTC/USD"):
+    return {
+        "ticker": ticker,
+        "asset_type": "crypto",
+        "bias": "bullish",
+        "confidence": 0.82,
+        "timeframe": "intraday",
+        "thesis": f"{ticker} high-conviction crypto setup.",
+        "reason": f"{ticker} high-conviction crypto setup.",
+        "catalyst": "Momentum and EMA reclaim with strong volume.",
+        "source": "test_crypto",
+        "timestamp": "2026-06-29T09:00:00Z",
+        "strategy_tags": ["crypto momentum", "breakout"],
+    }
+
+
 class _Dump:
     def __init__(self, payload: dict):
         self.payload = payload
@@ -58,6 +74,38 @@ def force_alpha(lab: AlphaLabService, monkeypatch, *, tier: str | None, composit
             _Dump({"institutional_score": 0, "component_score": 50.0, "bias": "neutral"}),
         ),
     )
+
+
+class NoOrderBroker(SimulatedPaperBroker):
+    def place_order(self, payload: dict):
+        raise AssertionError("crypto scanner must not call broker.place_order")
+
+
+def crypto_market_payload(ticker: str = "BTC/USD", *, bias: str = "bullish") -> dict:
+    symbol = ticker.split("/")[0]
+    return {
+        "status": "ok",
+        "ticker": ticker,
+        "symbol": symbol,
+        "name": symbol,
+        "price": 100.0,
+        "change_24h_pct": 3.1,
+        "change_7d_pct": 8.2,
+        "change_14d_pct": 11.5,
+        "volume_24h": 1000000000,
+        "last_updated": "2026-06-29T09:00:00Z",
+        "fetched_at": "2026-06-29T09:00:01Z",
+        "source": "unit_test_coingecko",
+        "bias": bias,
+        "summary": f"{ticker} unit-test crypto setup",
+        "indicators": {
+            "ema20": 95.0,
+            "ema50": 90.0,
+            "support_14d_close": 92.0,
+            "resistance_14d_close": 101.0,
+            "ema_read": "Price is above key EMAs.",
+        },
+    }
 
 
 def test_create_idea_with_strategy_tags(tmp_path: Path):
@@ -281,6 +329,83 @@ def test_dry_run_low_tier_still_simulates_without_broker_order(tmp_path: Path, m
     trades = lab.list_trades()
     assert len(trades) == 1
     assert trades[0]["dry_run"] == 1
+
+
+def test_crypto_paper_eligibility_gate_blocks_low_tier(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker(market_open=False)
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="ignore", composite=45.0)
+
+    idea = lab.create_idea(crypto_payload("BTC/USD"))
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is False
+    assert result["action"] == "paper_execution_blocked"
+    assert result["asset_type"] == "crypto"
+    assert result["paper_eligible"] is False
+    assert broker.orders == []
+    assert lab.list_trades() == []
+
+
+def test_crypto_24_7_scanner_is_dry_run_only_even_when_scheduler_armed(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = NoOrderBroker(market_open=False, price=100.0)
+    monkeypatch.setenv("ALPHALAB_SCHEDULER_MODE", "paper")
+    monkeypatch.setenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "true")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="high_conviction", composite=82.0)
+
+    def fake_market(ticker="BTC/USD"):
+        if ticker != "BTC/USD":
+            raise RuntimeError("unit-test data unavailable")
+        return crypto_market_payload("BTC/USD")
+
+    monkeypatch.setattr("alpha_lab.service.get_crypto_market", fake_market)
+
+    result = lab.poll_crypto_24_7()
+
+    assert result["status"] == "ok"
+    assert result["test_result"]["execution_mode"] == "dry_run"
+    assert result["test_result"]["dry_run"] is True
+    assert broker.orders == []
+    trades = lab.list_trades()
+    assert len(trades) == 1
+    assert trades[0]["ticker"] == "BTC/USD"
+    assert trades[0]["asset_type"] == "crypto"
+    assert trades[0]["dry_run"] == 1
+
+    runs = lab.list_scanner_runs()
+    assert len(runs) == 1
+    payload = runs[0]["payload"]
+    assert payload["dry_run"] is True
+    assert payload["safety_gates"]["paper_orders_allowed"] is False
+    log = next(item for item in payload["crypto_signal_logs"] if item["symbol"] == "BTC/USD")
+    assert log["alpha_tier"] == "high_conviction"
+    assert log["alpha_composite"] == 82.0
+    assert log["paper_eligible"] is True
+    assert log["source_data_freshness"] == "2026-06-29T09:00:00Z"
+
+
+def test_crypto_24_7_scanner_respects_per_symbol_cooldown(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: SimulatedPaperBroker(market_open=False))
+    lab.create_idea(crypto_payload("BTCUSD"))
+
+    def fake_market(ticker="BTC/USD"):
+        if ticker == "BTC/USD":
+            raise AssertionError("cooldown should skip BTC before fetching market data")
+        raise RuntimeError("unit-test data unavailable")
+
+    monkeypatch.setattr("alpha_lab.service.get_crypto_market", fake_market)
+
+    result = lab.poll_crypto_24_7()
+
+    btc_log = next(item for item in result["signal_logs"] if item["symbol"] == "BTC/USD")
+    assert btc_log["paper_eligible"] is False
+    assert btc_log["paper_eligibility_reason"] == "per-symbol cooldown active"
+    assert lab.list_trades() == []
 
 
 def test_neutral_idea_is_rejected_with_reason(tmp_path: Path):
