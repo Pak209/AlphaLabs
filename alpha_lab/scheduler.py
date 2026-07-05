@@ -121,12 +121,11 @@ def build_scheduler(service: AlphaLabService | None = None) -> BlockingScheduler
     scheduler.add_job(lambda: service.import_daily_brief_and_test(dry_run=_dry_run()), "cron", day_of_week="mon-fri", hour=12, minute=0)
     scheduler.add_job(lambda: service.import_daily_brief_and_test(dry_run=_dry_run()), "cron", day_of_week="mon-fri", hour=13, minute=35)
 
-    # --- Weekend crypto-only jobs (equities are closed sat/sun) ------------- #
-    # Crypto trades 24/7, so a weekend geopolitical/macro move (e.g. a shock that
-    # hits BTC) should still get caught. poll_weekend_crypto is crypto-only and
-    # dedupes, so it won't spam ideas or touch equities. Runs every 30m all
-    # weekend; the dashboard's read-only briefing refresh runs alongside it.
-    scheduler.add_job(lambda: service.poll_weekend_crypto(dry_run=_dry_run()), "cron", day_of_week="sat,sun", hour="0-23", minute="*/30")
+    # --- 24/7 crypto-only dry-run scanner ---------------------------------- #
+    # Crypto trades around the clock, so this scanner is deliberately independent
+    # from equity market hours. It is hard-wired to dry-run/log only; it never
+    # follows scheduler paper mode and never submits Alpaca paper orders.
+    scheduler.add_job(lambda: service.poll_crypto_24_7(), "cron", day_of_week="mon-sun", hour="0-23", minute="*/30", id="crypto_24_7_dry_run")
     scheduler.add_job(lambda: service.generate_and_save_market_briefing(live_catalysts=True), "cron", day_of_week="sat,sun", hour="6,12,18", minute=0)
     scheduler.add_job(lambda: service.evaluate_pending_signals(limit=500), "cron", day_of_week="sat,sun", hour=18, minute=10)
 
