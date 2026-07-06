@@ -217,13 +217,6 @@ def score_catalyst(item: dict[str, Any]) -> dict[str, Any]:
         "low_actionability": 0.2,
     }[category]
     actionability_score = min(10.0, round((abs(raw_score) * 2.0 + len(matches) * 0.35) * category_multiplier, 2))
-    confidence = min(0.93, max(0.55, 0.56 + actionability_score / 20))
-    trade_candidate = (
-        category == "direct_company_catalyst"
-        and bias in {"bullish", "bearish"}
-        and confidence >= 0.75
-        and actionability_score >= 3.5
-    )
     reason_bits = [match["label"] for match in matches[:4]]
     if not reason_bits:
         reason_bits = ["no high-impact keyword match"]
@@ -248,7 +241,20 @@ def score_catalyst(item: dict[str, Any]) -> dict[str, Any]:
         + sector_score * 0.06
     ))
     catalyst_score = max(0, min(100, catalyst_score))
-    confidence = min(0.95, max(0.50, (catalyst_score / 100) * 0.78 + source_quality_score / 500))
+    # Single confidence definition for the whole pipeline. This is the same
+    # number the decision engine gates on (min_confidence), so trade_candidate
+    # below uses it too — a candidate the radar emits can actually clear the
+    # downstream confidence check instead of being created and then rejected.
+    # Calibration anchor: a candidate right at the score floor (68) from an
+    # average-quality source (~65) sits at ~0.75, the decision engine's default
+    # min_confidence; stronger scores/sources scale up toward the 0.95 cap.
+    confidence = min(0.95, max(0.50, 0.40 + catalyst_score * 0.0045 + source_quality_score * 0.00075))
+    trade_candidate = (
+        category == "direct_company_catalyst"
+        and bias in {"bullish", "bearish"}
+        and confidence >= 0.75
+        and actionability_score >= 3.5
+    )
     explanation = _explanation(
         catalyst_type=catalyst_type,
         catalyst_score=catalyst_score,

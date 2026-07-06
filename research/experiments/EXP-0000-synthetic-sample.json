@@ -1,0 +1,47 @@
+{
+  "id": "EXP-0000",
+  "title": "SYNTHETIC SAMPLE - framework demonstration only (not a real experiment)",
+  "class": "A",
+  "status": "sample",
+  "owner": "framework",
+  "registered_at": "2026-07-04",
+  "hypothesis": "None - this spec exists so tests and the sample validation report exercise every analysis type against the synthetic fixture database. Its numbers describe fabricated data.",
+  "rationale": "Referenced by research/tests/ and used to generate research/validation/SAMPLE-*.md. Never point it at the production database.",
+  "leakage_checklist": {
+    "inputs_available_at_decision_time": true,
+    "labels_are_strictly_forward": true,
+    "no_survivorship_filter_in_population": true,
+    "legacy_rows_excluded_from_distributions": true
+  },
+  "population": {
+    "table": "idea_outcomes",
+    "limit": 5000,
+    "filters": {
+      "source": null,
+      "asset_type": null,
+      "status": null,
+      "since": null,
+      "until": null,
+      "evaluated_only": false
+    }
+  },
+  "variable": { "key": "confidence" },
+  "label": { "key": "excess_move_pct", "hit_key": "hit" },
+  "analyses": [
+    { "type": "summary" },
+    { "type": "threshold_step", "threshold": 0.75, "near_margin_frac": 0.1, "proposed_thresholds": [0.70] },
+    { "type": "buckets", "buckets": 5 },
+    { "type": "calibration", "buckets": 4 },
+    { "type": "session_stability" },
+    { "type": "regret", "gate": "confidence" }
+  ],
+  "sample_gates": {
+    "min_rows": 20,
+    "min_labeled_rows": 20,
+    "min_sessions": 3,
+    "min_near_misses": 2
+  },
+  "decision_rule": "Not applicable - synthetic demonstration data.",
+  "guardrails": [],
+  "never_loosen_ack": "Not applicable."
+}

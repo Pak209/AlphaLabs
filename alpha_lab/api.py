@@ -81,6 +81,13 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
     def safety_status() -> dict[str, Any]:
         return scheduler_safety_status()
 
+    @app.get("/api/diagnostics/rejection-waterfall")
+    def rejection_waterfall(limit: int = 5000) -> dict[str, Any]:
+        # Read-only pipeline observability: stage funnel, per-gate failure
+        # counts (structured traces + legacy reason parsing), first-failed-gate
+        # histogram, and threshold near-miss impact. Never mutates state.
+        return lab.rejection_waterfall(limit=max(100, min(int(limit), 20000)))
+
     @app.get("/api/ops/agent-status")
     def agent_status(limit: int = 50) -> dict[str, Any]:
         return build_agent_status(lab.db_path, limit=limit)

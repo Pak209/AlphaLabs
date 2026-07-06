@@ -14,7 +14,7 @@
 # close can complete even if the machine would otherwise nap.
 
 set -u
-PROJECT_DIR="$HOME/AlphaLab"
+PROJECT_DIR="$HOME/Projects/AlphaLab"
 cd "$PROJECT_DIR" || { echo "FATAL: project dir not found: $PROJECT_DIR"; exit 1; }
 
 mkdir -p logs

@@ -1,6 +1,6 @@
 #!/bin/zsh
 set -e
-cd "$HOME/AlphaLab"
+cd "$HOME/Projects/AlphaLab"
 if [ -f ".env" ]; then
   set -a
   source ".env"
@@ -23,4 +23,4 @@ fi
     sleep 0.25
   done
 ) &
-exec "$HOME/AlphaLab/.venv/bin/python" -m alpha_lab.main --port "${PORT}" >> "${LOG}" 2>&1
+exec "$HOME/Projects/AlphaLab/.venv/bin/python" -m alpha_lab.main --port "${PORT}" >> "${LOG}" 2>&1

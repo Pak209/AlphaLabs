@@ -133,3 +133,10 @@ class Decision:
     # MVP Analyst Brain score (a plain dict so paper_trader stays decoupled from
     # alpha_lab). Populated by the caller; rides through serialize_decision.
     alpha: dict[str, Any] | None = None
+    # Telemetry only (never consulted for the decision itself): one record per
+    # gate evaluated — gate name, observed value, threshold, comparator, pass/
+    # fail, and the exact rejection reason — plus the broker/config state the
+    # gates read. Rides through serialize_decision into decision_logs and the
+    # execution audit so every candidate's path is replayable.
+    gate_results: list[dict[str, Any]] | None = None
+    gate_context: dict[str, Any] | None = None

@@ -154,3 +154,73 @@ def test_rejects_daily_drawdown(tmp_path: Path):
     decision = evaluate_signal(signal(), config(), broker, AuditLog(tmp_path / "log.jsonl"))
     assert decision.accepted is False
     assert "max daily drawdown reached" in decision.reasons
+
+
+# ─── Gate-trace telemetry (observability only; decisions must be unchanged) ───
+
+def test_accepted_decision_records_all_gates_passed(tmp_path: Path):
+    decision = evaluate_signal(signal(), config(), FakeBroker(), AuditLog(tmp_path / "log.jsonl"), dry_run=True)
+    assert decision.accepted is True
+    assert decision.gate_results is not None
+    assert all(record["passed"] for record in decision.gate_results)
+    gate_names = [record["gate"] for record in decision.gate_results]
+    assert "confidence" in gate_names
+    assert "watchlist" in gate_names
+    assert "market_open" in gate_names
+    # Bullish equity signal: short-guards do not apply and must not be recorded.
+    assert "short_allowed" not in gate_names
+    assert "crypto_long_only" not in gate_names
+    assert serialize_decision(decision)["first_failed_gate"] is None
+
+
+def test_rejected_confidence_records_observed_vs_threshold(tmp_path: Path):
+    decision = evaluate_signal(signal(confidence=0.5), config(), FakeBroker(), AuditLog(tmp_path / "log.jsonl"))
+    assert decision.accepted is False
+    assert decision.reasons == ["confidence 0.50 below threshold 0.75"]
+    record = next(r for r in decision.gate_results if r["gate"] == "confidence")
+    assert record["passed"] is False
+    assert record["observed"] == 0.5
+    assert record["threshold"] == 0.75
+    assert record["comparator"] == ">="
+    assert record["detail"] == "confidence 0.50 below threshold 0.75"
+    assert serialize_decision(decision)["first_failed_gate"] == "confidence"
+
+
+def test_gate_trace_records_first_failure_in_gate_order(tmp_path: Path):
+    # Low confidence AND closed market: both recorded, confidence fails first.
+    decision = evaluate_signal(
+        signal(confidence=0.5), config(), FakeBroker(market_open=False), AuditLog(tmp_path / "log.jsonl")
+    )
+    failed = [r["gate"] for r in decision.gate_results if not r["passed"]]
+    assert failed == ["confidence", "market_open"]
+    assert serialize_decision(decision)["first_failed_gate"] == "confidence"
+
+
+def test_bearish_crypto_records_long_only_gate(tmp_path: Path):
+    decision = evaluate_signal(
+        signal(ticker="BTC/USD", asset_type="crypto", bias="bearish"),
+        crypto_config(),
+        FakeBroker(market_open=False),
+        AuditLog(tmp_path / "log.jsonl"),
+    )
+    assert decision.accepted is False
+    record = next(r for r in decision.gate_results if r["gate"] == "crypto_long_only")
+    assert record["passed"] is False
+    # Crypto never evaluates the equity market-open gate.
+    assert "market_open" not in [r["gate"] for r in decision.gate_results]
+
+
+def test_gate_context_captures_broker_state_inputs(tmp_path: Path):
+    broker = FakeBroker(positions=[{"symbol": "NVDA"}], account={"equity": "96000", "last_equity": "100000"})
+    decision = evaluate_signal(signal(), config(), broker, AuditLog(tmp_path / "log.jsonl"))
+    context = decision.gate_context
+    assert context["open_positions"] == 1
+    assert context["position_tickers"] == ["NVDA"]
+    assert context["has_position_in_ticker"] is True
+    assert context["equity"] == 96000.0
+    assert context["last_equity"] == 100000.0
+    assert context["drawdown_pct"] == 0.04
+    assert context["config"]["min_confidence"] == 0.75
+    # Behavior unchanged: same rejection reasons as before instrumentation.
+    assert "duplicate position already open" in decision.reasons
+    assert "max daily drawdown reached" in decision.reasons

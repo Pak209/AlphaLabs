@@ -4,7 +4,7 @@
 # launching the uvicorn server.
 
 set -u
-PROJECT_DIR="${ALPHALAB_PROJECT_DIR:-$HOME/AlphaLab}"
+PROJECT_DIR="${ALPHALAB_PROJECT_DIR:-$HOME/Projects/AlphaLab}"
 cd "$PROJECT_DIR" || { echo "FATAL: project dir not found: $PROJECT_DIR"; exit 1; }
 
 mkdir -p logs

@@ -219,12 +219,13 @@ def test_ignore_tier_blocks_paper_order(tmp_path: Path, monkeypatch):
 
     assert result["accepted"] is False
     assert result["action"] == "paper_execution_blocked"
-    assert "alpha_tier must be high_conviction or tradeable" in result["reasons"][0]
+    assert "alpha gate: composite must be >= 70 with tier tradeable/high_conviction" in result["reasons"][0]
+    assert "tier ignore" in result["reasons"][0]
     assert broker.orders == []
     assert lab.list_trades() == []
     stored = lab.list_ideas()[0]
     assert stored["status"] == "rejected"
-    assert "alpha_tier" in stored["rejection_reason"]
+    assert "alpha gate" in stored["rejection_reason"]
 
 
 def test_watchlist_tier_blocks_paper_order(tmp_path: Path, monkeypatch):
@@ -239,7 +240,7 @@ def test_watchlist_tier_blocks_paper_order(tmp_path: Path, monkeypatch):
 
     assert result["accepted"] is False
     assert result["action"] == "paper_execution_blocked"
-    assert any("alpha_composite must be >= 70" in reason for reason in result["reasons"])
+    assert any("composite must be >= 70" in reason for reason in result["reasons"])
     assert broker.orders == []
     assert lab.list_trades() == []
 
@@ -256,7 +257,7 @@ def test_missing_alpha_tier_blocks_paper_order(tmp_path: Path, monkeypatch):
 
     assert result["accepted"] is False
     assert result["action"] == "paper_execution_blocked"
-    assert "got missing" in result["reasons"][0]
+    assert "tier missing" in result["reasons"][0]
     assert broker.orders == []
     assert lab.list_trades() == []
 
@@ -273,7 +274,10 @@ def test_tradeable_tier_with_low_composite_blocks_paper_order(tmp_path: Path, mo
 
     assert result["accepted"] is False
     assert result["action"] == "paper_execution_blocked"
-    assert result["reasons"] == ["alpha_composite must be >= 70 before Alpaca paper execution (got 69.0)"]
+    assert result["reasons"] == [
+        "alpha gate: composite must be >= 70 with tier tradeable/high_conviction "
+        "before Alpaca paper execution (got composite 69.0, tier tradeable)"
+    ]
     assert broker.orders == []
     assert lab.list_trades() == []
 
@@ -324,7 +328,7 @@ def test_dry_run_low_tier_still_simulates_without_broker_order(tmp_path: Path, m
     assert result["accepted"] is True
     assert result["action"] == "dry_run"
     assert result["paper_eligible"] is False
-    assert "alpha_tier must be high_conviction or tradeable" in result["paper_eligibility_reason"]
+    assert "alpha gate: composite must be >= 70 with tier tradeable/high_conviction" in result["paper_eligibility_reason"]
     assert broker.orders == []
     trades = lab.list_trades()
     assert len(trades) == 1
@@ -468,3 +472,233 @@ def test_trades_without_strategy_are_backfilled_to_untagged(tmp_path: Path):
 
     assert diagnostics["trades_missing_strategy_labels"] == 0
     assert any(row["strategy"] == "test" and row["trades"] == 1 for row in lab.strategy_stats())
+
+
+def _fake_crypto_signal(ticker: str, bias: str) -> dict:
+    return {
+        "ticker": ticker,
+        "asset_type": "crypto",
+        "bias": bias,
+        "confidence": 0.78,
+        "timeframe": "intraday",
+        "thesis": f"{ticker} {bias} after-hours setup at a live price snapshot.",
+        "reason": f"{ticker} {bias} after-hours setup at a live price snapshot.",
+        "source": "after_hours_btc",
+        "timestamp": "2026-06-04T13:00:00Z",
+        "catalyst": "after-hours crypto read",
+        "strategy_tags": ["crypto momentum"],
+    }
+
+
+def test_poll_weekend_crypto_skips_bearish_long_only_entries(tmp_path: Path, monkeypatch):
+    import alpha_lab.service as service_module
+
+    lab = service(tmp_path)
+    monkeypatch.setattr(service_module, "get_crypto_market", lambda t: {"status": "ok", "ticker": t})
+    monkeypatch.setattr(
+        lab, "_btc_signal_from_market",
+        lambda market: _fake_crypto_signal(market["ticker"], "bearish"),
+    )
+
+    result = lab.poll_weekend_crypto(dry_run=True)
+
+    # Invariant preserved across the crypto_24_7 rewrite: a bearish crypto
+    # read must never mint an idea (Alpaca crypto is long-only). The scanner
+    # now logs these as no-short skips instead of pre-mint drops.
+    assert result["signals"] == []
+    assert lab.list_ideas() == []
+    run = lab.list_scanner_runs()[0]
+    reasons = {item["reason"]: item["count"] for item in run["payload"]["top_rejection_reasons"]}
+    assert reasons["no shorts: Alpaca crypto is long-only"] == 6
+
+
+def test_poll_weekend_crypto_dedupes_same_ticker_bias_within_window(tmp_path: Path, monkeypatch):
+    import alpha_lab.service as service_module
+
+    lab = service(tmp_path)
+    monkeypatch.setattr(service_module, "get_crypto_market", lambda t: {"status": "ok", "ticker": t})
+    calls = {"n": 0}
+
+    def fake_signal(market):
+        calls["n"] += 1
+        # Thesis embeds a changing "price" so thesis-equality dedupe never fires.
+        signal = _fake_crypto_signal(market["ticker"], "bullish")
+        signal["thesis"] = f"{market['ticker']} bullish setup at price {calls['n']}"
+        signal["reason"] = signal["thesis"]
+        return signal
+
+    monkeypatch.setattr(lab, "_btc_signal_from_market", fake_signal)
+
+    first = lab.poll_weekend_crypto(dry_run=True)
+    assert len(first["signals"]) == 6          # full CRYPTO_ALLOWLIST
+    ideas_after_first = len(lab.list_ideas())
+    assert ideas_after_first == 6
+
+    # Invariant preserved across the crypto_24_7 rewrite: an immediate repeat
+    # poll must not duplicate ideas even when the thesis text changes. The
+    # 30-minute per-symbol cooldown now provides what the 6h ticker+bias
+    # dedupe did before.
+    second = lab.poll_weekend_crypto(dry_run=True)
+    assert second["signals"] == []
+    assert len(lab.list_ideas()) == ideas_after_first
+    run = lab.list_scanner_runs()[0]
+    reasons = {item["reason"]: item["count"] for item in run["payload"]["top_rejection_reasons"]}
+    assert reasons["per-symbol cooldown active"] == 6
+
+
+def test_poll_live_catalysts_defers_equity_signals_while_market_closed(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    equity_signal = {
+        "ticker": "NVDA",
+        "asset_type": "equity",
+        "bias": "bullish",
+        "confidence": 0.82,
+        "timeframe": "intraday",
+        "reason": "Catalyst Radar: NVDA wins major AI contract.",
+        "source": "catalyst_radar",
+        "timestamp": "2026-06-04T13:00:00Z",
+        "catalyst": "major AI contract",
+        "strategy_tags": ["Government Contract"],
+    }
+    monkeypatch.setattr(
+        lab, "catalyst_intelligence",
+        lambda **kwargs: {"signals": [equity_signal], "catalysts": [], "live_status": None, "mode": "test"},
+    )
+    monkeypatch.setattr(lab, "_equity_market_open", lambda: False)
+
+    closed = lab.poll_live_catalysts(dry_run=True)
+    assert closed["signals"] == []
+    assert lab.list_ideas() == []
+
+    monkeypatch.setattr(lab, "_equity_market_open", lambda: True)
+    open_result = lab.poll_live_catalysts(dry_run=True)
+    assert len(open_result["signals"]) == 1
+    assert len(lab.list_ideas()) == 1
+
+
+def test_execution_audit_persists_gate_trace(tmp_path: Path):
+    lab = service(tmp_path)
+    payload = idea_payload()
+    payload["confidence"] = 0.72   # near-miss vs the 0.75 threshold
+    idea = lab.create_idea(payload)
+    result = lab.place_trade(idea["id"], dry_run=True)
+    assert result["accepted"] is False
+
+    audit = lab.list_execution_audit()[0]
+    gates = audit["payload"]["_gates"]
+    confidence = next(r for r in gates if r["gate"] == "confidence")
+    assert confidence["passed"] is False
+    assert confidence["observed"] == 0.72
+    assert confidence["threshold"] == 0.75
+    assert audit["payload"]["_first_failed_gate"] == "confidence"
+    assert audit["payload"]["_gate_context"]["config"]["min_confidence"] == 0.75
+
+
+def test_dry_run_records_advisory_alpha_gate(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="ignore", composite=45.0)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=True)
+
+    assert result["accepted"] is True   # dry-run still simulates
+    alpha_gate = next(r for r in result["gate_results"] if r["gate"] == "alpha_composite_tier")
+    assert alpha_gate["passed"] is False
+    assert alpha_gate["enforced"] is False   # advisory in dry-run
+    assert alpha_gate["observed"] == 45.0
+    assert alpha_gate["threshold"] == 70
+
+
+def test_paper_block_records_enforced_alpha_gate(tmp_path: Path, monkeypatch):
+    lab = service(tmp_path)
+    broker = SimulatedPaperBroker()
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)
+    force_alpha(lab, monkeypatch, tier="watchlist", composite=69.9)
+
+    idea = lab.create_idea(idea_payload())
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["accepted"] is False
+    assert result["first_failed_gate"] == "alpha_composite_tier"
+    alpha_gate = next(r for r in result["gate_results"] if r["gate"] == "alpha_composite_tier")
+    assert alpha_gate["enforced"] is True
+    audit = lab.list_execution_audit()[0]
+    assert audit["payload"]["_first_failed_gate"] == "alpha_composite_tier"
+
+
+def test_rejection_waterfall_aggregates_gates_and_stages(tmp_path: Path):
+    lab = service(tmp_path)
+    near_miss_payload = idea_payload()
+    near_miss_payload["confidence"] = 0.72
+    rejected = lab.create_idea(near_miss_payload)
+    lab.place_trade(rejected["id"], dry_run=True)
+    accepted = lab.create_idea(idea_payload())
+    lab.place_trade(accepted["id"], dry_run=True)
+
+    report = lab.rejection_waterfall()
+
+    assert report["status"] == "ok"
+    stages = {row["stage"]: row for row in report["stage_funnel"]}
+    assert stages["ideas_created"]["count"] == 2
+    assert stages["decision_attempts"]["count"] == 2
+    assert stages["accepted_decisions"]["count"] == 1
+    assert stages["paper_orders_submitted"]["count"] == 0
+
+    confidence = next(b for b in report["gate_failures"] if b["gate"] == "confidence")
+    assert confidence["failures"] == 1
+    assert confidence["near_misses"] == 1   # 0.72 is within 10% of 0.75
+    # Distribution over ALL structured evaluations (passed 0.82 + failed 0.72),
+    # so threshold placement can be judged against the candidate population.
+    stats = confidence["observed_stats"]
+    assert stats["count"] == 2
+    assert stats["min"] == 0.72
+    assert stats["max"] == 0.82
+    assert report["first_failed_gates"][0]["gate"] == "confidence"
+    assert report["window"]["structured_rows"] == 2
+
+
+def test_rejection_waterfall_maps_legacy_reason_rows(tmp_path: Path):
+    lab = service(tmp_path)
+    with connect(lab.db_path) as conn:
+        AlphaLabRepository(conn).log_execution_attempt({
+            "idea_id": None,
+            "ticker": "BTC/USD",
+            "status": "reject",
+            "rejection_reason": "Alpaca does not support shorting crypto (crypto is long-only); market is closed",
+            "payload": {},
+            "response": {},
+            "dry_run": True,
+        })
+
+    report = lab.rejection_waterfall()
+    by_gate = {b["gate"]: b for b in report["gate_failures"]}
+    assert by_gate["crypto_long_only"]["legacy_failures"] == 1
+    assert by_gate["market_open"]["legacy_failures"] == 1
+    # First clause counts as the first-failed gate for legacy rows.
+    assert {"gate": "crypto_long_only", "count": 1} in report["first_failed_gates"]
+
+
+def test_waterfall_snapshot_writes_file_and_diffs(tmp_path: Path, capsys):
+    from scripts.waterfall_snapshot import take_snapshot, previous_snapshot, print_delta
+
+    lab = service(tmp_path)
+    rejected = lab.create_idea({**idea_payload(), "confidence": 0.72})
+    lab.place_trade(rejected["id"], dry_run=True)
+
+    out_dir = tmp_path / "snapshots"
+    first = take_snapshot(lab, out_dir)
+    assert first.exists()
+    assert previous_snapshot(out_dir, first) is None
+
+    accepted = lab.create_idea(idea_payload())
+    lab.place_trade(accepted["id"], dry_run=True)
+    second = take_snapshot(lab, out_dir)
+    assert previous_snapshot(out_dir, second) == first
+
+    print_delta(second, first)
+    output = capsys.readouterr().out
+    assert "compared to" in output
+    assert "decision_attempts" in output

@@ -20,7 +20,7 @@ set -u
 emulate -L zsh
 setopt pipefail
 
-PROJECT_DIR="$HOME/AlphaLab"
+PROJECT_DIR="$HOME/Projects/AlphaLab"
 UID_NUM="$(id -u)"
 # launchd agents installed on the production Mac. dashboard + scheduler are the
 # always-on services; options-validation is the weekday validator. Each has a

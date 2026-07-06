@@ -13,7 +13,7 @@
 # After changing .env, reload the agent so it re-reads the value:
 #   launchctl kickstart -k gui/$(id -u)/com.alphalab.scheduler
 set -e
-cd "$HOME/AlphaLab"
+cd "$HOME/Projects/AlphaLab"
 if [ -f ".env" ]; then
   chmod 600 ".env" 2>/dev/null || true
   set -a; source .env; set +a

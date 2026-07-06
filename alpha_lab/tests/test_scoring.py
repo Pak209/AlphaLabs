@@ -227,3 +227,34 @@ def test_catalyst_inputs_from_idea_keyword_scan():
     assert ci.catalyst_type == "fda"
     # no catalyst keywords -> generic
     assert se.catalyst_inputs_from_idea({"thesis": "broad market chatter"}).catalyst_type == "generic_pr"
+
+
+def test_catalyst_inputs_from_idea_prefers_stored_radar_fields():
+    # Radar-created ideas carry the radar's catalyst_type label and 0-100 score;
+    # the decision layer must score the same event class, not re-derive a weaker
+    # generic_pr read from thesis text.
+    idea = {
+        "catalyst_type": "Government Contract",
+        "catalyst_score": 74,
+        "catalyst": "text without engine keywords",
+        "thesis": "",
+        "theme": "",
+    }
+    ci = se.catalyst_inputs_from_idea(idea, gap_pct=4.0)
+    assert ci.catalyst_type == "contract"
+    assert ci.materiality == 74.0
+    assert ci.gap_pct == 4.0
+
+
+def test_catalyst_inputs_from_idea_unknown_label_falls_back_to_keywords():
+    idea = {"catalyst_type": "Mystery Label", "catalyst": "major fda approval", "thesis": "", "theme": ""}
+    assert se.catalyst_inputs_from_idea(idea).catalyst_type == "fda"
+
+
+def test_narrative_inputs_for_crypto_pair_tickers():
+    # "BTC/USD" and "BTCUSD" must resolve to the BTC theme, not "none".
+    assert se.narrative_inputs_for_ticker("BTC/USD").theme == "crypto"
+    assert se.narrative_inputs_for_ticker("BTCUSD").theme == "crypto"
+    assert se.narrative_inputs_for_ticker("ETH/USD").theme == "crypto"
+    # Non-crypto suffix lookalikes stay unmapped rather than mis-themed.
+    assert se.narrative_inputs_for_ticker("ZZZZUSD").theme == "none"

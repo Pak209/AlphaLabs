@@ -1,0 +1,51 @@
+{
+  "id": "EXP-0001",
+  "title": "Does the 0.75 execution confidence bar sit on a real outcome step?",
+  "class": "A",
+  "status": "registered",
+  "owner": "Pak",
+  "registered_at": "2026-07-04",
+  "hypothesis": "Ideas in the near-miss confidence band (0.675-0.75, the 10% margin below the execution bar) have a materially lower forward hit rate (excess move > 0) than ideas at or above 0.75. If the near-miss band's hit-rate CI overlaps the above band's CI, the bar at 0.75 is not carrying selective information at its current placement.",
+  "rationale": "CALIBRATION_PLAN.md lists the confidence formula coefficients as evidence-based candidate #2 and requires >=200 structured evaluations over >=5 sessions before analysis. The unified confidence formula shipped 2026-07-04; this experiment is the pre-registered readout for when that sample exists. The 0.75 execution bar itself is on the never-loosen list: this experiment can motivate a proposal to a human, never a change.",
+  "leakage_checklist": {
+    "inputs_available_at_decision_time": true,
+    "labels_are_strictly_forward": true,
+    "no_survivorship_filter_in_population": true,
+    "legacy_rows_excluded_from_distributions": true
+  },
+  "population": {
+    "table": "idea_outcomes",
+    "limit": 5000,
+    "filters": {
+      "source": null,
+      "asset_type": null,
+      "status": null,
+      "since": "2026-07-04",
+      "until": null,
+      "evaluated_only": false
+    }
+  },
+  "variable": { "key": "confidence" },
+  "label": { "key": "excess_move_pct", "hit_key": "hit" },
+  "analyses": [
+    { "type": "summary" },
+    { "type": "threshold_step", "threshold": 0.75, "near_margin_frac": 0.1, "proposed_thresholds": [0.70, 0.72] },
+    { "type": "buckets", "buckets": 10 },
+    { "type": "calibration", "buckets": 5 },
+    { "type": "session_stability" },
+    { "type": "regret", "gate": "confidence" }
+  ],
+  "sample_gates": {
+    "min_rows": 200,
+    "min_labeled_rows": 200,
+    "min_sessions": 5,
+    "min_near_misses": 10
+  },
+  "decision_rule": "If sample gates pass AND the near-miss band's hit-rate CI upper bound is below the above band's lower bound: record 'correctly selective', close the experiment, no proposal. If the intervals overlap AND the regret flag is true AND session stability shows positive-session share >= 0.6 in the near-miss band population: draft a shadow proposal (advisory threshold at 0.70 or 0.72, enforced:false) for human review per CALIBRATION_PLAN §2.4. Under no outcome does this experiment change the live 0.75 bar - that value is on the never-loosen list.",
+  "guardrails": [
+    "Acceptance volume stays within the 5-15 accepted dry-run decisions/week band",
+    "No never-loosen gate fires more often than its pre-experiment baseline",
+    "The 0.75 execution bar is never edited as part of this experiment"
+  ],
+  "never_loosen_ack": "min_confidence 0.75 at execution is on the never-loosen list. This experiment produces evidence and, at most, a shadow-threshold proposal for explicit human approval."
+}
