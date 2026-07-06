@@ -502,11 +502,14 @@ def test_poll_weekend_crypto_skips_bearish_long_only_entries(tmp_path: Path, mon
 
     result = lab.poll_weekend_crypto(dry_run=True)
 
+    # Invariant preserved across the crypto_24_7 rewrite: a bearish crypto
+    # read must never mint an idea (Alpaca crypto is long-only). The scanner
+    # now logs these as no-short skips instead of pre-mint drops.
     assert result["signals"] == []
     assert lab.list_ideas() == []
     run = lab.list_scanner_runs()[0]
     reasons = {item["reason"]: item["count"] for item in run["payload"]["top_rejection_reasons"]}
-    assert reasons["bearish crypto skipped (broker is long-only)"] == 3
+    assert reasons["no shorts: Alpaca crypto is long-only"] == 6
 
 
 def test_poll_weekend_crypto_dedupes_same_ticker_bias_within_window(tmp_path: Path, monkeypatch):
@@ -527,13 +530,20 @@ def test_poll_weekend_crypto_dedupes_same_ticker_bias_within_window(tmp_path: Pa
     monkeypatch.setattr(lab, "_btc_signal_from_market", fake_signal)
 
     first = lab.poll_weekend_crypto(dry_run=True)
-    assert len(first["signals"]) == 3
+    assert len(first["signals"]) == 6          # full CRYPTO_ALLOWLIST
     ideas_after_first = len(lab.list_ideas())
-    assert ideas_after_first == 3
+    assert ideas_after_first == 6
 
+    # Invariant preserved across the crypto_24_7 rewrite: an immediate repeat
+    # poll must not duplicate ideas even when the thesis text changes. The
+    # 30-minute per-symbol cooldown now provides what the 6h ticker+bias
+    # dedupe did before.
     second = lab.poll_weekend_crypto(dry_run=True)
     assert second["signals"] == []
     assert len(lab.list_ideas()) == ideas_after_first
+    run = lab.list_scanner_runs()[0]
+    reasons = {item["reason"]: item["count"] for item in run["payload"]["top_rejection_reasons"]}
+    assert reasons["per-symbol cooldown active"] == 6
 
 
 def test_poll_live_catalysts_defers_equity_signals_while_market_closed(tmp_path: Path, monkeypatch):
