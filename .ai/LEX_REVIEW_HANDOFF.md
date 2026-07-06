@@ -2381,6 +2381,92 @@ Wired prototype Screen B (Opportunity Detail) to the read-only GET /api/review/o
 Human review/approve commit of prototype Screen B wiring; then decide on Mini deploy
 
 
+## 2026-06-28 21:52 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Deployed commit 46910fe (read-only review opportunity endpoint + live Screen B wiring) to the Mac mini. Fast-forward only 7d2c9d1->46910fe; restarted ONLY the dashboard daemon (TERM -> LaunchDaemon KeepAlive respawn, PID 69011->19817); scheduler untouched (PID 62393 unchanged). No code/.env/scheduler/launchd/Tailscale changes.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- ssh mini: git merge --ff-only 46910fe
+- ssh mini: kill -TERM 69011 (dashboard respawn via KeepAlive)
+- localhost curl verification on 127.0.0.1:8787
+- safety re-verify (authoritative + dashboard)
+
+### Results
+- Mini HEAD now 46910fe (FF, no merge commit)
+- dashboard PID 69011->19817; /api/health 200; scheduler PID 62393 unchanged
+- /review 200; /api/review/briefing 200 schema review.v1; /api/review/opportunity/737 200 schema review.v1 (HYPE/USD, status-aware actions approve/reject disabled=already_decided); /api/review/opportunity/999999 404; / 200 dashboard ideas_today=132
+- dry_run, automation_paper_trading_armed=false, safe_stabilization_mode=true (both authoritative scheduler_safety_status and restarted-dashboard /api/safety-status agree)
+
+### Risks / Blockers
+- Briefing currently has 0 reviewable cards (no new/needs_review ideas on Mini), so a live tap from Screen A is not data-exercisable right now though the detail endpoint itself is confirmed 200; Mini dashboard is loopback-only and preview sandbox has no network, so frontend runtime confirmed via served-bundle inspection (contains live wiring, GET-only fetches) plus prior in-browser verification of this exact commit
+
+### Next Recommended Task
+Optionally seed/await a reviewable idea to exercise live Screen A->B tap end-to-end on the Mini; otherwise no further deploy action
+
+
+## 2026-06-28 22:08 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Created a clearly-marked review-only TEST idea (id=741, NVDA, source=review-ui-test, status=needs_review) on the Mac mini so the live /review Screen A->B flow can be verified from mobile. Used the documented safe POST /api/ideas path (DB insert + signal eval + explanation only) — NO trade placed, NO broker order, NO approve, NO scheduler/mode/.env changes.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- authenticated localhost POST /api/ideas on Mini (token read from .env into shell var, never printed)
+- verify on Mini 127.0.0.1:8787
+
+### Results
+- HTTP 200, idea id=741 NVDA status=needs_review
+- /api/review/briefing now has 1 top_opportunity (741 NVDA score 75 tier tradeable); /review 200 with tappable card wiring; /api/review/opportunity/741 200 schema review.v1; actions are metadata-only (approve/reject enabled flag true because reviewable, watchlist not_implemented)
+
+### Risks / Blockers
+- approve/reject action METADATA shows enabled=true (idea is reviewable) but the deployed frontend keeps these inert (console-log+toast, zero POST — confirmed in 46910fe bundle); test idea persists in the Mini production DB until manually removed/expired
+
+### Next Recommended Task
+User to verify on phone at https://dans-mac-mini.tailc4ac76.ts.net/review; afterward optionally expire/delete test idea 741
+
+
+## 2026-06-29 22:42 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Fixed raw Python list/dict leakage in the review.v1 Morning Brief Lex Summary; now renders clean prose with honest fallback.
+
+### Files Modified
+- alpha_lab/review_api.py
+- alpha_lab/tests/test_review_api.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_review_api.py -q
+- manual builder check on reported-bug list/dict payload
+
+### Results
+- 17 passed (13 prior + 4 new lex_summary tests)
+- lex_summary.text is clean prose; missing payload returns 'No market summary available yet.'
+
+### Risks / Blockers
+- Live read-only Approval Queue intentionally untouched (deferred to a separate task). No scheduler/trading/broker/.env changes.
+
+### Next Recommended Task
+Build live read-only Approval Queue (Screen C) and deploy Lex Summary fix to the Mac mini after approval.
+
+
 ## 2026-07-01 00:19 PT — Codex
 
 Branch: main

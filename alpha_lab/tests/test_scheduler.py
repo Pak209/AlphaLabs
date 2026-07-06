@@ -79,7 +79,7 @@ def test_build_scheduler_registers_all_jobs(monkeypatch):
     sched = scheduler.build_scheduler(service=object())
     jobs = sched.get_jobs()
     # 1 heartbeat + 6 always-safe + 2 premarket context pulls
-    # + 6 weekday idea/trade + 3 weekend read/crypto jobs = 18
+    # + 6 weekday idea/trade + 1 always-on crypto + 2 weekend read jobs = 18
     assert len(jobs) == 18
     assert all(job.trigger is not None for job in jobs)
 
@@ -108,12 +108,23 @@ def test_options_flow_preview_is_weekday_premarket():
     assert len(weekday_six_12) == 1
 
 
-def test_weekend_jobs_run_only_on_sat_sun():
-    # The crypto-only weekend jobs must not fire mon-fri (equities are closed
-    # and the weekday jobs already cover those days).
+def test_crypto_dry_run_scanner_runs_24_7():
     sched = scheduler.build_scheduler(service=object())
-    weekend_jobs = [j for j in sched.get_jobs() if "sat" in str(j.trigger) or "sun" in str(j.trigger)]
-    assert len(weekend_jobs) == 3
+    crypto_jobs = [j for j in sched.get_jobs() if j.id == "crypto_24_7_dry_run"]
+    assert len(crypto_jobs) == 1
+    fields = {f.name: str(f) for f in crypto_jobs[0].trigger.fields}
+    assert fields["day_of_week"] in {"mon-sun", "0-6"}
+    assert fields["hour"] == "0-23"
+    assert fields["minute"] == "*/30"
+
+
+def test_weekend_read_jobs_run_only_on_sat_sun():
+    sched = scheduler.build_scheduler(service=object())
+    weekend_jobs = [
+        j for j in sched.get_jobs()
+        if ("sat" in str(j.trigger) or "sun" in str(j.trigger)) and j.id != "crypto_24_7_dry_run"
+    ]
+    assert len(weekend_jobs) == 2
     for job in weekend_jobs:
         fields = {f.name: str(f) for f in job.trigger.fields}
         assert fields["day_of_week"] in {"sat,sun", "5,6"}

@@ -120,6 +120,60 @@ def test_builder_shapes_real_rows():
     assert out["pending_approvals"] == {"total": 2, "high_conviction": 2, "needs_review": 2}
 
 
+def _lex_text(payload):
+    out = build_review_briefing(
+        safety=SAFE, futures_snapshots=[],
+        market_briefings=[{"generated_at": "2026-06-25T13:31:00Z", "payload": payload}],
+        ideas=[], pending_approvals=[], now=NOW,
+    )
+    return out["lex_summary"]
+
+
+def test_lex_summary_list_payload_becomes_readable_prose():
+    lex = _lex_text({
+        "broad_market_tone": "constructive",
+        "major_indexes_sector_movement": ["Crypto Majors: bid", "AI Stocks: leading"],
+    })
+    text = lex["text"]
+    assert lex["availability"] == "available"
+    # No stringified Python-list artifacts leak through.
+    assert "[" not in text and "]" not in text and "'" not in text
+    assert "Crypto Majors: bid" in text and "AI Stocks: leading" in text
+
+
+def test_lex_summary_dict_payload_becomes_readable_prose():
+    lex = _lex_text({
+        "broad_market_tone": "constructive",
+        "major_indexes_sector_movement": {"label": "Tech leading, energy lagging"},
+        "themes": [{"name": "AI infrastructure"}],
+    })
+    text = lex["text"]
+    assert lex["availability"] == "available"
+    assert "{" not in text and "}" not in text and "'" not in text
+    assert "Tech leading, energy lagging" in text
+    assert "AI infrastructure" in text
+
+
+def test_lex_summary_plain_text_stays_plain_text():
+    lex = _lex_text({
+        "broad_market_tone": "constructive",
+        "major_indexes_sector_movement": "Tech leading.",
+    })
+    assert lex["availability"] == "available"
+    assert "Broad market tone is constructive." in lex["text"]
+    assert "Tech leading." in lex["text"]
+
+
+def test_lex_summary_missing_payload_uses_fallback():
+    out = build_review_briefing(
+        safety=SAFE, futures_snapshots=[], market_briefings=[],
+        ideas=[], pending_approvals=[], now=NOW,
+    )
+    lex = out["lex_summary"]
+    assert lex["availability"] == "unavailable"
+    assert lex["text"] == "No market summary available yet."
+
+
 def _snapshot_with_confidence(conf):
     return [{
         "generated_at": "2026-06-25T13:30:00Z",

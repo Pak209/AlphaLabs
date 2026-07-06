@@ -30,6 +30,7 @@ CRYPTO_TICKERS = {
     "ETH", "ETH/USD", "ETHUSD",
     "SOL", "SOL/USD", "SOLUSD",
     "LINK", "LINK/USD", "LINKUSD",
+    "HYPE", "HYPE/USD", "HYPEUSD",
     "BNB", "BNB/USD", "BNBUSD",
     "DOGE", "DOGE/USD", "DOGEUSD",
 }
@@ -42,6 +43,8 @@ def normalize_idea_payload(payload: dict[str, Any]) -> dict[str, Any]:
         asset_type = "equity"
     if asset_type == "options":
         asset_type = "option"
+    if asset_type == "crypto":
+        ticker = _canonical_crypto_ticker(ticker)
     bias = str(payload.get("bias", "")).strip().lower()
     confidence = float(payload.get("confidence", -1))
     timeframe = str(payload.get("timeframe", "")).strip().lower()
@@ -117,3 +120,12 @@ def _infer_asset_type(ticker: str) -> str:
     if ticker.endswith("/USD") and ticker.split("/")[0] in {symbol.split("/")[0] for symbol in CRYPTO_TICKERS}:
         return "crypto"
     return "equity"
+
+
+def _canonical_crypto_ticker(ticker: str) -> str:
+    normalized = str(ticker or "").strip().upper().replace("-", "/")
+    if "/" not in normalized and normalized.endswith("USD"):
+        normalized = f"{normalized[:-3]}/USD"
+    if "/" not in normalized and normalized in {symbol.split("/")[0] for symbol in CRYPTO_TICKERS if "/" in symbol}:
+        normalized = f"{normalized}/USD"
+    return normalized

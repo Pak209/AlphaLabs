@@ -58,6 +58,8 @@ class Signal:
             asset_type = "option"
         if asset_type not in {"equity", "option", "crypto"}:
             raise ValidationError("asset_type must be equity, option, or crypto")
+        if asset_type == "crypto":
+            ticker = _canonical_crypto_ticker(ticker)
 
         reason = str(payload["reason"]).strip()
         source = str(payload["source"]).strip()
@@ -104,10 +106,19 @@ class RiskConfig:
 
 def _infer_asset_type(ticker: str) -> str:
     normalized = ticker.upper()
-    crypto_symbols = {"BTC", "BTC/USD", "BTCUSD", "ETH", "ETH/USD", "ETHUSD", "SOL", "SOL/USD", "SOLUSD", "LINK", "LINK/USD", "LINKUSD", "BNB", "BNB/USD", "BNBUSD", "DOGE", "DOGE/USD", "DOGEUSD"}
+    crypto_symbols = {"BTC", "BTC/USD", "BTCUSD", "ETH", "ETH/USD", "ETHUSD", "SOL", "SOL/USD", "SOLUSD", "LINK", "LINK/USD", "LINKUSD", "HYPE", "HYPE/USD", "HYPEUSD", "BNB", "BNB/USD", "BNBUSD", "DOGE", "DOGE/USD", "DOGEUSD"}
     if normalized in crypto_symbols or normalized.endswith("/USD") and normalized.split("/")[0] in crypto_symbols:
         return "crypto"
     return "equity"
+
+
+def _canonical_crypto_ticker(ticker: str) -> str:
+    normalized = str(ticker or "").strip().upper().replace("-", "/")
+    if "/" not in normalized and normalized.endswith("USD"):
+        normalized = f"{normalized[:-3]}/USD"
+    if "/" not in normalized and normalized in {"BTC", "ETH", "SOL", "LINK", "HYPE", "BNB", "DOGE"}:
+        normalized = f"{normalized}/USD"
+    return normalized
 
 
 @dataclass(frozen=True)

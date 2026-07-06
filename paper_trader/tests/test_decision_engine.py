@@ -137,6 +137,18 @@ def test_crypto_risk_limits_still_apply_when_market_is_closed(tmp_path: Path):
     assert "max open positions reached" in decision.reasons
 
 
+def test_crypto_duplicate_position_normalizes_slash_symbols(tmp_path: Path):
+    decision = evaluate_signal(
+        signal(ticker="BTC/USD", asset_type="crypto"),
+        crypto_config(),
+        FakeBroker(market_open=False, positions=[{"symbol": "BTCUSD"}]),
+        AuditLog(tmp_path / "log.jsonl"),
+        dry_run=True,
+    )
+    assert decision.accepted is False
+    assert "duplicate position already open" in decision.reasons
+
+
 def test_rejects_daily_drawdown(tmp_path: Path):
     broker = FakeBroker(account={"equity": "96000", "last_equity": "100000"})
     decision = evaluate_signal(signal(), config(), broker, AuditLog(tmp_path / "log.jsonl"))

@@ -285,7 +285,15 @@ def evaluate_signal(
 
 
 def _has_position(positions: list[dict[str, Any]], ticker: str) -> bool:
-    return any(str(position.get("symbol", "")).upper() == ticker for position in positions)
+    target = _position_key(ticker)
+    return any(_position_key(str(position.get("symbol", ""))) == target for position in positions)
+
+
+def _position_key(symbol: str) -> str:
+    value = str(symbol or "").strip().upper().replace("-", "/")
+    if "/" not in value and value.endswith("USD"):
+        value = f"{value[:-3]}/USD"
+    return value
 
 
 def _daily_drawdown_exceeded(account: dict[str, Any], config: RiskConfig) -> bool:

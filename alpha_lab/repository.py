@@ -413,6 +413,11 @@ class AlphaLabRepository:
                 "duration_ms",
                 "items_created",
                 "error_message",
+                "crypto_signal_logs",
+                "safety_gates",
+                "allowlist",
+                "cooldown_minutes",
+                "max_simulated_crypto_ideas_per_day",
             )
             if key in payload
         }
