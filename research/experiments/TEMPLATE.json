@@ -1,0 +1,50 @@
+{
+  "id": "EXP-NNNN",
+  "title": "One-line falsifiable claim being tested",
+  "class": "A",
+  "status": "registered",
+  "owner": "human-name",
+  "registered_at": "YYYY-MM-DD",
+  "hypothesis": "Pre-registered, falsifiable statement. Name the single primary metric and the direction of the expected effect. Everything else in the report is secondary/exploratory.",
+  "rationale": "Why this is worth testing — cite the telemetry observation that motivated it (waterfall gate, audit finding, regret report, journal lesson).",
+  "leakage_checklist": {
+    "inputs_available_at_decision_time": false,
+    "labels_are_strictly_forward": false,
+    "no_survivorship_filter_in_population": false,
+    "legacy_rows_excluded_from_distributions": false
+  },
+  "population": {
+    "table": "idea_outcomes",
+    "limit": 5000,
+    "filters": {
+      "source": null,
+      "asset_type": null,
+      "status": null,
+      "since": null,
+      "until": null,
+      "evaluated_only": false
+    }
+  },
+  "variable": { "key": "confidence" },
+  "label": { "key": "excess_move_pct", "hit_key": "hit" },
+  "analyses": [
+    { "type": "summary" },
+    { "type": "threshold_step", "threshold": 0.75, "near_margin_frac": 0.1, "proposed_thresholds": [] },
+    { "type": "buckets", "buckets": 10 },
+    { "type": "calibration", "buckets": 5 },
+    { "type": "session_stability" },
+    { "type": "regret", "gate": "confidence" }
+  ],
+  "sample_gates": {
+    "min_rows": 50,
+    "min_labeled_rows": 50,
+    "min_sessions": 5,
+    "min_near_misses": 10
+  },
+  "decision_rule": "Pre-registered rule the human reviewer applies, phrased against interval bounds, e.g.: 'Advance to shadow (P2) only if the near-miss band's hit-rate CI lower bound exceeds the below band's upper bound AND the accepted-band mean excess move remains positive.' The runner never applies this rule itself.",
+  "guardrails": [
+    "Acceptance volume stays within the 5-15 accepted dry-run decisions/week band",
+    "No never-loosen gate fires more often than its pre-experiment baseline"
+  ],
+  "never_loosen_ack": "This experiment does not propose changing any control on the CALIBRATION_PLAN never-loosen list; if it did, it requires explicit human approval regardless of results."
+}

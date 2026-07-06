@@ -17,7 +17,7 @@ emulate -L zsh
 setopt pipefail
 
 REPO_URL="${ALPHALAB_REPO_URL:-https://github.com/Pak209/AlphaLabs.git}"
-PROJECT_DIR="${ALPHALAB_PROJECT_DIR:-$HOME/AlphaLab}"
+PROJECT_DIR="${ALPHALAB_PROJECT_DIR:-$HOME/Projects/AlphaLab}"
 BRANCH="${ALPHALAB_BRANCH:-main}"
 
 ok()   { print -P "%F{green}[OK]%f   $*"; }

@@ -171,6 +171,229 @@ class AlphaLabService:
         status["scheduler_heartbeat"] = heartbeat
         return status
 
+    # Canonical gate names for legacy free-text rejection clauses, so the
+    # waterfall can aggregate history recorded before structured gate telemetry
+    # existed. Matched by substring against each ';'-separated clause.
+    _LEGACY_CLAUSE_GATES: tuple[tuple[str, str], ...] = (
+        ("confidence ", "confidence"),
+        ("bias is not actionable", "bias_actionable"),
+        ("bearish short entries are disabled", "short_allowed"),
+        ("does not support shorting crypto", "crypto_long_only"),
+        ("not in approved watchlist", "watchlist"),
+        ("market is closed", "market_open"),
+        ("max open positions", "max_open_positions"),
+        ("duplicate position", "duplicate_position"),
+        ("max trades per day", "max_trades_per_day"),
+        ("max daily drawdown", "daily_drawdown"),
+        ("alpha gate:", "alpha_composite_tier"),
+        ("alpha_tier must", "alpha_composite_tier"),
+        ("alpha_composite must", "alpha_composite_tier"),
+        ("human approval", "human_approval"),
+        ("llm-assisted signal was", "human_approval"),
+        ("latest price is required for paper short sizing", "short_sizing_price"),
+        ("option signal is missing a selected contract", "option_contract_selected"),
+        ("no tradeable option contract", "option_contract_selected"),
+        ("option contract cost is unavailable", "option_cost_known"),
+        ("exceeds per-trade budget", "option_cost_within_budget"),
+        ("paper account equity is unavailable", "equity_available"),
+    )
+
+    def rejection_waterfall(self, limit: int = 5000) -> dict[str, Any]:
+        """Read-only rejection waterfall across the whole pipeline.
+
+        Answers: where are candidates rejected, which gates fire most, what
+        share of candidates reaches each stage, and which thresholds cost the
+        most near-miss opportunities. Sources: scanner_runs summaries (pre-idea
+        stage), alpha_ideas / trades counts, and execution_audit rows — using
+        the structured ``_gates`` telemetry where present and falling back to
+        parsing legacy free-text rejection clauses. Never mutates anything.
+        """
+        with connect(self.db_path) as conn:
+            audit_rows = [dict(r) for r in conn.execute(
+                """
+                SELECT status, dry_run, rejection_reason, payload_json
+                FROM execution_audit ORDER BY datetime(created_at) DESC, id DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()]
+            audit_total = int(conn.execute("SELECT COUNT(*) FROM execution_audit").fetchone()[0])
+            ideas_total = int(conn.execute("SELECT COUNT(*) FROM alpha_ideas").fetchone()[0])
+            trades_paper = int(conn.execute("SELECT COUNT(*) FROM trades WHERE dry_run = 0").fetchone()[0])
+            scanner_rows = [dict(r) for r in conn.execute(
+                "SELECT payload_json FROM scanner_runs ORDER BY datetime(created_at) DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()]
+
+        candidates_scanned = 0
+        pre_idea_skips: dict[str, int] = {}
+        for row in scanner_rows:
+            try:
+                summary = json.loads(row.get("payload_json") or "{}")
+            except (TypeError, ValueError):
+                continue
+            candidates_scanned += int(summary.get("candidates_found") or 0)
+            for item in summary.get("top_rejection_reasons") or []:
+                reason = str(item.get("reason") or "").strip()
+                if reason:
+                    pre_idea_skips[reason] = pre_idea_skips.get(reason, 0) + int(item.get("count") or 0)
+
+        # ── Per-gate aggregation ────────────────────────────────────────────
+        gates: dict[str, dict[str, Any]] = {}
+
+        def bucket(name: str) -> dict[str, Any]:
+            return gates.setdefault(name, {
+                "gate": name, "evaluated": 0, "failures": 0, "enforced_failures": 0,
+                "advisory_failures": 0, "legacy_failures": 0, "near_misses": 0,
+                "example": "", "_observed": [],
+            })
+
+        def near_miss(record: dict[str, Any]) -> bool:
+            observed, threshold = record.get("observed"), record.get("threshold")
+            comparator = str(record.get("comparator") or "")
+            if not isinstance(observed, (int, float)) or not isinstance(threshold, (int, float)):
+                return False
+            margin = 0.1 * abs(threshold) if threshold else 0.1
+            if comparator in {">=", ">"}:
+                return 0 <= threshold - observed <= margin
+            if comparator in {"<", "<="}:
+                return 0 <= observed - threshold <= margin
+            return False
+
+        structured_rows = 0
+        first_failed: dict[str, int] = {}
+        accepted_statuses = {"dry_run", "submitted"}
+        accepted = sum(1 for row in audit_rows if row["status"] in accepted_statuses)
+        submitted = sum(1 for row in audit_rows if row["status"] == "submitted")
+        alpha_gate_passed = 0
+        alpha_gate_seen = 0
+
+        for row in audit_rows:
+            try:
+                payload = json.loads(row.get("payload_json") or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            records = payload.get("_gates")
+            if isinstance(records, list) and records:
+                structured_rows += 1
+                for record in records:
+                    b = bucket(str(record.get("gate") or "unknown"))
+                    b["evaluated"] += 1
+                    if isinstance(record.get("observed"), (int, float)) and isinstance(record.get("threshold"), (int, float)):
+                        b["_observed"].append(float(record["observed"]))
+                    if record.get("gate") == "alpha_composite_tier":
+                        alpha_gate_seen += 1
+                        if record.get("passed"):
+                            alpha_gate_passed += 1
+                    if not record.get("passed"):
+                        b["failures"] += 1
+                        if record.get("enforced", True):
+                            b["enforced_failures"] += 1
+                        else:
+                            b["advisory_failures"] += 1
+                        if near_miss(record):
+                            b["near_misses"] += 1
+                        if not b["example"] and record.get("detail"):
+                            b["example"] = str(record["detail"])[:160]
+                ffg = payload.get("_first_failed_gate")
+                if ffg:
+                    first_failed[str(ffg)] = first_failed.get(str(ffg), 0) + 1
+            elif row["status"] not in accepted_statuses:
+                # Legacy rejected row: map free-text clauses onto canonical gate
+                # names, counting each gate at most once per attempt (the old
+                # alpha gate emitted two clauses for one gate). Accepted rows
+                # are skipped — their reason text is an acceptance note, not a
+                # failure.
+                clauses = [c.strip() for c in str(row.get("rejection_reason") or "").split(";") if c.strip()]
+                seen: set[str] = set()
+                for index, clause in enumerate(clauses):
+                    lowered = clause.lower()
+                    name = next((g for token, g in self._LEGACY_CLAUSE_GATES if token in lowered), "other")
+                    if index == 0:
+                        first_failed[name] = first_failed.get(name, 0) + 1
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    b = bucket(name)
+                    b["failures"] += 1
+                    b["enforced_failures"] += 1
+                    b["legacy_failures"] += 1
+                    if not b["example"]:
+                        b["example"] = clause[:160]
+
+        def quantiles(values: list[float]) -> dict[str, float] | None:
+            """min/p25/p50/p75/max over all structured evaluations of a numeric
+            gate (passed AND failed) — the distribution needed to judge where a
+            threshold sits relative to the candidate population."""
+            if not values:
+                return None
+            ordered = sorted(values)
+
+            def pct(p: float) -> float:
+                index = min(len(ordered) - 1, max(0, round(p * (len(ordered) - 1))))
+                return round(ordered[index], 4)
+
+            return {"count": len(ordered), "min": round(ordered[0], 4), "p25": pct(0.25),
+                    "p50": pct(0.50), "p75": pct(0.75), "max": round(ordered[-1], 4)}
+
+        gate_failures = sorted(gates.values(), key=lambda b: b["failures"], reverse=True)
+        for b in gate_failures:
+            b["share_of_attempts"] = round(b["failures"] / len(audit_rows), 4) if audit_rows else 0.0
+            b["observed_stats"] = quantiles(b.pop("_observed"))
+
+        # ── Stage funnel ────────────────────────────────────────────────────
+        def stage(name: str, count: int, previous: int | None, basis: str) -> dict[str, Any]:
+            return {
+                "stage": name,
+                "count": count,
+                "pct_of_previous": round(count / previous, 4) if previous else None,
+                "basis": basis,
+            }
+
+        funnel = [stage("candidates_scanned", candidates_scanned, None, f"scanner_runs (last {len(scanner_rows)} runs)")]
+        funnel.append(stage("ideas_created", ideas_total, candidates_scanned or None, "alpha_ideas (all time)"))
+        funnel.append(stage("decision_attempts", len(audit_rows), ideas_total or None,
+                            f"execution_audit (last {len(audit_rows)} of {audit_total}; ideas can be attempted more than once)"))
+        funnel.append(stage("accepted_decisions", accepted, len(audit_rows) or None, "risk-engine accepted (dry_run or submitted)"))
+        funnel.append(stage("alpha_gate_passed", alpha_gate_passed, alpha_gate_seen or None,
+                            f"structured traces only ({alpha_gate_seen} accepted attempts carried the alpha gate)"))
+        funnel.append(stage("paper_orders_submitted", submitted, accepted or None, "execution_audit status=submitted"))
+        funnel.append(stage("paper_trades", trades_paper, submitted or None, "trades with dry_run=0 (all time)"))
+
+        threshold_impact = [
+            {
+                "gate": b["gate"],
+                "enforced_failures": b["enforced_failures"],
+                "advisory_failures": b["advisory_failures"],
+                "near_misses": b["near_misses"],
+                "example": b["example"],
+            }
+            for b in sorted(gates.values(), key=lambda b: (b["enforced_failures"], b["near_misses"]), reverse=True)
+            if b["failures"]
+        ][:12]
+
+        return {
+            "status": "ok",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "window": {
+                "audit_rows_analyzed": len(audit_rows),
+                "audit_rows_total": audit_total,
+                "structured_rows": structured_rows,
+                "legacy_rows": len(audit_rows) - structured_rows,
+                "scanner_runs_analyzed": len(scanner_rows),
+            },
+            "stage_funnel": funnel,
+            "gate_failures": gate_failures,
+            "first_failed_gates": sorted(
+                ({"gate": name, "count": count} for name, count in first_failed.items()),
+                key=lambda item: item["count"], reverse=True,
+            ),
+            "threshold_impact": threshold_impact,
+            "pre_idea_skips": sorted(
+                ({"reason": reason, "count": count} for reason, count in pre_idea_skips.items()),
+                key=lambda item: item["count"], reverse=True,
+            )[:12],
+        }
+
     def _score_idea(self, idea: dict[str, Any]) -> Any:
         """
         Full Alpha Score for an idea: catalyst + price/volume + narrative +
@@ -182,11 +405,14 @@ class AlphaLabService:
         ticker = idea.get("ticker")
         options_signal = score_options_flow(self.options_flow_provider.fetch(ticker), ticker)
         institutional_signal = score_institutional(self.dark_pool_provider.fetch(ticker), ticker)
+        pv_inputs = self._price_volume_inputs(idea)
         alpha = composite(
-            catalyst=score_catalyst(catalyst_inputs_from_idea(idea)),
+            # The live gap doubles as the catalyst "surprise" input — without it
+            # surprise sat frozen at its floor (gap 0 -> 20) for every idea.
+            catalyst=score_catalyst(catalyst_inputs_from_idea(idea, gap_pct=pv_inputs.gap_pct)),
             narrative=score_narrative(narrative_inputs_for_ticker(ticker)),
             macro=score_macro(MacroInputs()),
-            price_volume=score_price_volume(self._price_volume_inputs(idea)),
+            price_volume=score_price_volume(pv_inputs),
             options=options_component_from_signal(options_signal),
             institutional=institutional_component_from_signal(institutional_signal),
         )
@@ -338,11 +564,21 @@ class AlphaLabService:
             "timestamp": datetime.now(ZoneInfo("UTC")).isoformat(),
         }
         existing = self._recent_catalyst_theses()
+        equity_market_open = self._equity_market_open()
         signals = []
         duplicates = 0
+        deferred_market_closed = 0
         for signal in payload["signals"]:
             if signal["reason"] in existing:
                 duplicates += 1
+                continue
+            # Defer equity/option signals while the market is closed instead of
+            # creating an idea that is instantly rejected ("market is closed")
+            # AND then permanently dedupe-blocked from re-testing after the
+            # open. The catalyst stays fresh; the next in-session poll (every 3
+            # minutes) imports it while it is actually tradeable.
+            if str(signal.get("asset_type") or "equity") != "crypto" and not equity_market_open:
+                deferred_market_closed += 1
                 continue
             signals.append(signal)
         if not signals:
@@ -350,8 +586,8 @@ class AlphaLabService:
                 candidates_found=len(payload.get("catalysts") or []),
                 ideas_persisted=0,
                 rejected=len(payload.get("catalysts") or []),
-                skipped=duplicates,
-                reasons={"duplicate ticker/catalyst": duplicates, "not trade candidate": len(payload.get("catalysts") or []) - len(payload.get("signals") or [])},
+                skipped=duplicates + deferred_market_closed,
+                reasons={"duplicate ticker/catalyst": duplicates, "deferred: equity market closed": deferred_market_closed, "not trade candidate": len(payload.get("catalysts") or []) - len(payload.get("signals") or [])},
                 dry_run=dry_run,
                 note="no new catalyst signals",
             )
@@ -367,8 +603,8 @@ class AlphaLabService:
             candidates_found=len(payload.get("catalysts") or []),
             ideas_persisted=len(result.get("results") or []),
             rejected=max(0, len(payload.get("catalysts") or []) - len(result.get("results") or [])),
-            skipped=duplicates,
-            reasons={"duplicate ticker/catalyst": duplicates, "not trade candidate": len(payload.get("catalysts") or []) - len(payload.get("signals") or [])},
+            skipped=duplicates + deferred_market_closed,
+            reasons={"duplicate ticker/catalyst": duplicates, "deferred: equity market closed": deferred_market_closed, "not trade candidate": len(payload.get("catalysts") or []) - len(payload.get("signals") or [])},
             dry_run=dry_run,
         )
         summary.update(self._catalyst_source_accounting(payload))
@@ -760,19 +996,30 @@ class AlphaLabService:
         signals: list[dict[str, Any]] = []
         unavailable = 0
         duplicates = 0
+        bearish_skipped = 0
         for ticker in CRYPTO_COINS:
             market = self._safe_market_payload(lambda t=ticker: get_crypto_market(t))
             if market.get("status") not in {None, "ok"}:
                 unavailable += 1
                 continue
             signal = self._btc_signal_from_market(market)
-            if signal.get("thesis") in recent:
+            # Alpaca crypto is long-only, so a bearish crypto ENTRY can never
+            # execute — the decision engine rejects every one. Keep the bearish
+            # read as market context (briefings still show it) but do not mint
+            # a doomed idea for it. This is noise reduction, not a loosened
+            # guard: the short-selling rejection in the decision engine stays.
+            if signal.get("bias") == "bearish":
+                bearish_skipped += 1
+                continue
+            if signal.get("thesis") in recent or self._recent_crypto_idea_exists(
+                str(signal.get("ticker") or ticker), str(signal.get("bias") or "")
+            ):
                 duplicates += 1
                 continue
             signals.append(signal)
         if not signals:
-            note = "no new crypto signal" if (duplicates or not unavailable) else "crypto market data unavailable"
-            status = "unavailable" if unavailable and not duplicates else "ok"
+            note = "no new crypto signal" if (duplicates or bearish_skipped or not unavailable) else "crypto market data unavailable"
+            status = "unavailable" if unavailable and not (duplicates or bearish_skipped) else "ok"
             self._record_scanner_run(
                 "after_hours_btc",
                 "weekend_crypto",
@@ -780,8 +1027,8 @@ class AlphaLabService:
                     candidates_found=len(CRYPTO_COINS) - unavailable,
                     ideas_persisted=0,
                     rejected=unavailable,
-                    skipped=duplicates,
-                    reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
+                    skipped=duplicates + bearish_skipped,
+                    reasons={"duplicate thesis": duplicates, "bearish crypto skipped (broker is long-only)": bearish_skipped, "crypto market data unavailable": unavailable},
                     dry_run=dry_run,
                     note=note,
                 ),
@@ -796,8 +1043,8 @@ class AlphaLabService:
                 candidates_found=len(signals),
                 ideas_persisted=len(result.get("results") or []),
                 rejected=unavailable,
-                skipped=duplicates,
-                reasons={"duplicate thesis": duplicates, "crypto market data unavailable": unavailable},
+                skipped=duplicates + bearish_skipped,
+                reasons={"duplicate thesis": duplicates, "bearish crypto skipped (broker is long-only)": bearish_skipped, "crypto market data unavailable": unavailable},
                 dry_run=dry_run,
             ),
         )
@@ -888,6 +1135,7 @@ class AlphaLabService:
             return payload
 
     def place_trade(self, idea_id: int, dry_run: bool = True, as_option: bool = False) -> dict[str, Any]:
+        pre_gate_records: list[dict[str, Any]] = []
         if not dry_run:
             approval_error = self._paper_execution_approval_error(idea_id)
             if approval_error:
@@ -895,6 +1143,9 @@ class AlphaLabService:
                 if approval_error.get("action") == "needs_human_approval":
                     self._notify_approval_required(idea_id, approval_error)
                 return approval_error
+            pre_gate_records.append(
+                self._approval_gate_record(True, "approved_or_not_required", "")
+            )
         try:
             decision = self.run_decision(idea_id, dry_run=dry_run, as_option=as_option)
         except OptionSelectionError as exc:
@@ -941,16 +1192,35 @@ class AlphaLabService:
             }
             self._log_execution_attempt(idea_id, result, dry_run=dry_run)
             return result
+        if pre_gate_records:
+            decision["gate_results"] = pre_gate_records + list(decision.get("gate_results") or [])
         if not decision["accepted"]:
             self._log_execution_attempt(idea_id, decision, dry_run=dry_run)
             return decision
 
         eligibility_error = self._paper_order_eligibility_error(decision)
+        # Telemetry: record the alpha gate outcome on EVERY accepted decision.
+        # In dry-run it is advisory (enforced=False, the trade still simulates);
+        # in paper mode it blocks. Recording both lets the waterfall answer
+        # "how many dry-run trades would the alpha gate have stopped?".
+        alpha_payload = decision.get("alpha") or {}
+        decision["gate_results"] = list(decision.get("gate_results") or []) + [{
+            "stage": "paper_eligibility",
+            "gate": "alpha_composite_tier",
+            "passed": eligibility_error is None,
+            "observed": alpha_payload.get("composite_score"),
+            "threshold": 70,
+            "comparator": ">=",
+            "tier": alpha_payload.get("tier"),
+            "detail": "" if eligibility_error is None else eligibility_error["reasons"][0],
+            "enforced": not dry_run,
+        }]
         if eligibility_error:
             decision["paper_eligible"] = False
             decision["paper_eligibility_reason"] = eligibility_error["reasons"][0]
             if not dry_run:
                 result = {**decision, **eligibility_error}
+                result["first_failed_gate"] = result.get("first_failed_gate") or "alpha_composite_tier"
                 with connect(self.db_path) as conn:
                     AlphaLabRepository(conn).update_idea_status(
                         idea_id,
@@ -1508,6 +1778,24 @@ class AlphaLabService:
             ).fetchall()
         return {str(row["thesis"]) for row in rows}
 
+    def _recent_crypto_idea_exists(self, ticker: str, bias: str, hours: int = 6) -> bool:
+        """True if an after-hours crypto idea for this ticker+bias was created in
+        the last N hours. The thesis text embeds live prices, so thesis-equality
+        dedupe almost never fires; this stable key is what actually stops a new
+        idea for the same setup every 30-minute weekend poll."""
+        with connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) FROM alpha_ideas
+                WHERE source = 'after_hours_btc'
+                  AND ticker = ?
+                  AND bias = ?
+                  AND datetime(created_at) >= datetime('now', ?)
+                """,
+                (ticker, bias, f"-{int(hours)} hours"),
+            ).fetchone()
+        return int(row[0]) > 0
+
     def _friendly_broker_error(self, exc: Exception) -> str:
         raw = str(exc)
         if "paper-api.alpaca.markets" in raw and "blocked" in raw.lower():
@@ -1528,20 +1816,20 @@ class AlphaLabService:
         alpha = decision.get("alpha") or {}
         tier = str(alpha.get("tier") or "").strip()
         composite = alpha.get("composite_score")
-        reasons: list[str] = []
-        if tier not in {"high_conviction", "tradeable"}:
-            reasons.append(
-                "alpha_tier must be high_conviction or tradeable before Alpaca paper execution"
-                + (f" (got {tier or 'missing'})")
-            )
         try:
             composite_value = float(composite)
         except (TypeError, ValueError):
             composite_value = None
-        if composite_value is None or composite_value < 70:
+        # Tier is derived from the composite, so these two conditions normally
+        # fail together; both are kept (defense in depth against a malformed
+        # alpha payload) but reported as ONE reason so the audit log reads as a
+        # single gate instead of two apparently independent rejections.
+        reasons: list[str] = []
+        if tier not in {"high_conviction", "tradeable"} or composite_value is None or composite_value < 70:
             reasons.append(
-                "alpha_composite must be >= 70 before Alpaca paper execution"
-                + (f" (got {composite if composite is not None else 'missing'})")
+                "alpha gate: composite must be >= 70 with tier tradeable/high_conviction "
+                f"before Alpaca paper execution (got composite {composite if composite is not None else 'missing'}, "
+                f"tier {tier or 'missing'})"
             )
         if not reasons:
             return None
@@ -1571,6 +1859,15 @@ class AlphaLabService:
         response = result.get("order_response") or {}
         context = self._execution_context(dry_run)
         payload_for_log = {**order_payload, "_execution": context}
+        # Structured gate telemetry (when the attempt reached the decision
+        # engine): every gate evaluated with observed value vs threshold, the
+        # first gate that rejected, and the broker/config state the gates read.
+        # Stored inside the existing payload JSON column — no schema change.
+        if result.get("gate_results") is not None:
+            payload_for_log["_gates"] = result["gate_results"]
+            payload_for_log["_first_failed_gate"] = result.get("first_failed_gate")
+        if result.get("gate_context") is not None:
+            payload_for_log["_gate_context"] = result["gate_context"]
         response_for_log = {**response, "_execution": context}
         reasons = result.get("reasons") or []
         ticker = result.get("ticker") or order_payload.get("symbol") or "unknown"
@@ -1850,30 +2147,50 @@ class AlphaLabService:
             status = repo.approval_status_for_idea(idea_id)
             if status in {"rejected", "expired"}:
                 idea = repo.get_idea(idea_id)
+                reason = f"LLM-assisted signal was {status}; no Alpaca paper order was placed."
                 return {
                     "accepted": False,
                     "action": f"approval_{status}",
-                    "reasons": [f"LLM-assisted signal was {status}; no Alpaca paper order was placed."],
+                    "reasons": [reason],
                     "ticker": idea.get("ticker"),
                     "notional": None,
                     "qty": None,
                     "order_payload": None,
                     "order_response": {"submitted": False, "message": "No Alpaca paper order was placed."},
+                    "gate_results": [self._approval_gate_record(False, status, reason)],
+                    "first_failed_gate": "human_approval",
                 }
             if not self._paper_approval_required():
                 return None
             if status == "approved":
                 return None
+            reason = f"{asset_type.title()} signal requires human approval before Alpaca paper execution."
             return {
                 "accepted": False,
                 "action": "needs_human_approval",
-                "reasons": [f"{asset_type.title()} signal requires human approval before Alpaca paper execution."],
+                "reasons": [reason],
                 "ticker": idea.get("ticker"),
                 "notional": None,
                 "qty": None,
                 "order_payload": None,
                 "order_response": {"submitted": False, "message": "No Alpaca paper order was placed."},
+                "gate_results": [self._approval_gate_record(False, status or "pending", reason)],
+                "first_failed_gate": "human_approval",
             }
+
+    @staticmethod
+    def _approval_gate_record(passed: bool, status: str, detail: str) -> dict[str, Any]:
+        """Telemetry record for the human-approval gate (paper execution only)."""
+        return {
+            "stage": "approval",
+            "gate": "human_approval",
+            "passed": bool(passed),
+            "observed": status,
+            "threshold": "approved (or approval not required)",
+            "comparator": "==",
+            "detail": "" if passed else detail,
+            "enforced": True,
+        }
 
     def _notify_approval_required(self, idea_id: int, approval_error: dict[str, Any]) -> None:
         """Fire an informational APPROVAL_REQUIRED alert routing to the sign-off UI.

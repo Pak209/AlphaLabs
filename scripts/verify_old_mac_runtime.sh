@@ -26,7 +26,7 @@ set -u
 emulate -L zsh
 setopt pipefail
 
-PROJECT_DIR="$HOME/AlphaLab"
+PROJECT_DIR="$HOME/Projects/AlphaLab"
 PY="$PROJECT_DIR/.venv/bin/python"
 PORT="${ALPHALAB_PORT:-8787}"
 EXPECTED_JOBS="${ALPHALAB_EXPECTED_JOBS:-18}"

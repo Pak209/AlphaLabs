@@ -790,3 +790,36 @@ def test_trades_expose_signal_breakdown_fields(tmp_path: Path):
     inst = json.loads(trade["institutional_json"])
     assert flow["has_data"] is False
     assert inst["has_data"] is False
+
+
+def test_rejection_waterfall_endpoint(tmp_path: Path):
+    lab = AlphaLabService(
+        db_path=str(tmp_path / "waterfall.sqlite3"),
+        risk_config_path="alpha_lab/config.example.json",
+        audit_log_path=str(tmp_path / "audit.jsonl"),
+    )
+    client = TestClient(create_app(lab))
+
+    idea = client.post(
+        "/api/ideas",
+        json={
+            "ticker": "NVDA",
+            "bias": "bullish",
+            "confidence": 0.72,
+            "timeframe": "intraday",
+            "thesis": "Near-miss confidence candidate for waterfall telemetry.",
+            "source": "test",
+            "timestamp": "2026-06-04T13:00:00Z",
+        },
+    ).json()
+    client.post(f"/api/ideas/{idea['id']}/dry-run-trade")
+
+    response = client.get("/api/diagnostics/rejection-waterfall")
+    assert response.status_code == 200
+    report = response.json()
+    assert report["status"] == "ok"
+    stage_names = [row["stage"] for row in report["stage_funnel"]]
+    assert stage_names[0] == "candidates_scanned"
+    assert "accepted_decisions" in stage_names
+    assert any(b["gate"] == "confidence" for b in report["gate_failures"])
+    assert report["first_failed_gates"][0]["gate"] == "confidence"

@@ -74,3 +74,21 @@ def test_polygon_bullish_catalyst_unbroken():
     scored = score_catalyst(item)
     assert scored["bias"] == "bullish"
     assert scored["category"] == "direct_company_catalyst"
+
+
+def test_trade_candidate_confidence_clears_decision_engine_gate():
+    """The radar's emitted candidates must carry a confidence that can clear the
+    decision engine's default min_confidence (0.75) — one formula, one gate.
+    Previously trade_candidate used a different confidence formula than the one
+    stored on the signal, so candidates were created and then always rejected."""
+    item = {
+        "ticker": "NVDA",
+        "headline": "NVIDIA partner signs AI infrastructure contract",
+        "summary": "Source-backed contract catalyst for AI infrastructure demand.",
+        "source": "unit_test_news",
+        "published_at": datetime.now(timezone.utc).isoformat(),
+        "security_type": "stock",
+    }
+    scored = score_catalyst(item)
+    assert scored["trade_candidate"] is True
+    assert scored["confidence"] >= 0.75

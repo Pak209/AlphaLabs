@@ -51,7 +51,9 @@ CATALYST_TYPE_WEIGHTS: dict[str, float] = {
     "earnings_beat": 80,
     "earnings": 80,
     "partnership_named": 70,
+    "sec_filing": 65,
     "insider_buying": 60,
+    "ipo": 60,
     "product_launch": 55,
     "analyst_upgrade": 45,
     "financing": 35,
@@ -63,9 +65,16 @@ CATALYST_TYPE_WEIGHTS: dict[str, float] = {
 _DEFAULT_TYPE_WEIGHT = 15.0
 
 
-def catalyst_type_weight(catalyst_type: str) -> float:
-    return float(CATALYST_TYPE_WEIGHTS.get((catalyst_type or "").strip().lower(),
-                                           _DEFAULT_TYPE_WEIGHT))
+def catalyst_type_weight(catalyst_type: str,
+                         type_weights: Optional[dict[str, float]] = None) -> float:
+    """Type strength from the live table, or from a replay-scenario override.
+
+    ``type_weights`` entries are merged over the live table (partial overrides
+    allowed). Passing None — every live call site — is byte-for-byte the
+    existing behavior; only the offline replay framework passes overrides.
+    """
+    table = CATALYST_TYPE_WEIGHTS if type_weights is None else {**CATALYST_TYPE_WEIGHTS, **type_weights}
+    return float(table.get((catalyst_type or "").strip().lower(), _DEFAULT_TYPE_WEIGHT))
 
 
 def novelty_score(prior_count_30d: int) -> float:
@@ -91,8 +100,9 @@ def surprise_score(gap_pct: float) -> float:
     return 20.0
 
 
-def score_catalyst(inputs: CatalystInputs) -> ComponentScore:
-    type_w = catalyst_type_weight(inputs.catalyst_type)
+def score_catalyst(inputs: CatalystInputs,
+                   type_weights: Optional[dict[str, float]] = None) -> ComponentScore:
+    type_w = catalyst_type_weight(inputs.catalyst_type, type_weights)
     surprise = surprise_score(inputs.gap_pct)
     novelty = novelty_score(inputs.prior_count_30d)
     materiality = _clamp(inputs.materiality)
@@ -142,9 +152,12 @@ TICKER_THEME: dict[str, str] = {
     "SMCI": "data_centers", "VRT": "data_centers", "DELL": "data_centers",
     "MSFT": "ai", "META": "ai", "GOOGL": "ai", "AAPL": "ai",
     "TSLA": "robotics", "PLTR": "ai",
+    "TSM": "semiconductors", "ASML": "semiconductors", "ARM": "semiconductors",
+    "ORCL": "ai", "AMZN": "ai",
     "VST": "energy", "CEG": "energy", "NEE": "energy",
     "LMT": "defense", "RTX": "defense",
     "BTC": "crypto", "ETH": "crypto", "SOL": "crypto", "COIN": "crypto", "MSTR": "crypto",
+    "LINK": "crypto", "DOGE": "crypto", "HYPE": "crypto", "BNB": "crypto",
 }
 # Current narrative phase per theme (MVP: updated by hand, e.g. weekly).
 THEME_PHASE: dict[str, str] = {
@@ -373,7 +386,10 @@ def composite(catalyst: ComponentScore,
               macro: ComponentScore,
               price_volume: Optional[ComponentScore] = None,
               options: Optional[ComponentScore] = None,
-              institutional: Optional[ComponentScore] = None) -> AlphaScore:
+              institutional: Optional[ComponentScore] = None,
+              weights: Optional[dict[str, float]] = None,
+              catalyst_confirm_min: Optional[float] = None,
+              price_volume_confirm_min: Optional[float] = None) -> AlphaScore:
     """
     Weighted blend of the present components with the CRITICAL-RULE hard gate.
 
@@ -382,13 +398,22 @@ def composite(catalyst: ComponentScore,
     EXCLUDED from the blend (so they can never lift a weak idea) and the score is
     capped at the watchlist ceiling. Components with no data are dropped and the
     remaining weights renormalized, so absence is neutral rather than a penalty.
+
+    ``weights`` / ``catalyst_confirm_min`` / ``price_volume_confirm_min`` are
+    replay-scenario overrides (offline what-if scoring). Every live call site
+    leaves them as None, which reproduces the module constants exactly. The
+    structural safety rules — modifier exclusion, watchlist ceiling, macro and
+    catalyst floors — are NOT parameterized: a scenario cannot switch them off.
     """
     floors_applied: list[str] = []
+    W = WEIGHTS if weights is None else {**WEIGHTS, **weights}
+    confirm_cat = CATALYST_CONFIRM_MIN if catalyst_confirm_min is None else float(catalyst_confirm_min)
+    confirm_pv = PRICE_VOLUME_CONFIRM_MIN if price_volume_confirm_min is None else float(price_volume_confirm_min)
 
     confirmed = (
-        catalyst.score >= CATALYST_CONFIRM_MIN
+        catalyst.score >= confirm_cat
         and price_volume is not None
-        and price_volume.score >= PRICE_VOLUME_CONFIRM_MIN
+        and price_volume.score >= confirm_pv
     )
 
     # Assemble the components that participate in the weighted average.
@@ -413,8 +438,8 @@ def composite(catalyst: ComponentScore,
             floors_applied.append("confirmation_gate")
 
     # Renormalize the weights of the present components and blend.
-    total_w = sum(WEIGHTS[name] for name, _ in parts)
-    base = sum(WEIGHTS[name] * cs.score for name, cs in parts) / total_w
+    total_w = sum(W[name] for name, _ in parts)
+    base = sum(W[name] * cs.score for name, cs in parts) / total_w
 
     result = base
     if gate_applied:
@@ -430,7 +455,7 @@ def composite(catalyst: ComponentScore,
 
     composite_score = _round(_clamp(result))
 
-    blend = " + ".join(f"{name} {cs.score:g}×{WEIGHTS[name]:g}" for name, cs in parts)
+    blend = " + ".join(f"{name} {cs.score:g}×{W[name]:g}" for name, cs in parts)
     expl = f"base = ({blend}) / {total_w:g} = {_round(base):g}"
     if floors_applied:
         expl += f"; {floors_applied} -> {composite_score:g}"
@@ -577,20 +602,51 @@ def catalyst_inputs_from_radar_row(row: dict, prior_count_30d: int = 0) -> Catal
     )
 
 
-def catalyst_inputs_from_idea(idea: dict, prior_count_30d: int = 0) -> CatalystInputs:
+# Map Catalyst Radar catalyst_type labels (alpha_lab.catalysts._catalyst_type) to
+# engine type keys, so the decision layer scores the SAME event class the radar
+# detected instead of re-deriving a weaker read from thesis text.
+_RADAR_LABEL_TO_TYPE: dict[str, str] = {
+    "ai catalyst": "partnership_named",
+    "ai partnership": "partnership_named",
+    "government contract": "contract",
+    "sec filing": "sec_filing",
+    "ipo momentum": "ipo",
+    "earnings revision": "earnings",
+    "analyst upgrade": "analyst_upgrade",
+    "analyst downgrade": "analyst_upgrade",   # direction handled by bias
+    "partnership catalyst": "partnership_named",
+    "acquisition catalyst": "acquisition",
+    "financing event": "financing",
+    "news catalyst": "generic_pr",
+}
+
+
+def catalyst_inputs_from_idea(idea: dict, prior_count_30d: int = 0,
+                              gap_pct: float = 0.0) -> CatalystInputs:
     """
-    Build CatalystInputs from a stored AlphaLab idea dict by keyword-scanning its
-    catalyst/thesis/theme text. Used at the decision layer where the original
-    radar row is no longer attached.
+    Build CatalystInputs from a stored AlphaLab idea dict. Radar-created ideas
+    carry the radar's catalyst_type label and 0-100 catalyst_score; use those
+    directly (type strength + materiality) so decision-time scoring agrees with
+    the radar read. Ideas without radar provenance fall back to keyword-scanning
+    their catalyst/thesis/theme text, exactly as before.
     """
-    text = " ".join(str(idea.get(k, "")) for k in ("catalyst", "thesis", "theme")).lower()
-    keywords = [kw for kw in _KEYWORD_TO_TYPE if kw in text]
-    catalyst_type = catalyst_type_from_keywords(keywords)
+    stored_label = str(idea.get("catalyst_type") or "").strip().lower()
+    catalyst_type = _RADAR_LABEL_TO_TYPE.get(stored_label, "")
+    if not catalyst_type:
+        text = " ".join(str(idea.get(k, "")) for k in ("catalyst", "thesis", "theme")).lower()
+        keywords = [kw for kw in _KEYWORD_TO_TYPE if kw in text]
+        catalyst_type = catalyst_type_from_keywords(keywords)
+
+    materiality = 50.0
+    stored_score = idea.get("catalyst_score")
+    if isinstance(stored_score, (int, float)) and 0 <= float(stored_score) <= 100:
+        materiality = float(stored_score)
+
     return CatalystInputs(
         catalyst_type=catalyst_type,
-        gap_pct=0.0,
+        gap_pct=float(gap_pct or 0.0),
         prior_count_30d=prior_count_30d,
-        materiality=50.0,
+        materiality=materiality,
     )
 
 
@@ -600,6 +656,13 @@ def narrative_inputs_for_ticker(ticker: Optional[str],
     """Look up theme + current phase for a ticker from the static config."""
     t = (ticker or "").strip().upper()
     theme = TICKER_THEME.get(t, "none")
+    if theme == "none":
+        # Crypto pairs arrive as "BTC/USD" or "BTCUSD"; the theme table is keyed
+        # by base symbol, so a raw-pair lookup silently landed on "none".
+        base = t.split("/")[0]
+        if base == t and t.endswith("USD"):
+            base = t[:-3]
+        theme = TICKER_THEME.get(base, "none")
     phase = THEME_PHASE.get(theme, "expansion")
     return NarrativeInputs(
         theme=theme,

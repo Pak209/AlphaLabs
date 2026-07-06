@@ -75,6 +75,53 @@ def alpaca_connectivity() -> tuple[str, str]:
         return "WARN", redact_secrets(str(exc).splitlines()[0][:220])
 
 
+def print_rejection_waterfall(service: AlphaLabService) -> None:
+    """ASCII rejection waterfall: stage funnel with pass-through percentages,
+    per-gate failure counts (structured traces + legacy reason parsing),
+    first-failed-gate histogram, and threshold near-miss impact."""
+    report = service.rejection_waterfall()
+    window = report["window"]
+    print("\nRejection waterfall")
+    print(f"  window: {window['audit_rows_analyzed']} audit rows analyzed "
+          f"({window['structured_rows']} structured, {window['legacy_rows']} legacy) "
+          f"of {window['audit_rows_total']} total")
+
+    print("\n  Stage funnel")
+    bar_scale = max((row["count"] for row in report["stage_funnel"]), default=1) or 1
+    for row in report["stage_funnel"]:
+        pct = f"{row['pct_of_previous'] * 100:6.1f}%" if row["pct_of_previous"] is not None else "      -"
+        bar = "#" * max(1, round(30 * row["count"] / bar_scale)) if row["count"] else ""
+        print(f"    {row['stage']:24s} {row['count']:6d}  {pct} of prev  {bar}")
+        print(f"    {'':24s} basis: {row['basis']}")
+
+    print("\n  Gate failures (most frequent first)")
+    for b in report["gate_failures"][:15]:
+        advisory = f", advisory {b['advisory_failures']}" if b["advisory_failures"] else ""
+        near = f", near-miss {b['near_misses']}" if b["near_misses"] else ""
+        print(f"    {b['failures']:5d}  {b['gate']:26s} enforced {b['enforced_failures']}{advisory}{near}")
+        if b["example"]:
+            print(f"           e.g. {b['example']}")
+
+    if report["first_failed_gates"]:
+        print("\n  First gate that rejected (per attempt)")
+        for item in report["first_failed_gates"][:10]:
+            print(f"    {item['count']:5d}  {item['gate']}")
+
+    if report["pre_idea_skips"]:
+        print("\n  Skipped before idea creation (scanner accounting)")
+        for item in report["pre_idea_skips"][:10]:
+            print(f"    {item['count']:5d}  {item['reason'][:120]}")
+
+    print("\n  Idea funnel by source x status")
+    for row in rows(
+        """
+        SELECT source, status, COUNT(*) AS n FROM alpha_ideas
+        GROUP BY source, status ORDER BY source, n DESC
+        """
+    ):
+        print(f"  {row['n']:5d}  {str(row['source'])[:60]:60s} {row['status']}")
+
+
 def main() -> None:
     load_local_env()
     print("AlphaLab Trading Pipeline Diagnostic")
@@ -85,6 +132,17 @@ def main() -> None:
     status("Dry-run status", "PASS" if "scheduler_mode=paper" not in scheduler_dry_run_status() else "WARN", scheduler_dry_run_status())
     level, detail = alpaca_connectivity()
     status("Alpaca connectivity", level, detail)
+
+    # The paper-execution alpha gate REQUIRES price/volume confirmation, which
+    # only a live intraday source (Polygon) can supply. Without it every idea
+    # stays unconfirmed/neutral and the >= 70 composite gate can never pass, so
+    # surface presence (never values) of the load-bearing provider keys.
+    polygon_set = bool(os.getenv("POLYGON_API_KEY", "").strip())
+    status(
+        "Price/volume confirmation source (POLYGON_API_KEY)",
+        "PASS" if polygon_set else "WARN",
+        "configured" if polygon_set else "missing: ideas cannot be confirmed, alpha gate blocks all paper orders",
+    )
 
     db_path = resolve_db_path()
     if not Path(db_path).exists():
@@ -132,6 +190,8 @@ def main() -> None:
         status("Strategies page API", "PASS" if with_trades else "WARN", f"{len(with_trades)} strategy rows with trades")
     else:
         status("Strategies page API", "FAIL", f"HTTP {response.status_code}")
+
+    print_rejection_waterfall(service)
 
     print("\nSummary")
     if mode == "live":

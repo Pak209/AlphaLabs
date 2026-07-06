@@ -1,0 +1,524 @@
+{
+  "meta": {
+    "db_path": "synthetic fixture - research/tests/fixtures.py",
+    "generated_at": "2026-07-05T00:20:31+00:00",
+    "labeled_rows": 36,
+    "population_rows": 36,
+    "session_count": 6,
+    "spec_path": "research/experiments/EXP-0000-synthetic-sample.json",
+    "verdict": "READY_FOR_REVIEW"
+  },
+  "results": [
+    {
+      "analysis": "summary",
+      "coverage": 1.0,
+      "hit": {
+        "high": 0.7979,
+        "low": 0.5033,
+        "n": 36,
+        "rate": 0.6667
+      },
+      "label_mean": {
+        "high": 1.0799,
+        "low": -0.0133,
+        "mean": 0.5333,
+        "n": 36
+      },
+      "labeled": 36,
+      "rows": 36
+    },
+    {
+      "analysis": "threshold_step",
+      "bands": {
+        "above": {
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.9295,
+            "low": 0.5481,
+            "n": 15,
+            "rate": 0.8
+          },
+          "label_mean": {
+            "high": 1.7334,
+            "low": 0.2666,
+            "mean": 1.0,
+            "n": 15
+          },
+          "labeled": 15,
+          "rows": 15
+        },
+        "below": {
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.6458,
+            "low": 0.1206,
+            "n": 9,
+            "rate": 0.3333
+          },
+          "label_mean": {
+            "high": 0.51,
+            "low": -1.7766,
+            "mean": -0.6333,
+            "n": 9
+          },
+          "labeled": 9,
+          "rows": 9
+        },
+        "near_miss": {
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.9111,
+            "low": 0.4677,
+            "n": 12,
+            "rate": 0.75
+          },
+          "label_mean": {
+            "high": 1.7206,
+            "low": -0.0706,
+            "mean": 0.825,
+            "n": 12
+          },
+          "labeled": 12,
+          "rows": 12
+        }
+      },
+      "near_margin": 0.075,
+      "pass_rate_at_threshold": 0.4167,
+      "simulated_pass_rates": [
+        {
+          "n": 36,
+          "pass_rate": 0.6667,
+          "proposed_threshold": 0.7
+        }
+      ],
+      "step_detected_vs_near_miss": false,
+      "threshold": 0.75,
+      "value_key": "confidence"
+    },
+    {
+      "analysis": "buckets",
+      "buckets": [
+        {
+          "bucket": 1,
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.7495,
+            "low": 0.1582,
+            "n": 7,
+            "rate": 0.4286
+          },
+          "label_mean": {
+            "high": 1.0859,
+            "low": -1.6859,
+            "mean": -0.3,
+            "n": 7
+          },
+          "labeled": 7,
+          "rows": 7,
+          "value_max": 0.65,
+          "value_min": 0.55
+        },
+        {
+          "bucket": 2,
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.9178,
+            "low": 0.3589,
+            "n": 7,
+            "rate": 0.7143
+          },
+          "label_mean": {
+            "high": 1.9652,
+            "low": -0.5652,
+            "mean": 0.7,
+            "n": 7
+          },
+          "labeled": 7,
+          "rows": 7,
+          "value_max": 0.7,
+          "value_min": 0.65
+        },
+        {
+          "bucket": 3,
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.8418,
+            "low": 0.2505,
+            "n": 7,
+            "rate": 0.5714
+          },
+          "label_mean": {
+            "high": 1.5859,
+            "low": -1.1859,
+            "mean": 0.2,
+            "n": 7
+          },
+          "labeled": 7,
+          "rows": 7,
+          "value_max": 0.74,
+          "value_min": 0.7
+        },
+        {
+          "bucket": 4,
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.9743,
+            "low": 0.4869,
+            "n": 7,
+            "rate": 0.8571
+          },
+          "label_mean": {
+            "high": 2.18,
+            "low": 0.22,
+            "mean": 1.2,
+            "n": 7
+          },
+          "labeled": 7,
+          "rows": 7,
+          "value_max": 0.85,
+          "value_min": 0.78
+        },
+        {
+          "bucket": 5,
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.9285,
+            "low": 0.4093,
+            "n": 8,
+            "rate": 0.75
+          },
+          "label_mean": {
+            "high": 1.9477,
+            "low": -0.2977,
+            "mean": 0.825,
+            "n": 8
+          },
+          "labeled": 8,
+          "rows": 8,
+          "value_max": 0.92,
+          "value_min": 0.85
+        }
+      ],
+      "spearman_value_vs_label": 0.2048,
+      "value_key": "confidence"
+    },
+    {
+      "analysis": "calibration",
+      "table": [
+        {
+          "confidence_high": 0.6425,
+          "confidence_low": 0.55,
+          "realized_hit": {
+            "high": 0.8124,
+            "low": 0.1876,
+            "n": 6,
+            "rate": 0.5
+          },
+          "stated_mean": 0.575
+        },
+        {
+          "confidence_high": 0.735,
+          "confidence_low": 0.6425,
+          "realized_hit": {
+            "high": 0.7462,
+            "low": 0.2538,
+            "n": 12,
+            "rate": 0.5
+          },
+          "stated_mean": 0.6875
+        },
+        {
+          "confidence_high": 0.8275,
+          "confidence_low": 0.735,
+          "realized_hit": {
+            "high": 1.0,
+            "low": 0.7009,
+            "n": 9,
+            "rate": 1.0
+          },
+          "stated_mean": 0.7733
+        },
+        {
+          "confidence_high": 0.92,
+          "confidence_low": 0.8275,
+          "realized_hit": {
+            "high": 0.8794,
+            "low": 0.3542,
+            "n": 9,
+            "rate": 0.6667
+          },
+          "stated_mean": 0.8833
+        }
+      ]
+    },
+    {
+      "analysis": "session_stability",
+      "positive_session_share": 0.6667,
+      "qualifying_sessions": 6,
+      "session_count": 6,
+      "sessions": [
+        {
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.9699,
+            "low": 0.4365,
+            "n": 6,
+            "rate": 0.8333
+          },
+          "label_mean": {
+            "high": 2.26,
+            "low": -0.0266,
+            "mean": 1.1167,
+            "n": 6
+          },
+          "labeled": 6,
+          "rows": 6,
+          "session": "2026-06-22"
+        },
+        {
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.3903,
+            "low": 0.0,
+            "n": 6,
+            "rate": 0.0
+          },
+          "label_mean": {
+            "high": -1.8,
+            "low": -1.8,
+            "mean": -1.8,
+            "n": 6
+          },
+          "labeled": 6,
+          "rows": 6,
+          "session": "2026-06-23"
+        },
+        {
+          "coverage": 1.0,
+          "hit": {
+            "high": 1.0,
+            "low": 0.6097,
+            "n": 6,
+            "rate": 1.0
+          },
+          "label_mean": {
+            "high": 1.7,
+            "low": 1.7,
+            "mean": 1.7,
+            "n": 6
+          },
+          "labeled": 6,
+          "rows": 6,
+          "session": "2026-06-24"
+        },
+        {
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.8124,
+            "low": 0.1876,
+            "n": 6,
+            "rate": 0.5
+          },
+          "label_mean": {
+            "high": 1.4839,
+            "low": -1.5839,
+            "mean": -0.05,
+            "n": 6
+          },
+          "labeled": 6,
+          "rows": 6,
+          "session": "2026-06-25"
+        },
+        {
+          "coverage": 1.0,
+          "hit": {
+            "high": 1.0,
+            "low": 0.6097,
+            "n": 6,
+            "rate": 1.0
+          },
+          "label_mean": {
+            "high": 1.7,
+            "low": 1.7,
+            "mean": 1.7,
+            "n": 6
+          },
+          "labeled": 6,
+          "rows": 6,
+          "session": "2026-06-26"
+        },
+        {
+          "coverage": 1.0,
+          "hit": {
+            "high": 0.9032,
+            "low": 0.3,
+            "n": 6,
+            "rate": 0.6667
+          },
+          "label_mean": {
+            "high": 1.9795,
+            "low": -0.9129,
+            "mean": 0.5333,
+            "n": 6
+          },
+          "labeled": 6,
+          "rows": 6,
+          "session": "2026-06-29"
+        }
+      ]
+    },
+    {
+      "accepted": {
+        "coverage": 1.0,
+        "hit": {
+          "high": 0.9743,
+          "low": 0.4869,
+          "n": 7,
+          "rate": 0.8571
+        },
+        "label_mean": {
+          "high": 2.18,
+          "low": 0.22,
+          "mean": 1.2,
+          "n": 7
+        },
+        "labeled": 7,
+        "rows": 7
+      },
+      "analysis": "regret",
+      "gate": "confidence",
+      "regret_flag": true,
+      "rejected_far": {
+        "coverage": 1.0,
+        "hit": {
+          "high": 0.7693,
+          "low": 0.1176,
+          "n": 5,
+          "rate": 0.4
+        },
+        "label_mean": {
+          "high": 1.2803,
+          "low": -2.0803,
+          "mean": -0.4,
+          "n": 5
+        },
+        "labeled": 5,
+        "rows": 5
+      },
+      "rejected_near_miss": {
+        "coverage": 1.0,
+        "hit": {
+          "high": 0.9032,
+          "low": 0.3,
+          "n": 6,
+          "rate": 0.6667
+        },
+        "label_mean": {
+          "high": 1.9795,
+          "low": -0.9129,
+          "mean": 0.5333,
+          "n": 6
+        },
+        "labeled": 6,
+        "rows": 6
+      }
+    }
+  ],
+  "sample_gates": {
+    "detail": {
+      "labeled_rows": {
+        "observed": 36,
+        "passed": true,
+        "required": 20
+      },
+      "near_misses": {
+        "observed": 12,
+        "passed": true,
+        "required": 2
+      },
+      "rows": {
+        "observed": 36,
+        "passed": true,
+        "required": 20
+      },
+      "sessions": {
+        "observed": 6,
+        "passed": true,
+        "required": 3
+      }
+    },
+    "passed": true
+  },
+  "spec": {
+    "analyses": [
+      {
+        "type": "summary"
+      },
+      {
+        "near_margin_frac": 0.1,
+        "proposed_thresholds": [
+          0.7
+        ],
+        "threshold": 0.75,
+        "type": "threshold_step"
+      },
+      {
+        "buckets": 5,
+        "type": "buckets"
+      },
+      {
+        "buckets": 4,
+        "type": "calibration"
+      },
+      {
+        "type": "session_stability"
+      },
+      {
+        "gate": "confidence",
+        "type": "regret"
+      }
+    ],
+    "class": "A",
+    "decision_rule": "Not applicable - synthetic demonstration data.",
+    "guardrails": [],
+    "hypothesis": "None - this spec exists so tests and the sample validation report exercise every analysis type against the synthetic fixture database. Its numbers describe fabricated data.",
+    "id": "EXP-0000",
+    "label": {
+      "hit_key": "hit",
+      "key": "excess_move_pct"
+    },
+    "leakage_checklist": {
+      "inputs_available_at_decision_time": true,
+      "labels_are_strictly_forward": true,
+      "legacy_rows_excluded_from_distributions": true,
+      "no_survivorship_filter_in_population": true
+    },
+    "never_loosen_ack": "Not applicable.",
+    "owner": "framework",
+    "population": {
+      "filters": {
+        "asset_type": null,
+        "evaluated_only": false,
+        "since": null,
+        "source": null,
+        "status": null,
+        "until": null
+      },
+      "limit": 5000,
+      "table": "idea_outcomes"
+    },
+    "rationale": "Referenced by research/tests/ and used to generate research/validation/SAMPLE-*.md. Never point it at the production database.",
+    "registered_at": "2026-07-04",
+    "sample_gates": {
+      "min_labeled_rows": 20,
+      "min_near_misses": 2,
+      "min_rows": 20,
+      "min_sessions": 3
+    },
+    "status": "sample",
+    "title": "SYNTHETIC SAMPLE - framework demonstration only (not a real experiment)",
+    "variable": {
+      "key": "confidence"
+    }
+  }
+}
