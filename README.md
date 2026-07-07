@@ -11,6 +11,8 @@ cd ~/AlphaLab
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+# For a byte-reproducible service environment, install from the lockfile instead:
+#   pip install -r requirements.lock   (exact pins from the tested venv; see docs/CONFIG_SOURCES.md)
 cp .env.example .env
 ```
 

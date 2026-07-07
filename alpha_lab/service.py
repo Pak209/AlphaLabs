@@ -1956,24 +1956,6 @@ class AlphaLabService:
             ).fetchall()
         return {str(row["thesis"]) for row in rows}
 
-    def _recent_crypto_idea_exists(self, ticker: str, bias: str, hours: int = 6) -> bool:
-        """True if an after-hours crypto idea for this ticker+bias was created in
-        the last N hours. The thesis text embeds live prices, so thesis-equality
-        dedupe almost never fires; this stable key is what actually stops a new
-        idea for the same setup every 30-minute weekend poll."""
-        with connect(self.db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT COUNT(*) FROM alpha_ideas
-                WHERE source = 'after_hours_btc'
-                  AND ticker = ?
-                  AND bias = ?
-                  AND datetime(created_at) >= datetime('now', ?)
-                """,
-                (ticker, bias, f"-{int(hours)} hours"),
-            ).fetchone()
-        return int(row[0]) > 0
-
     def _friendly_broker_error(self, exc: Exception) -> str:
         raw = str(exc)
         if "paper-api.alpaca.markets" in raw and "blocked" in raw.lower():

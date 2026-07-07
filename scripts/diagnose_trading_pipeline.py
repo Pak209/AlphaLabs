@@ -122,10 +122,26 @@ def print_rejection_waterfall(service: AlphaLabService) -> None:
         print(f"  {row['n']:5d}  {str(row['source'])[:60]:60s} {row['status']}")
 
 
+def python_runtime_status() -> tuple[str, str]:
+    """Report the interpreter this diagnostic (and by extension the venv) runs on.
+
+    Informational only. Python 3.9 reached end-of-life in October 2025; the
+    codebase currently supports it, so this WARNS rather than fails — the
+    3.11+ migration is an approval-gated ops change (health audit P3).
+    """
+    version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    detail = f"{version} at {sys.executable}"
+    if sys.version_info < (3, 11):
+        return "WARN", f"{detail} (3.9 is past end-of-life; see docs/CODEBASE_HEALTH_AUDIT.md P3)"
+    return "PASS", detail
+
+
 def main() -> None:
     load_local_env()
     print("AlphaLab Trading Pipeline Diagnostic")
     print("=" * 40)
+    level, detail = python_runtime_status()
+    status("Python runtime", level, detail)
     mode = alpaca_mode()
     mode_level = "PASS" if mode == "paper" else "FAIL" if mode == "live" else "WARN"
     status("Alpaca mode", mode_level, mode)
