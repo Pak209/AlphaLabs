@@ -3178,3 +3178,33 @@ Follow CUTOVER_CHECKLIST.md: (1) verify Mac mini prerequisites, (2) bootstrap fr
 (9) run ./ops doctor + ./ops remote-status to confirm.
 
 > (Entry recovered 2026-07-07 from the AlphaLabs-main snapshot's journal; it predates the July entries above — appended here to keep the canonical journal complete without editing prior entries.)
+
+
+## 2026-07-07 16:50 PT — Claude
+
+Branch: chore/phase0-hygiene
+Commit: 9364177
+Working Tree: clean
+
+### Summary
+Phase 0 hygiene implemented (health-audit P0) on branch chore/phase0-hygiene, pushed for PR review. Branch reconciliation: committed pending docs (health audit, engineering handbook, recovered migration docs, journal appends), merged origin/main aa048a2 cleanly, fast-forwarded local main, deleted the merged local integration branch (backup branch preserved). Reproducibility: requirements.lock (pip freeze of the tested 3.9.6 venv) checked in with README install note; diagnose_trading_pipeline.py now reports the Python runtime and WARNS on the EOL 3.9 interpreter. Dead code: removed service._recent_crypto_idea_exists (zero call sites, superseded by crypto_24_7 cooldown) and three committed .bak snapshot files; catalyst_inputs_from_alert KEPT (has live test coverage - documented instead of deleted per constraints). Junk: .pakos/ notes and 46MB .venv.old-prepath moved to /Users/pak/Archive/, both added to .git/info/exclude (local-only). Config drift: docs/CONFIG_SOURCES.md documents which config.example.json governs live risk limits and the divergences (D5) - documentation only, zero config values touched. Explicitly untouched: scheduler, broker, execution, scoring, gates, thresholds, approval flow, live service config, service.py structure. Note observed during verification: diagnose shows scheduler_mode=paper with automation armed (human-set per journal; not modified).
+
+### Files Modified
+- requirements.lock
+- README.md
+- scripts/diagnose_trading_pipeline.py
+- alpha_lab/service.py
+- docs/CONFIG_SOURCES.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- .venv/bin/python scripts/diagnose_trading_pipeline.py
+
+### Results
+- 501 tests passed (characterization + import-boundary suites intact); diagnose runs clean with the new runtime status line; running services untouched (they run pre-change code until next deploy/restart)
+
+### Risks / Blockers
+- Local tree is ahead of what the launchd services loaded at boot; behavior-identical changes, but the next deploy should still follow the standard verify flow
+
+### Next Recommended Task
+Human: open/merge PR for chore/phase0-hygiene (https://github.com/Pak209/AlphaLabs/pull/new/chore/phase0-hygiene), then Phase 1 (test frontier: live_sources fixtures, setup-classifier tests, crypto-normalizer agreement test)
