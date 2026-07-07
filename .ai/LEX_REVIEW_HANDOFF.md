@@ -3086,3 +3086,95 @@ Designed the AlphaLabs self-learning roadmap (docs/SELF_LEARNING_ROADMAP.md). Do
 
 ### Next Recommended Task
 Human review of docs/SELF_LEARNING_ROADMAP.md; if the direction is approved, implement L0 (REC schema + registry + manual weekly-report generator under research/) as a research-only change with no approval barriers.
+
+
+## 2026-07-07 14:08 PT — Claude
+
+Branch: merge/claude-codex-integration
+Commit: none
+Working Tree: modified
+
+### Summary
+Comprehensive codebase health audit (docs/CODEBASE_HEALTH_AUDIT.md) - evidence-only, no runtime changes. Grade B: sound core (pure decision path, deterministic scoring, fingerprinted read-only diagnostics, executable import-boundary contracts, characterization tests, 501 tests / ~12.3k test LOC vs ~20.4k source) with concentrated risk. Debt inventory: service.py god object (2,459 LOC, 117 methods, top branch mass, site of both July merge conflicts); untested network layer (live_sources 413 LOC / 0 tests, daily_brief 0); Python 3.9.6 EOL venv + unpinned requirements (no lockfile); dual catalyst scoring systems (radar 8-factor vs analyst-brain engine) still bridged by adapters; live risk limits read from *.example.json files with 3 divergent copies; legacy paper_trader stack (469 LOC) semi-orphaned; report-CLI boilerplate duplicated across 5 scripts; dead symbols (_recent_crypto_idea_exists orphaned by crypto_24_7 merge, catalyst_inputs_from_alert unwired) plus committed .bak files and untracked junk; local tree behind origin/main (aa048a2). Complexity hotspots via AST scan: api.create_app 550 LOC/69 branches, rejection_waterfall 195/54, evaluate_signal 216/26 (treat as frozen safety kernel), place_trade 162/24. Three independent crypto-symbol normalizers agree today with nothing enforcing it. Roadmap: P0 hygiene (branch sync, lockfile, dead-code deletes), P1 test frontier (live_sources fixtures, setup-classifier tests, normalizer-agreement test), P2 behavior-frozen refactors backed by characterization suite (service split, report_io extraction, waterfall decomposition, APIRouter split), P3 approval-gated decisions (config rename, scorer unification via calibration protocol, legacy stack deprecation, Python 3.11 migration).
+
+### Files Modified
+- docs/CODEBASE_HEALTH_AUDIT.md
+
+### Commands / Tests Run
+- AST complexity scan, import/reference greps, test-file mapping, pip list --outdated, git fetch (read-only)
+
+### Results
+- Audit document written; working tree untouched apart from the doc; services untouched (audit ran against the live checkout without switching branches)
+
+### Risks / Blockers
+- origin/main advanced to aa048a2 since the integration merge - reconcile before acting on the roadmap so P0-P2 changes land on current mainline
+
+### Next Recommended Task
+Human: approve P0 hygiene batch (branch sync + lockfile + dead-code deletes) as the first action; P2 service.py split should follow within a few sessions while the characterization suite is fresh
+
+
+## 2026-07-07 14:23 PT — Claude
+
+Branch: merge/claude-codex-integration
+Commit: none
+Working Tree: modified
+
+### Summary
+Final engineering handoff: wrote docs/ENGINEERING_HANDBOOK.md, the judgment-layer companion to ARCHITECTURE.md, intended to guide future Claude/Codex/Hermes/human contributors. Contents: nine never-change principles (paper-only enforced structurally; evaluate_signal stays a pure function; deterministic scoring with live-identical override defaults; evidence-before-behavior calibration protocol as the platform's most valuable asset; read-only fingerprinted diagnostics; structural gate telemetry; safety composed via min(); append-only journal; absent data is neutral, never positive). Checkable invariants list (paper URL, one audit row per attempt, import direction, discovered_at anchoring, raw-move labels never confidence-embedding scores, three crypto normalizers must agree, two-switch arming). Eight predicted mistakes (lowering gates instead of fixing inputs; reimplementing the pure core; small-sample conclusions; editing the wrong live config; helpful defaults leaking into the signal path; rewriting append-only history; confusing the two catalyst scorers; deploy drift). Dangerous refactors (splitting evaluate_signal without freezing reason strings/gate order; removing 'redundant' confirmation safety; async rewrite; merging diagnostics layers; destructive SQLite migrations; renaming gate identifiers). Safe extension patterns for sources/features/gates/reports/strategies/experiments. Engineering philosophy (trust is the product; boring on purpose; the system may only tighten on its own; constraint comments; instrument first; leave a trail). Full PR review checklist split into safety-blocking, correctness, evidence/process, and deployment sections.
+
+### Files Modified
+- docs/ENGINEERING_HANDBOOK.md
+
+### Commands / Tests Run
+- none (documentation only)
+
+### Results
+- Handbook written; no code changed; test state unchanged (501 passing as of last run)
+
+### Risks / Blockers
+- The handbook reflects the 2026-07-05 tree; keep it updated when contracts change (it is itself listed in the PR checklist for that reason)
+
+### Next Recommended Task
+Add ENGINEERING_HANDBOOK.md to CLAUDE.md/AGENTS.md required-reading lists so every future agent session loads it before touching code
+
+
+## 2026-06-23 19:54 PT — Claude
+
+Branch: none (working copy, not a git repo on this machine)
+Commit: none
+Working Tree: new files only (MIGRATION_REPORT.md, SERVER_READINESS_REPORT.md, CUTOVER_CHECKLIST.md)
+
+### Summary
+Full Phase 1–5 migration audit for old Mac → Apple Silicon Mac mini cutover. Read all repo
+scripts, deploy templates, requirements, env examples, ops CLI, and documentation. Generated
+three migration planning documents. No source code, config, .env, DB, or launchd files changed.
+
+### Files Modified
+- MIGRATION_REPORT.md (new) — Phase 1 audit: startup commands, agents, DB path, env vars, ports, risks, deployment order
+- SERVER_READINESS_REPORT.md (new) — Phase 4 PASS/FAIL readiness template for Mac mini
+- CUTOVER_CHECKLIST.md (new) — Phase 5 12-step cutover checklist with rollback plan
+
+### Commands / Tests Run
+- Read: requirements.txt, .env.example, ops, setup_old_mac.sh, bootstrap_old_mac_from_github.sh, verify_old_mac_runtime.sh, run_dashboard.sh, run_scheduler.sh, deploy/*.plist.template, docs/server-setup.md, alpha_lab/main.py, .ai/project-context.md, .ai/agent-rules.md
+
+### Results
+- Phase 1 audit complete. Migration is straightforward using existing tooling.
+- Three LaunchAgents (dashboard, scheduler, options-validation); templates in deploy/.
+- Dashboard: uvicorn on 127.0.0.1:8787. Scheduler: APScheduler long-running (18 jobs). Options validator: weekdays 06:32 PT.
+- DB: SQLite at ALPHA_LAB_DB_PATH (absolute path, local disk only, must not be on network mount).
+- Python 3.11+ required; pure-Python deps; ARM wheels available for all packages.
+- Existing scripts are designed for exactly this migration scenario — no new tooling needed.
+
+### Risks / Blockers
+- DB migration is highest risk: alpha_lab.sqlite3 must be copied from old Mac before Mac mini first startup.
+- Mac mini timezone must be America/Los_Angeles for scheduler calendar alignment.
+- .env must be manually copied; ALPHA_LAB_DB_PATH must be updated to Mac mini absolute path.
+- Stop old Mac services before starting Mac mini to prevent split-brain ambiguity.
+
+### Next Recommended Task
+Follow CUTOVER_CHECKLIST.md: (1) verify Mac mini prerequisites, (2) bootstrap from GitHub,
+(3) stop old Mac, (4) backup + copy DB, (5) copy .env, (6) run setup_old_mac.sh on Mac mini,
+(7) run verify_old_mac_runtime.sh, (8) update scripts/server.conf to Mac mini Tailscale IP,
+(9) run ./ops doctor + ./ops remote-status to confirm.
+
+> (Entry recovered 2026-07-07 from the AlphaLabs-main snapshot's journal; it predates the July entries above — appended here to keep the canonical journal complete without editing prior entries.)
