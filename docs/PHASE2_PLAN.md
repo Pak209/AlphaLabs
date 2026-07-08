@@ -198,6 +198,97 @@ untouched + one new `test_waterfall_helpers.py` (~60 lines). Expected diff
 ≈ +100/−80 in one module. **Stop.** Not in PR2: report_io extraction (PR3),
 APIRouter split (PR4), near-miss-margin unification, any service.py change.
 
+---
+
+# PR4 plan — first APIRouter extraction from api.create_app (added 2026-07-09; PR1–PR3 merged)
+
+`create_app` is a single 550-LOC closure holding **73 routes**. PR4 extracts
+exactly one router — the smallest, safest cluster — and establishes the
+pattern every later router PR copies. **No route path, response shape, auth
+behavior, service call, telemetry, or DB access changes.**
+
+## Router boundaries (the full future map, for orientation only)
+
+ops/diagnostics · dashboard/market data · catalysts/intelligence · ideas +
+approvals · trades/execution/performance · briefs/briefings · futures/options
+· notifications/review · misc (journal, chat, seed). Each becomes its own
+later PR; PR4 does ONE.
+
+## First router to extract: **ops/diagnostics** (5 routes)
+
+`GET /api/health`, `GET /api/db-status`, `GET /api/safety-status`,
+`GET /api/diagnostics/rejection-waterfall`, `GET /api/ops/agent-status`
+
+Why safest:
+1. **All read-only GETs** — a botched extraction cannot approve, import, or
+   trade; worst case is a broken status page.
+2. **Smallest coherent cluster** (5 of 73) with the least handler logic —
+   each is a one-line delegation to the service.
+3. **Already tested by path**: health, safety-status, and the waterfall
+   endpoint have direct assertions in `test_api.py`; the waterfall response
+   body is additionally pinned by the golden test via the service delegate.
+4. **Auth-neutral by construction**: `require_token_for_writes` is app-level
+   middleware — routers included via `app.include_router` pass through it
+   unchanged, and these are GETs (open by design) anyway.
+5. They are physically the first block in the file (lines 63–94), so the
+   extraction diff is contiguous and trivially reviewable.
+
+## Files / functions to create
+
+```
+alpha_lab/routers/__init__.py      # empty marker (package exists for PR5+ siblings)
+alpha_lab/routers/ops.py           # build_ops_router(lab) -> APIRouter
+```
+
+Factory-function pattern, preserving today's closure semantics exactly:
+`build_ops_router(lab)` declares the five handlers on an `APIRouter` capturing
+`lab`, with handler bodies moved **verbatim**. `create_app` replaces the five
+inline handlers with one line: `app.include_router(build_ops_router(lab))`.
+No `Depends`, no `app.state`, no DI framework — the same captured service
+instance as today, just declared in another file.
+
+## Dependency changes
+
+- `routers/ops.py` imports `fastapi.APIRouter` + `typing.Any` only (the
+  service instance arrives as a parameter; no `alpha_lab.service` import, so
+  the import graph gains no new edges and boundary contracts are untouched).
+- `api.py` imports `build_ops_router`. Nothing else moves.
+
+## Tests that protect behavior
+
+Existing (must pass unmodified): the three direct endpoint tests, auth suite,
+golden waterfall (via service delegate), `PINNED_SURFACE`.
+
+Added in commit A, **before** the split — the route-manifest characterization:
+a test that snapshots the complete sorted `[(method, path)]` inventory of
+`create_app().routes` (all 73) plus spot response-shape checks for
+`db-status` and `agent-status` (the two cluster members without direct
+tests). The extraction must keep the manifest byte-identical — the API
+equivalent of PR1's golden test, and it protects every later router PR too.
+
+## Risks
+
+1. **Route registration order** — FastAPI matches distinct paths regardless
+   of order, and none of the five overlap with other routes; the manifest
+   test documents the full inventory either way.
+2. **Closure drift** — handlers must capture the same `lab` instance;
+   the factory receives it from `create_app`, same object, verified by the
+   existing tests that exercise handlers against a seeded service.
+3. **Scope creep** — resist "while I'm here" moves of dashboard or market
+   routes; one cluster only.
+
+## Rollback
+
+Single revert: one new package, a five-handler deletion and one include line
+in `api.py`. No callers, schemas, paths, or configs to unwind.
+
+## Exact stopping point
+
+PR4 = `routers/ops.py` + `routers/__init__.py` + route-manifest test +
+five handlers removed from `api.py` + one `include_router` line. Expected
+diff ≈ +90/−35 plus ~50 test lines. **Stop.** Not in PR4: any second router,
+dashboard/market routes, auth changes, or `service.py` edits.
+
 ## 9. Phase 2 sequence after PR1 (each its own small PR)
 
 1. **PR2** — decompose `build_rejection_waterfall` internals into

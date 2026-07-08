@@ -3400,3 +3400,56 @@ Phase 2 PR3 implemented on branch refactor/p2-report-io. Extracted alpha_lab/rep
 
 ### Next Recommended Task
 Human: review/merge PR3. Next in Phase 2 sequence: PR4 (split api.create_app into APIRouters) - needs a fresh seam plan before implementation per the PR-per-seam discipline
+
+
+## 2026-07-07 21:59 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR4 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR3 merged, main at ea0fa7c). create_app measured at 73 routes in one 550-LOC closure. First router chosen: ops/diagnostics - the five read-only GETs (health, db-status, safety-status, diagnostics/rejection-waterfall, ops/agent-status). Rationale: all read-only (botched extraction cannot trade), smallest coherent cluster with one-line handlers, three of five already path-tested, auth-neutral by construction (require_token_for_writes is app-level middleware inherited by included routers, and these are open GETs by design), physically contiguous in the file (lines 63-94) for a reviewable diff. Pattern: factory function build_ops_router(lab) on an APIRouter capturing the same service instance (no Depends/app.state/DI change), handlers moved verbatim, create_app gains one include_router line. New package alpha_lab/routers/ with ops.py; router imports fastapi+typing only so the import graph gains no new edges. Test protection: commit A adds a route-manifest characterization (complete sorted method+path inventory of all 73 routes must stay byte-identical) plus response-shape spot checks for the two cluster members lacking direct tests; existing endpoint/auth/golden tests must pass unmodified. Risks: registration order (moot - no overlapping paths, manifest documents inventory), closure drift (same lab object via factory), scope creep (one cluster only). Rollback: single revert. Stopping point: routers package + manifest test + five handlers replaced by one include line, ~+90/-35 plus ~50 test lines; no second router, no auth or service.py changes.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep inventory of api.py routes (73), middleware review, API test coverage check
+
+### Results
+- Plan section written; no code changed; suite last known green at 545
+
+### Risks / Blockers
+- None new; plan doc uncommitted in working tree, rides the PR4 branch as before
+
+### Next Recommended Task
+Human: approve PR4 scope, then implementation proceeds (branch refactor/p2-router-ops)
+
+
+## 2026-07-07 22:16 PT — Claude
+
+Branch: refactor/p2-router-ops
+Commit: 5f0bfa5
+Working Tree: clean
+
+### Summary
+Phase 2 PR4 implemented on branch refactor/p2-router-ops per the approved plan. Commit A: route-manifest characterization test pinning the complete sorted (method, path) inventory of create_app - 73 routes - plus response-shape spot checks for db-status and agent-status (the two ops-cluster endpoints without direct tests). Commit B: new alpha_lab/routers package with ops.py exposing build_ops_router(lab) -> APIRouter; the five read-only GET handlers (health, db-status, safety-status, diagnostics/rejection-waterfall, ops/agent-status) moved VERBATIM with their comments; create_app replaces them with a single include_router line; scheduler_safety_status and build_agent_status imports moved with their handlers (api.py copies removed only after verifying zero remaining references). Closure semantics identical: the factory captures the same lab instance create_app holds; app-level require_token_for_writes middleware applies to included routers unchanged. Verification: 548 tests passed (545 + 3 new); manifest test green post-split proves path-neutrality; all pre-existing endpoint, auth, golden-waterfall, and characterization tests pass unmodified. Constraints honored: no route paths, response shapes, auth, service.py, scheduler, broker, telemetry, scoring, database, or execution changes; no second router. Stopped after PR4.
+
+### Files Modified
+- alpha_lab/routers/__init__.py
+- alpha_lab/routers/ops.py
+- alpha_lab/api.py
+- alpha_lab/tests/test_api_route_manifest.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 548 tests passed; route manifest byte-identical across the split; ops endpoints verified by existing + new shape tests
+
+### Risks / Blockers
+- None notable; the manifest test now guards every future router PR against silent path drift
+
+### Next Recommended Task
+Human: review/merge PR4. Later router PRs can now follow this exact pattern (one cluster per PR, manifest test as the guard); next Phase 2 candidate per the sequence is the service-cluster seam analysis (market-context first)
