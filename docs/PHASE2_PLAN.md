@@ -363,6 +363,72 @@ deletions. Expected diff ≈ +90/−70 plus ~70 test lines. **Stop.** Not in
 PR5: `_safe_market_payload`, `_validation_price`, market-open/session logic,
 regime/briefing context, or any scanning-cluster method.
 
+---
+
+# PR6 plan — market-context seam, slice 2: self-free I/O helpers (added 2026-07-10; PR1–PR5 merged)
+
+Extract the three **self-free** members of the I/O tier into a new
+`alpha_lab/market_context.py` (the module the repo-coupled tier will also
+join in PR7, completing the cluster's home):
+
+| Function | Today | Notes (measured) |
+|---|---|---|
+| `validation_price(ticker)` | `_validation_price`, 4 internal call sites | Polygon→Yahoo→Alpaca chain; env/network only, no self-state |
+| `regular_equity_session_open(now=None)` | `_regular_equity_session_open`, 1 caller | pure datetime; gains an optional `now` injection (default = real clock, behavior-identical) so it becomes testable for the first time |
+| `safe_market_payload(fn)` | `_safe_market_payload`, 3 call sites | trivial error-envelope wrapper |
+
+**Stays in service:** `_equity_market_open` (broker-factory coupling; two
+tests monkeypatch it on the instance) — its fallback line changes to call the
+module function. `_validation_price` **stays as a delegate** (test_performance
+monkeypatches it on the instance).
+
+## The wrinkle this plan must be honest about
+
+`test_price_volume_feed` characterizes the quote-fallback chain by
+monkeypatching `fetch_polygon_intraday` / `fetch_yahoo_price` **on the
+service module's namespace**. After the move, the chain executes in
+`market_context`'s namespace, so those patches no longer reach it. The tests
+must be **mechanically retargeted** (patch `market_context.fetch_yahoo_price`
+instead of `service_mod.fetch_yahoo_price`) with assertions unchanged. This
+is a declared exception to the tests-pass-unmodified gold standard — same
+semantics, new patch target — called out in the PR description and handoff.
+The instance-level patch in `test_performance` is preserved by the delegate
+and needs no edit.
+
+## Test protection
+
+- Existing integration coverage IS the pre-move characterization:
+  the fallback-order tests (retargeted mechanically), scanner tests
+  exercising `safe_market_payload` through `poll_crypto_24_7`, the
+  after-hours flow, and the instance-level `_validation_price` patch.
+- New unit tests arrive WITH the module (they cannot precede it):
+  `regular_equity_session_open` weekday/weekend/9:29/9:30/15:59/16:00
+  boundaries via `now` injection; `safe_market_payload` ok + error-envelope
+  cases.
+- Full suite + `PINNED_SURFACE` (none of these are public members).
+
+## Risks
+
+1. **Patch-retarget edits** (above) — mechanical, declared, assertions
+   untouched.
+2. **One-line touch in `poll_crypto_24_7`** (Codex-authored region) for the
+   `safe_market_payload` call — smallest possible diff there.
+3. **`now` parameter** — new-surface-only; the no-arg call path is
+   byte-identical to today.
+
+## Rollback
+
+Single revert: one module, one delegate, two deleted methods, four one-line
+call-site edits, one retargeted test file.
+
+## Exact stopping point
+
+PR6 = `market_context.py` + delegate + deletions + call-site edits +
+retargeted patches + new unit tests. Expected diff ≈ +110/−60 plus ~60 test
+lines. **Stop.** Not in PR6: `_equity_market_open` extraction, repo tier
+(`_current_market_regime`, `_latest_briefing_context` — PR7), scanning
+cluster, anything else.
+
 ## 9. Phase 2 sequence after PR1 (each its own small PR)
 
 1. **PR2** — decompose `build_rejection_waterfall` internals into

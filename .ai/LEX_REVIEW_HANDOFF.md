@@ -3505,3 +3505,28 @@ Phase 2 PR5 implemented on branch refactor/p2-crypto-signals per the approved pl
 
 ### Next Recommended Task
 Human: review/merge PR5. Remaining market-context tiers (I/O: validation price + market-open; repo: regime/briefing context) are PR6+ candidates, each needing its own seam plan
+
+
+## 2026-07-07 23:23 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR6 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR5 merged, main at 68bce78). Slice 2 of the market-context seam: extract the three self-free I/O helpers into new alpha_lab/market_context.py - validation_price(ticker) (Polygon->Yahoo->Alpaca chain, 4 call sites, service keeps a delegate because test_performance monkeypatches it on the instance), regular_equity_session_open(now=None) (pure datetime, gains optional now-injection - default preserves behavior - making it unit-testable for the first time), and safe_market_payload(fn) (3 call sites incl. one one-line touch in the Codex-authored poll_crypto_24_7). _equity_market_open STAYS in service (broker coupling + instance monkeypatches); its fallback line calls the module function. Honest wrinkle documented: test_price_volume_feed characterizes the quote fallback by patching fetchers on the service module namespace, so those patches must be mechanically retargeted to market_context with assertions unchanged - a declared exception to tests-pass-unmodified. New unit tests (session-open boundaries via now injection, safe_market_payload envelopes) arrive with the module since they cannot precede it. Rollback single revert. Stopping point: one module + delegate + two deletions + four call-site lines + retargeted patches + unit tests; repo tier (_current_market_regime/_latest_briefing_context) deferred to PR7.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep measurement of I/O-tier callers and test patch targets; read of _regular_equity_session_open body and validation-price fallback test
+
+### Results
+- Plan section written; no code changed; suite last known green at 551
+
+### Risks / Blockers
+- None new; plan doc uncommitted, rides the PR6 branch as before
+
+### Next Recommended Task
+Human: approve PR6 scope (note the declared patch-retarget exception), then implementation proceeds (branch refactor/p2-market-context)
