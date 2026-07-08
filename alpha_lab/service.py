@@ -1016,7 +1016,7 @@ class AlphaLabService:
     def place_trade(self, idea_id: int, dry_run: bool = True, as_option: bool = False) -> dict[str, Any]:
         pre_gate_records: list[dict[str, Any]] = []
         if not dry_run:
-            approval_error = self._paper_execution_approval_error(idea_id)
+            approval_error = self._paper_execution_approval_error(idea_id, as_option=as_option)
             if approval_error:
                 self._log_execution_attempt(idea_id, approval_error, dry_run=dry_run)
                 if approval_error.get("action") == "needs_human_approval":
@@ -1951,13 +1951,24 @@ class AlphaLabService:
             return "target watch"
         return "open"
 
-    def _paper_execution_approval_error(self, idea_id: int) -> dict[str, Any] | None:
+    def _paper_execution_approval_error(self, idea_id: int, as_option: bool = False) -> dict[str, Any] | None:
+        """Approval gate for paper execution.
+
+        Scope (human-decided 2026-07-08): equity/crypto paper-learning stays
+        unattended when ALPHALAB_REQUIRE_PAPER_APPROVAL=false, but OPTION
+        orders always require human sign-off (push + Approvals UI) unless the
+        operator explicitly sets ALPHALAB_REQUIRE_OPTION_APPROVAL=false.
+        Option orders therefore skip the analyst-assisted/crypto scoping below.
+        """
         with connect(self.db_path) as conn:
             repo = AlphaLabRepository(conn)
             explanation = repo.get_trade_explanation(idea_id)
             idea = repo.get_idea(idea_id)
             asset_type = str(idea.get("asset_type", "equity"))
-            if not explanation or (not explanation.get("analyst_assisted") and asset_type != "crypto"):
+            is_option_order = as_option or asset_type == "option"
+            if not is_option_order and (
+                not explanation or (not explanation.get("analyst_assisted") and asset_type != "crypto")
+            ):
                 return None
             status = repo.approval_status_for_idea(idea_id)
             if status in {"rejected", "expired"}:
@@ -1975,11 +1986,23 @@ class AlphaLabService:
                     "gate_results": [self._approval_gate_record(False, status, reason)],
                     "first_failed_gate": "human_approval",
                 }
-            if not self._paper_approval_required():
+            approval_required = self._paper_approval_required() or (
+                is_option_order and self._option_approval_required()
+            )
+            if not approval_required:
                 return None
             if status == "approved":
                 return None
-            reason = f"{asset_type.title()} signal requires human approval before Alpaca paper execution."
+            # Make the blocked idea actually approvable: ideas that never
+            # entered review at creation (plain equity ideas hitting the
+            # option-approval rule) get queued now, so the push notification
+            # leads to a working Approve button. Idempotent; never resets a
+            # decided status.
+            repo.queue_idea_for_review(idea_id)
+            if is_option_order:
+                reason = "Option order requires human approval before Alpaca paper execution."
+            else:
+                reason = f"{asset_type.title()} signal requires human approval before Alpaca paper execution."
             return {
                 "accepted": False,
                 "action": "needs_human_approval",
@@ -2032,6 +2055,11 @@ class AlphaLabService:
 
     def _paper_approval_required(self) -> bool:
         return os.getenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "true").strip().lower() not in FALSE_ENV_VALUES
+
+    def _option_approval_required(self) -> bool:
+        # Default TRUE: option paper orders need human sign-off even in
+        # unattended paper-learning mode (see _paper_execution_approval_error).
+        return os.getenv("ALPHALAB_REQUIRE_OPTION_APPROVAL", "true").strip().lower() not in FALSE_ENV_VALUES
 
     def _signal_from_idea(self, idea: dict[str, Any], as_option: bool = False) -> Signal:
         # For an option trade the underlying ticker still drives the risk checks

@@ -643,6 +643,26 @@ class AlphaLabRepository:
             output.append(item)
         return output
 
+    def queue_idea_for_review(self, idea_id: int) -> None:
+        """Put an idea into the approval queue as needs_review (idempotent).
+
+        Used when a paper attempt is blocked pending human sign-off (e.g. the
+        option-order approval rule) on an idea that never entered review at
+        creation. Never resets an already-decided approval (DO NOTHING on
+        conflict) and only promotes ideas still in 'new'.
+        """
+        self.conn.execute(
+            "INSERT INTO approval_queue (idea_id, status) VALUES (?, 'needs_review') "
+            "ON CONFLICT(idea_id) DO NOTHING",
+            (idea_id,),
+        )
+        self.conn.execute(
+            "UPDATE alpha_ideas SET status = 'needs_review', updated_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND status = 'new'",
+            (idea_id,),
+        )
+        self.conn.commit()
+
     def set_approval_status(self, idea_id: int, status: str, note: str = "") -> dict[str, Any]:
         if status not in {"approved", "rejected", "expired"}:
             raise ValueError("approval status must be approved, rejected, or expired")
