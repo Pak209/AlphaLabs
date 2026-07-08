@@ -21,7 +21,10 @@ from .notifications import NotificationCenter, live_execution_enabled
 from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .crypto_signals import btc_signal_from_market
-from .market_context import regular_equity_session_open, safe_market_payload, validation_price
+from .market_context import (
+    current_market_regime, latest_briefing_context,
+    regular_equity_session_open, safe_market_payload, validation_price,
+)
 from .daily_brief import build_daily_market_brief
 from .live_sources import fetch_polygon_intraday
 from .market_data import (
@@ -277,14 +280,14 @@ class AlphaLabService:
         idea = normalize_idea_payload(payload)
         with connect(self.db_path) as conn:
             repo = AlphaLabRepository(conn)
-            idea["market_regime"] = idea.get("market_regime") or self._current_market_regime(repo)
+            idea["market_regime"] = idea.get("market_regime") or current_market_regime(repo)
             created = repo.create_idea(idea)
             validation_price = self._validation_price(created["ticker"])
             repo.upsert_signal_evaluation(
                 created["id"],
                 self._initial_signal_evaluation(created, validation_price),
             )
-            analyst_context = {**self._latest_briefing_context(conn), "reference_price": validation_price}
+            analyst_context = {**latest_briefing_context(conn), "reference_price": validation_price}
             explanation = build_trade_explanation({**idea, "id": created["id"]}, analyst_context)
             repo.create_trade_explanation(created["id"], explanation, {"source_payload": payload})
             if created.get("catalyst_event_id"):
@@ -429,7 +432,7 @@ class AlphaLabService:
         radar = get_catalyst_radar(payload, live=live)
         with connect(self.db_path) as conn:
             repo = AlphaLabRepository(conn)
-            regime = self._current_market_regime(repo)
+            regime = current_market_regime(repo)
             persisted = []
             for event in radar.get("catalysts", []):
                 event = {**event, "market_regime": event.get("market_regime") or regime}
@@ -684,7 +687,7 @@ class AlphaLabService:
         idea = normalize_idea_payload(signal)
         with connect(self.db_path) as conn:
             repo = AlphaLabRepository(conn)
-            idea["market_regime"] = self._current_market_regime(repo)
+            idea["market_regime"] = current_market_regime(repo)
             created = repo.create_idea(idea)
             explanation = build_trade_explanation({**idea, "id": created["id"]}, {"market_context": market.get("summary", ""), "source": market.get("source", "")})
             explanation["analyst_assisted"] = True
@@ -1299,7 +1302,7 @@ class AlphaLabService:
             if idea is None:
                 raise KeyError(f"idea {idea_id} not found")
             validation_price = self._validation_price(idea["ticker"])
-            analyst_context = {**self._latest_briefing_context(conn), "reference_price": validation_price}
+            analyst_context = {**latest_briefing_context(conn), "reference_price": validation_price}
             explanation = build_trade_explanation({**idea, "id": idea_id}, analyst_context)
             return repo.create_trade_explanation(idea_id, explanation, {"regenerated": True})
 
@@ -2069,35 +2072,6 @@ class AlphaLabService:
 
     def _paper_approval_required(self) -> bool:
         return os.getenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "true").strip().lower() not in FALSE_ENV_VALUES
-
-    def _latest_briefing_context(self, conn) -> dict[str, Any]:
-        briefings = AlphaLabRepository(conn).list_market_briefings(1)
-        if not briefings:
-            return {}
-        payload = briefings[0].get("payload", {})
-        return {
-            "headline": payload.get("broad_market_tone", ""),
-            "market_context": payload.get("broad_market_tone", ""),
-            "source": "stored_market_briefing",
-            "generated_at": payload.get("generated_at", ""),
-        }
-
-    def _current_market_regime(self, repo: AlphaLabRepository) -> str:
-        """Regime posture in force right now, stamped on each new signal.
-
-        Reads the most recent saved market briefing (the scheduler regenerates
-        these) and uses its ``broad_market_tone`` — the same defensive / risk-on
-        watch / mixed posture computed by the daily brief. Falls back to
-        ``unknown`` when no briefing has been generated yet.
-        """
-        try:
-            briefings = repo.list_market_briefings(1)
-        except Exception:
-            return "unknown"
-        if not briefings:
-            return "unknown"
-        tone = str(briefings[0].get("payload", {}).get("broad_market_tone") or "").strip().lower()
-        return tone or "unknown"
 
     def _signal_from_idea(self, idea: dict[str, Any], as_option: bool = False) -> Signal:
         # For an option trade the underlying ticker still drives the risk checks

@@ -48,3 +48,58 @@ def test_safe_market_payload_wraps_exceptions():
 
     result = safe_market_payload(boom)
     assert result == {"status": "unavailable", "error": "feed down"}
+
+
+# ─── repo-coupled tier (Phase 2 PR7) ─────────────────────────────────────────
+
+def test_current_market_regime_reads_latest_briefing(tmp_path):
+    from pathlib import Path
+
+    from alpha_lab.database import connect, init_db
+    from alpha_lab.market_context import current_market_regime
+    from alpha_lab.repository import AlphaLabRepository
+
+    db = str(Path(tmp_path) / "regime.sqlite3")
+    init_db(db)
+    with connect(db) as conn:
+        repo = AlphaLabRepository(conn)
+        assert current_market_regime(repo) == "unknown"        # no briefing yet
+        repo.save_market_briefing({"brief_type": "daily_market_brief",
+                                   "broad_market_tone": "Defensive",
+                                   "generated_at": "2026-07-08T13:00:00Z"})
+        assert current_market_regime(repo) == "defensive"      # lowercased tone
+
+
+def test_current_market_regime_unknown_fail_safe():
+    from alpha_lab.market_context import current_market_regime
+
+    class BrokenRepo:
+        def list_market_briefings(self, limit):
+            raise RuntimeError("db locked")
+
+    # Load-bearing behavior: a regime read must never block idea creation.
+    assert current_market_regime(BrokenRepo()) == "unknown"
+
+
+def test_latest_briefing_context_empty_and_populated(tmp_path):
+    from pathlib import Path
+
+    from alpha_lab.database import connect, init_db
+    from alpha_lab.market_context import latest_briefing_context
+    from alpha_lab.repository import AlphaLabRepository
+
+    db = str(Path(tmp_path) / "context.sqlite3")
+    init_db(db)
+    with connect(db) as conn:
+        assert latest_briefing_context(conn) == {}
+        AlphaLabRepository(conn).save_market_briefing({
+            "brief_type": "daily_market_brief",
+            "broad_market_tone": "Risk-On Watch",
+            "generated_at": "2026-07-08T13:00:00Z",
+        })
+        assert latest_briefing_context(conn) == {
+            "headline": "Risk-On Watch",
+            "market_context": "Risk-On Watch",
+            "source": "stored_market_briefing",
+            "generated_at": "2026-07-08T13:00:00Z",
+        }

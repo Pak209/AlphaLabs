@@ -3559,3 +3559,56 @@ Phase 2 PR6 implemented on branch refactor/p2-market-context per the approved pl
 
 ### Next Recommended Task
 Human: review/merge PR6 (note the two declared exceptions). PR7 candidate: repo-coupled tier (_current_market_regime, _latest_briefing_context) joining market_context.py - seam plan first
+
+
+## 2026-07-07 23:51 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR7 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR6 merged, main at c485585). Slice 3 completes the market-context cluster: move _current_market_regime(repo) and _latest_briefing_context(conn) verbatim into market_context.py as module functions. Measured: both read zero self-state (dependencies already parameters), NO test monkeypatches exist so no delegates are needed (both methods deleted outright), five one-line call sites (two in Codex-active regions - catalyst_intelligence and generate_after_hours_btc_idea), and zero boundary-contract edits (pure-core ban list does not apply to market_context; the paper_trader bridge entry exists from PR6; repository import is an unconstrained internal edge). The except->unknown fail-safe in current_market_regime is load-bearing (regime reads must never block idea creation) and moves verbatim. Protection: commit-A characterization through the PUBLIC create_idea path (unknown without briefing; lowercased broad_market_tone stamped after saving one) which survives the move untouched; latest_briefing_context honestly has no public-visible surface so its pins arrive as commit-B module unit tests (with-briefing/without/raising-repo-stub cases). Rollback single revert. After PR7 the market-context seam is DONE; _equity_market_open stays in service by design. Next candidates: scanning cluster (needs Codex coordination) or a deliberate Phase 2 pause.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep/read measurement of both method bodies, five call sites, zero test references, and boundary-contract applicability
+
+### Results
+- Plan section written; no code changed; suite last known green at 556
+
+### Risks / Blockers
+- None new; plan doc uncommitted, rides the PR7 branch as before
+
+### Next Recommended Task
+Human: approve PR7 scope, then implementation proceeds (branch refactor/p2-market-context-repo-tier)
+
+
+## 2026-07-08 00:07 PT — Claude
+
+Branch: refactor/p2-market-context-repo-tier
+Commit: 204c41d
+Working Tree: clean
+
+### Summary
+Phase 2 PR7 implemented on branch refactor/p2-market-context-repo-tier per the approved plan, completing the market-context seam. Commit A: public-path characterization (test_market_regime_stamping.py) - create_idea stamps 'unknown' with no stored briefing, stamps the lowercased broad_market_tone after one is saved, and never overrides an explicit market_regime; written before the move and exercising only the public surface. Commit B: current_market_regime(repo) and latest_briefing_context(conn) moved verbatim into market_context.py (new internal import of AlphaLabRepository - unconstrained edge, zero boundary-contract edits as planned); both service methods deleted outright since nothing monkeypatches them; five one-line call-site edits (create_idea x2, catalyst_intelligence, generate_after_hours_btc_idea, place_trade evaluation path). Module unit tests added: regime without/with briefing, the except->unknown fail-safe via a raising repo stub (load-bearing: regime reads must never block idea creation), and latest_briefing_context empty->{} plus populated->exact dict. Verification: 562 tests passed (556 + 6 new); service.py 2,133 -> 2,107 LOC; PINNED_SURFACE and all boundary contracts untouched. Market-context cluster is DONE (_equity_market_open remains in service by design, broker-coupled). Stopped after PR7.
+
+### Files Modified
+- alpha_lab/market_context.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_market_regime_stamping.py
+- alpha_lab/tests/test_market_context.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 562 tests passed; zero contract edits needed as measured in the plan
+
+### Risks / Blockers
+- None notable; Phase 2 continuation past this point (scanning cluster) has the highest Codex-conflict surface and should be a deliberate go/no-go decision
+
+### Next Recommended Task
+Human: review/merge PR7, then decide: pause Phase 2 here (market-context complete, service.py down 352 LOC from 2,459) or plan the scanning-cluster seam with Codex coordination
