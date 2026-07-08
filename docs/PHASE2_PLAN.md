@@ -122,6 +122,82 @@ code), one delegate, one golden test. Expected diff: `service.py` −~200 LOC,
 `waterfall.py` +~215, tests +~120. Anything more (decomposition, report_io,
 routers) dilutes reviewability and rollback cleanliness.
 
+---
+
+# PR2 plan — decompose build_rejection_waterfall internals (added 2026-07-09, PR1 merged as cb5bb82)
+
+Behavior-frozen decomposition of the ~200-LOC function inside
+`alpha_lab/waterfall.py`, entirely under the golden-value test. **No output
+key, gate name, reason string, SQL query, telemetry shape, or API behavior
+changes.** One file (plus optional helper unit tests); the public
+`build_rejection_waterfall(db_path, limit=5000)` signature is untouched.
+
+## Proposed helpers and responsibilities
+
+| Helper | Responsibility | Source today |
+|---|---|---|
+| `_load_inputs(db_path, limit)` | ALL four SQL reads, verbatim query strings; returns a small private dataclass (`audit_rows`, `audit_total`, `ideas_total`, `trades_paper`, `scanner_rows`). Everything downstream becomes pure. | lines 60–75 |
+| `_parse_scanner_runs(scanner_rows)` | `candidates_scanned` + `pre_idea_skips` dict | lines 77–88 |
+| `_near_miss(record)` | promote the existing closure verbatim to a module function | lines 102–112 |
+| `_aggregate_gates(audit_rows)` | the main loop; returns a private dataclass: `gates`, `first_failed`, `structured_rows`, `accepted`, `submitted`, `alpha_gate_seen/passed`. Internally two branch helpers: `_apply_structured_records(...)` and `_apply_legacy_clauses(...)` | lines 114–169 |
+| `_quantiles(values)` | promote the existing closure verbatim | lines 171–183 |
+| `_finalize_gate_failures(gates, n_rows)` | failures-desc sort, `share_of_attempts`, `observed_stats` / `_observed` pop | lines 185–188 |
+| `_build_stage_funnel(...)` | the seven `stage()` rows, format strings verbatim | lines 190–207 |
+| `_build_threshold_impact(gates)` | the sorted top-12 impact list | lines 209–219 |
+| `build_rejection_waterfall` | ~25-line orchestrator: load → parse → aggregate → finalize → assemble the same report dict, `generated_at` stamped here | remainder |
+
+All helpers are module-private (`_`-prefixed): they are NOT public API and PR2
+creates no new import surface (import-boundary contracts untouched).
+
+## Test protection
+
+Already in place (must pass **unmodified** — that is the definition of done):
+- `test_waterfall_golden.py` — full-dict golden, which already pins the two
+  subtle order dependencies: (a) **first-example-wins** capture (`example` set
+  only when empty, so row iteration order matters), and (b) **stable-sort
+  tie-breaking** (golden contains a confidence/market_open tie at 1 failure
+  whose order comes from dict insertion order during aggregation).
+- Waterfall behavior tests, API endpoint test, `PINNED_SURFACE`, golden shape
+  characterization.
+
+Added by PR2 (additive only): small unit tests for the two promoted pure
+functions — `_near_miss` boundary cases (exact threshold, margin edge, wrong
+comparator, non-numeric) and `_quantiles` (empty → None, single value, ties)
+— which become addressable for the first time.
+
+Verification protocol beyond the suite: run `build_rejection_waterfall`
+against the production DB **before branching and after the change**, diff the
+JSON minus `generated_at` — must be byte-identical (same DB, deterministic
+function).
+
+## Risks
+
+1. **Iteration-order drift** — bucket insertion order feeds tie-breaking in
+   two stable sorts, and `example` capture is first-wins. Mitigation: helpers
+   receive rows in the same order and mutate the same dict; the golden's
+   embedded tie catches regressions.
+2. **Rounding placement** — `round(...)` calls must stay at the same points
+   (moving a round changes 4th-decimal output). Golden catches.
+3. **Scope creep** — tempting adjacent "fixes" that are explicitly OUT:
+   unifying the near-miss margin with `outcomes.NEAR_MISS_MARGIN` /
+   `research/telemetry.py` (cross-module contract change → its own decision),
+   renaming output keys, touching SQL, adding parameters.
+4. **Dataclass serialization** — private carriers must never leak into the
+   report dict; assembly stays plain dicts.
+
+## Rollback
+
+Single `git revert` of one commit touching one module (plus a test file);
+no callers, signatures, or data to unwind. If the production-DB diff shows
+any discrepancy post-merge: revert first, investigate second.
+
+## Exact stopping point
+
+PR2 contains: `alpha_lab/waterfall.py` decomposition + `test_waterfall_golden.py`
+untouched + one new `test_waterfall_helpers.py` (~60 lines). Expected diff
+≈ +100/−80 in one module. **Stop.** Not in PR2: report_io extraction (PR3),
+APIRouter split (PR4), near-miss-margin unification, any service.py change.
+
 ## 9. Phase 2 sequence after PR1 (each its own small PR)
 
 1. **PR2** — decompose `build_rejection_waterfall` internals into
