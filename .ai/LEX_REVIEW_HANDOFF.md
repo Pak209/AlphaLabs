@@ -3400,3 +3400,28 @@ Phase 2 PR3 implemented on branch refactor/p2-report-io. Extracted alpha_lab/rep
 
 ### Next Recommended Task
 Human: review/merge PR3. Next in Phase 2 sequence: PR4 (split api.create_app into APIRouters) - needs a fresh seam plan before implementation per the PR-per-seam discipline
+
+
+## 2026-07-07 21:59 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR4 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR3 merged, main at ea0fa7c). create_app measured at 73 routes in one 550-LOC closure. First router chosen: ops/diagnostics - the five read-only GETs (health, db-status, safety-status, diagnostics/rejection-waterfall, ops/agent-status). Rationale: all read-only (botched extraction cannot trade), smallest coherent cluster with one-line handlers, three of five already path-tested, auth-neutral by construction (require_token_for_writes is app-level middleware inherited by included routers, and these are open GETs by design), physically contiguous in the file (lines 63-94) for a reviewable diff. Pattern: factory function build_ops_router(lab) on an APIRouter capturing the same service instance (no Depends/app.state/DI change), handlers moved verbatim, create_app gains one include_router line. New package alpha_lab/routers/ with ops.py; router imports fastapi+typing only so the import graph gains no new edges. Test protection: commit A adds a route-manifest characterization (complete sorted method+path inventory of all 73 routes must stay byte-identical) plus response-shape spot checks for the two cluster members lacking direct tests; existing endpoint/auth/golden tests must pass unmodified. Risks: registration order (moot - no overlapping paths, manifest documents inventory), closure drift (same lab object via factory), scope creep (one cluster only). Rollback: single revert. Stopping point: routers package + manifest test + five handlers replaced by one include line, ~+90/-35 plus ~50 test lines; no second router, no auth or service.py changes.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep inventory of api.py routes (73), middleware review, API test coverage check
+
+### Results
+- Plan section written; no code changed; suite last known green at 545
+
+### Risks / Blockers
+- None new; plan doc uncommitted in working tree, rides the PR4 branch as before
+
+### Next Recommended Task
+Human: approve PR4 scope, then implementation proceeds (branch refactor/p2-router-ops)
