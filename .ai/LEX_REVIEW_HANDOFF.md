@@ -3559,3 +3559,28 @@ Phase 2 PR6 implemented on branch refactor/p2-market-context per the approved pl
 
 ### Next Recommended Task
 Human: review/merge PR6 (note the two declared exceptions). PR7 candidate: repo-coupled tier (_current_market_regime, _latest_briefing_context) joining market_context.py - seam plan first
+
+
+## 2026-07-07 23:51 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR7 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR6 merged, main at c485585). Slice 3 completes the market-context cluster: move _current_market_regime(repo) and _latest_briefing_context(conn) verbatim into market_context.py as module functions. Measured: both read zero self-state (dependencies already parameters), NO test monkeypatches exist so no delegates are needed (both methods deleted outright), five one-line call sites (two in Codex-active regions - catalyst_intelligence and generate_after_hours_btc_idea), and zero boundary-contract edits (pure-core ban list does not apply to market_context; the paper_trader bridge entry exists from PR6; repository import is an unconstrained internal edge). The except->unknown fail-safe in current_market_regime is load-bearing (regime reads must never block idea creation) and moves verbatim. Protection: commit-A characterization through the PUBLIC create_idea path (unknown without briefing; lowercased broad_market_tone stamped after saving one) which survives the move untouched; latest_briefing_context honestly has no public-visible surface so its pins arrive as commit-B module unit tests (with-briefing/without/raising-repo-stub cases). Rollback single revert. After PR7 the market-context seam is DONE; _equity_market_open stays in service by design. Next candidates: scanning cluster (needs Codex coordination) or a deliberate Phase 2 pause.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep/read measurement of both method bodies, five call sites, zero test references, and boundary-contract applicability
+
+### Results
+- Plan section written; no code changed; suite last known green at 556
+
+### Risks / Blockers
+- None new; plan doc uncommitted, rides the PR7 branch as before
+
+### Next Recommended Task
+Human: approve PR7 scope, then implementation proceeds (branch refactor/p2-market-context-repo-tier)

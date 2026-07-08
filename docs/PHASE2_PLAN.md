@@ -429,6 +429,75 @@ lines. **Stop.** Not in PR6: `_equity_market_open` extraction, repo tier
 (`_current_market_regime`, `_latest_briefing_context` — PR7), scanning
 cluster, anything else.
 
+---
+
+# PR7 plan — market-context seam, slice 3: repo-coupled tier (added 2026-07-10; PR1–PR6 merged)
+
+Move the last two cluster members into `alpha_lab/market_context.py`,
+completing the cluster's home. Measured facts that make this the easiest
+slice yet:
+
+- `_current_market_regime(repo)` and `_latest_briefing_context(conn)` read
+  **zero self-state** — their repo/connection dependencies are already
+  threaded as parameters.
+- **No test monkeypatches either method** (grep: zero references under
+  tests/) → **no delegates needed**; both methods are deleted outright.
+- Five call sites total (`create_idea` ×2, `catalyst_intelligence`,
+  `generate_after_hours_btc_idea`, `place_trade`'s evaluation path), each a
+  one-line `self._x(...)` → `x(...)` edit.
+- `market_context` will import `AlphaLabRepository` — an alpha_lab-internal
+  edge. Verified against the boundary contracts: the pure-core ban list only
+  constrains `PURE_CORE_MODULES` (market_context is not one), and the
+  paper_trader bridge entry already exists from PR6. **Zero contract edits.**
+
+## Functions to create
+
+```
+market_context.current_market_regime(repo: AlphaLabRepository) -> str
+market_context.latest_briefing_context(conn) -> dict[str, Any]
+```
+
+Bodies verbatim, including `current_market_regime`'s except→"unknown"
+fail-safe (that behavior is load-bearing: a regime read must never block idea
+creation).
+
+## Test protection
+
+- **Commit A (before the move)** — characterization through the PUBLIC path,
+  which survives the move untouched: `create_idea` with no stored briefing
+  stamps `market_regime == "unknown"`; after saving a briefing with
+  `broad_market_tone: "Risk-On Watch"`, `create_idea` stamps the lowercased
+  `"risk-on watch"`. (`latest_briefing_context` has no test-visible public
+  surface — it feeds the analyst context — so its pins arrive as module unit
+  tests in commit B; stated honestly rather than pretending coverage.)
+- **Commit B** — module unit tests: regime with briefing / without / with a
+  raising repo stub → "unknown"; briefing context empty → `{}` and populated
+  → exact dict.
+- Full suite; `PINNED_SURFACE` unaffected (both are private and unpinned).
+
+## Risks
+
+1. Two call sites sit in Codex-active regions (`catalyst_intelligence`,
+   `generate_after_hours_btc_idea`) — one-line edits, smallest possible
+   conflict surface.
+2. The raising-repo stub in tests must not over-specify the repo interface —
+   a plain object with a raising `list_market_briefings` suffices.
+3. Scope: `_equity_market_open` remains in service **by design** (broker
+   coupling); this PR closes the market-context cluster otherwise.
+
+## Rollback
+
+Single revert: two module functions, two method deletions, five one-line
+call-site edits, tests.
+
+## Exact stopping point
+
+PR7 = the two moves + call-site edits + commit-A public-path characterization
++ commit-B unit tests. Expected diff ≈ +60/−35 plus ~70 test lines. **Stop.**
+After PR7 the market-context seam is DONE; the next Phase 2 candidate is the
+scanning cluster (highest Codex churn — needs coordination) or a deliberate
+pause of Phase 2.
+
 ## 9. Phase 2 sequence after PR1 (each its own small PR)
 
 1. **PR2** — decompose `build_rejection_waterfall` internals into
