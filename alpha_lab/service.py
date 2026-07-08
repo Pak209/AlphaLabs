@@ -1111,6 +1111,7 @@ class AlphaLabService:
         else:
             decision["paper_eligible"] = True
 
+        self._maybe_record_option_routing(idea_id, decision, as_option)
         broker = self._broker(dry_run=dry_run)
         order_payload = decision["order_payload"]
         try:
@@ -1667,6 +1668,62 @@ class AlphaLabService:
             if dry_run:
                 return SimulatedPaperBroker()
             raise
+
+    @staticmethod
+    def _options_automation_mode() -> str:
+        """ALPHALAB_OPTIONS_AUTOMATION: off | shadow | on (default off).
+
+        'on' deliberately behaves as shadow until the arming PR lands — per
+        docs/OPTIONS_AUTOMATION_PLAN.md, arming requires >=5 shadow sessions
+        of evidence plus a further explicit human approval. Automation can
+        therefore not be enabled by an env edit alone today.
+        """
+        value = os.getenv("ALPHALAB_OPTIONS_AUTOMATION", "off").strip().lower()
+        return value if value in {"off", "shadow", "on"} else "off"
+
+    def _maybe_record_option_routing(self, idea_id: int, decision: dict[str, Any], as_option: bool) -> None:
+        """Shadow-mode option routing (PR-B): advisory telemetry, zero orders.
+
+        For accepted EQUITY decisions while the flag is shadow (or 'on', see
+        above), evaluate the v1 routing rule — tier == high_conviction — and
+        record what WOULD have happened (selected contract or why not) as an
+        enforced=False record in the gate trace. Never alters the order path;
+        any failure here must never break the trade flow.
+        """
+        try:
+            if as_option or self._options_automation_mode() == "off":
+                return
+            if str(decision.get("asset_type") or "equity") != "equity":
+                return
+            alpha = decision.get("alpha") or {}
+            tier = str(alpha.get("tier") or "")
+            record: dict[str, Any] = {
+                "stage": "option_routing", "gate": "option_routing", "passed": False,
+                "enforced": False, "observed": tier, "threshold": "high_conviction",
+                "comparator": "==", "detail": "",
+            }
+            if tier != "high_conviction":
+                record["detail"] = f"shadow: tier {tier or 'unknown'} below high_conviction; no option routing"
+            else:
+                with connect(self.db_path) as conn:
+                    idea = AlphaLabRepository(conn).get_idea(idea_id)
+                try:
+                    selection = self._select_option_contract(idea)
+                    record["passed"] = True
+                    record["detail"] = (
+                        f"shadow: would route to {selection.get('contract_symbol')} "
+                        f"(dte {selection.get('dte')}, est cost ${selection.get('estimated_cost_usd')})"
+                    )
+                    record["contract"] = {
+                        key: selection.get(key)
+                        for key in ("contract_symbol", "dte", "estimated_cost_usd", "spread_pct")
+                    }
+                except Exception as exc:
+                    record["detail"] = f"shadow: selection failed: {str(exc)[:120]}"
+            decision.setdefault("gate_results", []).append(record)
+        except Exception:
+            # Telemetry-only path: swallow everything rather than block a trade.
+            pass
 
     def _paper_order_eligibility_error(self, decision: dict[str, Any]) -> dict[str, Any] | None:
         alpha = decision.get("alpha") or {}
