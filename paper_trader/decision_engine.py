@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -163,9 +165,17 @@ def evaluate_signal(
         "max open positions reached",
         observed=len(positions), threshold=config.max_open_positions, comparator="<",
     )
+    # PR-A (options automation plan): an OPTION entry is only a duplicate if an
+    # option position already exists on the same underlying — holding the equity
+    # does not block a defined-risk option (human-decided 2026-07-08). Equity and
+    # crypto signals keep the original any-position semantics, byte-identical.
+    if signal.asset_type == "option":
+        duplicate = _has_option_position(positions, signal.ticker)
+    else:
+        duplicate = _has_position(positions, signal.ticker)
     gate(
         "duplicate_position",
-        not _has_position(positions, signal.ticker),
+        not duplicate,
         "duplicate position already open",
         observed=signal.ticker, threshold="no open position in ticker", comparator="not in",
     )
@@ -287,6 +297,22 @@ def evaluate_signal(
 def _has_position(positions: list[dict[str, Any]], ticker: str) -> bool:
     target = _position_key(ticker)
     return any(_position_key(str(position.get("symbol", ""))) == target for position in positions)
+
+
+# OCC option symbol suffix: YYMMDD + C/P + 8-digit strike (e.g. PLTR260918C00170000).
+_OCC_SUFFIX_RE = re.compile(r"\d{6}[CP]\d{8}$")
+
+
+def _has_option_position(positions: list[dict[str, Any]], underlying: str) -> bool:
+    """True if any open position is an option contract on this underlying."""
+    target = str(underlying or "").strip().upper()
+    if not target:
+        return False
+    for position in positions:
+        symbol = str(position.get("symbol", "")).strip().upper()
+        if symbol.startswith(target) and _OCC_SUFFIX_RE.fullmatch(symbol[len(target):]):
+            return True
+    return False
 
 
 def _position_key(symbol: str) -> str:
