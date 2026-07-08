@@ -3832,3 +3832,31 @@ Fixed the review UI issues reported from the phone on branch feat/lex-summary-an
 
 ### Next Recommended Task
 Merge PR, then the phone flow: install the DASHBOARD (root URL) as the Home Screen PWA and enable push in Settings->Notifications there - /review is a separate non-PWA surface by design
+
+
+## 2026-07-08 16:34 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: 8d38148
+Working Tree: clean
+
+### Summary
+Extended feat/lex-summary-and-review-chrome with two-way navigation between the two UI surfaces per human naming decision: root command center = Overview (detail-rich; approvals, notifications, settings), /review = Dashboard (mobile). Overview's Research nav section gains a 'Dashboard (mobile)' entry - the nav renderer now supports plain external hrefs alongside SPA routes; the Dashboard hamburger menu links back to 'Overview - full command center'; prototype brand bar renamed from AlphaLabs Prototype to AlphaLabs Dashboard; standalone bundle rebuilt. 584 tests passed. Dashboard agent restarted to serve the update.
+
+### Files Modified
+- alpha_lab/static/app.js
+- prototype/app.js
+- prototype/build_standalone.py
+- prototype/index.html
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 584 tests passed; both surfaces cross-linked
+
+### Risks / Blockers
+- None; UI navigation only
+
+### Next Recommended Task
+Human: merge the feat/lex-summary-and-review-chrome PR (now includes lex summary, live bell/menu, and cross-navigation); then install Overview as the Home Screen PWA and enable push in Settings->Notifications
