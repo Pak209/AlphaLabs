@@ -3208,3 +3208,31 @@ Phase 0 hygiene implemented (health-audit P0) on branch chore/phase0-hygiene, pu
 
 ### Next Recommended Task
 Human: open/merge PR for chore/phase0-hygiene (https://github.com/Pak209/AlphaLabs/pull/new/chore/phase0-hygiene), then Phase 1 (test frontier: live_sources fixtures, setup-classifier tests, crypto-normalizer agreement test)
+
+
+## 2026-07-07 18:34 PT — Claude
+
+Branch: test/phase1-test-frontier
+Commit: none
+Working Tree: clean
+
+### Summary
+Phase 1 (test frontier from CODEBASE_HEALTH_AUDIT P1) implemented on branch test/phase1-test-frontier, stacked on chore/phase0-hygiene. Tests only - zero runtime code changed. Added 32 tests across four new files: test_live_sources.py (disabled-when-unconfigured contract for all six vendor feeds with a monkeypatched no-network guard proving unconfigured feeds never touch the network; fixture-based parser tests for SEC EDGAR incl. material-form filtering, 424B5 dilution wording and archive-URL construction, Polygon news normalization with related-ticker uppercasing, Benzinga news RFC-822-to-UTC time parsing + watchlist filtering + HTML stripping, Benzinga insiders headline composition, Tiingo and Newsfilter row shapes; fetch_live_catalysts dedupe/sort; _safe_error secret redaction). test_stock_setup_classifier.py (synthetic-bar case per branch: extended_or_correcting don't-chase guard, pre_breakout, trend_pullback_long, breakdown_short, base_watch, oversold_watch, unclear - quality values pinned since they drive trending confidence). test_crypto_symbol_normalizers.py (three-way agreement contract across _position_key, _canonical_crypto_ticker, normalize_crypto_symbol on every spelling of every allowlisted pair; bare-symbol divergence documented as intentional with a drift alarm; serves as the executable contract until P3 unification). test_daily_brief.py (offline assembly: strict signals[] field contract, actionable-only filter, bearish-intraday timeframe rule, section error containment, max_signals cap, cache-hit proof via poisoned provider).
+
+### Files Modified
+- alpha_lab/tests/test_live_sources.py
+- alpha_lab/tests/test_stock_setup_classifier.py
+- alpha_lab/tests/test_crypto_symbol_normalizers.py
+- alpha_lab/tests/test_daily_brief.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 533 tests passed (501 prior + 32 new); no runtime module modified; characterization and import-boundary suites untouched
+
+### Risks / Blockers
+- Branch is stacked on chore/phase0-hygiene - merge that PR first, then this one (or land both in order); classifier tests pin current quality constants, so a future calibration of those values must update the tests in the same approved change
+
+### Next Recommended Task
+Phase 2 (behavior-frozen refactors) is next per the audit: service.py split guarded by characterization tests; needs human go-ahead since it touches the god object
