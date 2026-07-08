@@ -3773,3 +3773,32 @@ Deploy + restart at human request: PRs #13 (Yahoo news source) and #14 (options 
 
 ### Next Recommended Task
 Run waterfall_snapshot.py + outcome_report.py after each of the next 5 sessions; review shadow option_routing records before proposing the arming PR
+
+
+## 2026-07-08 15:19 PT — Claude
+
+Branch: feat/option-order-approval
+Commit: 3022665
+Working Tree: clean
+
+### Summary
+Implemented option-order approval on branch feat/option-order-approval per human decision (equity paper-learning unattended, options gated). ALSO completed post-migration push verification: restarted dashboard to pick up ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true (human-set), sent one REAL URGENT_IDEA test push - delivered (sent=1 errors=0) to the registered iPhone subscription; recommend removing the flag after receipt confirmation. Code: _paper_execution_approval_error takes as_option; option orders (as_option or asset_type=option) skip the analyst-assisted/crypto scoping and require approval via new _option_approval_required (ALPHALAB_REQUIRE_OPTION_APPROVAL, default TRUE - env absence is the safe state); reason string 'Option order requires human approval before Alpaca paper execution.' (contains 'human approval' so legacy waterfall clause mapping still matches). Gap found by tests and fixed: plain ideas blocked for option approval were unapprovable (never queued) - new repo.queue_idea_for_review enqueues idempotently on block (ON CONFLICT DO NOTHING, only promotes status='new'), so the push always leads to a working Approve button. Five new gate tests incl. approve-then-retry-proceeds and the escape hatch; six pre-existing options-layer MECHANICS tests adapted via the documented escape-hatch env with in-file rationale (declared adaptation). 584 tests passed. Interaction note: the daily options_lifecycle_validation will now emit one APPROVAL_REQUIRED push per day at 13:32 PT until approved/expired - the human may want to expire those or treat them as a daily end-to-end push check.
+
+### Files Modified
+- alpha_lab/service.py
+- alpha_lab/repository.py
+- alpha_lab/tests/test_options_automation.py
+- alpha_lab/tests/test_options_layer.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- real push test via /api/notifications/test (delivered sent=1)
+
+### Results
+- 584 tests passed; push channel verified end to end post-migration
+
+### Risks / Blockers
+- Daily validation push may be noisy (one per day); quiet-hours bypass applies to APPROVAL_REQUIRED so early-morning approvals will ring through - both are the designed behavior, flagged for awareness
+
+### Next Recommended Task
+Human: merge feat/option-order-approval PR, restart agents, remove ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS from .env; then the approval push flow is live for the options shadow->arming path
