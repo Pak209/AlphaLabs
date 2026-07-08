@@ -92,6 +92,11 @@ def _force_tradeable_alpha(lab, monkeypatch):
 
 
 def _stub_lab(tmp_path, monkeypatch, selection, market_open=True):
+    # These tests characterize the option mechanics DOWNSTREAM of the approval
+    # gate (selection, budget, lifecycle). The option-order approval rule
+    # (2026-07-08) has its own dedicated tests in test_options_automation.py,
+    # so opt out here via the documented operator escape hatch.
+    monkeypatch.setenv("ALPHALAB_REQUIRE_OPTION_APPROVAL", "false")
     monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
     lab = service(tmp_path)
     monkeypatch.setattr(lab, "_select_option_contract", lambda idea: selection)
@@ -164,6 +169,7 @@ def test_full_lifecycle_fill_position_close_and_outcome_linkage(tmp_path, monkey
     # Entry fills at 4.50, exit at 5.50 -> realized = (5.50-4.50) * 1 contract * 100 = $100.
     broker = SimulatedPaperBroker(price=4.50, close_price=5.50)
     monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")
+    monkeypatch.setenv("ALPHALAB_REQUIRE_OPTION_APPROVAL", "false")   # mechanics test; approval gate covered in test_options_automation
     lab = service(tmp_path)
     monkeypatch.setattr(lab, "_select_option_contract", lambda idea: CALL_SELECTION)
     monkeypatch.setattr(lab, "_broker", lambda dry_run=True: broker)

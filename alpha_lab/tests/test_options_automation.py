@@ -103,3 +103,76 @@ def test_selection_failure_is_contained(tmp_path: Path, monkeypatch):
     record = routing_records(lab)[0]
     assert record["passed"] is False
     assert "selection failed" in record["detail"]
+
+
+# ─── option-order approval gate (human-decided 2026-07-08) ───────────────────
+
+def paper_lab(tmp_path, monkeypatch):
+    from paper_trader.simulated_broker import SimulatedPaperBroker
+
+    monkeypatch.setenv("ALPHALAB_REQUIRE_PAPER_APPROVAL", "false")   # paper-learning mode
+    monkeypatch.delenv("ALPHALAB_REQUIRE_OPTION_APPROVAL", raising=False)
+    monkeypatch.delenv("ALPHALAB_OPTIONS_AUTOMATION", raising=False)
+    lab = service(tmp_path)
+    monkeypatch.setattr(lab, "_broker", lambda dry_run=True: SimulatedPaperBroker())
+    return lab
+
+
+def test_option_order_requires_approval_even_in_paper_learning_mode(tmp_path: Path, monkeypatch):
+    lab = paper_lab(tmp_path, monkeypatch)
+    idea = lab.create_idea(idea_payload())
+
+    result = lab.place_trade(idea["id"], dry_run=False, as_option=True)
+
+    assert result["action"] == "needs_human_approval"
+    assert result["reasons"] == ["Option order requires human approval before Alpaca paper execution."]
+    with connect(lab.db_path) as conn:
+        alert = conn.execute(
+            "SELECT level, title FROM alerts ORDER BY id DESC LIMIT 1").fetchone()
+    assert alert["level"] == "APPROVAL_REQUIRED"               # push channel engaged
+
+
+def test_equity_paper_learning_stays_unattended(tmp_path: Path, monkeypatch):
+    lab = paper_lab(tmp_path, monkeypatch)
+    force_alpha(lab, monkeypatch, tier="tradeable", composite=74.0)
+    idea = lab.create_idea(idea_payload())
+
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["action"] != "needs_human_approval"          # no new gate for equity
+
+
+def test_approved_option_order_proceeds(tmp_path: Path, monkeypatch):
+    lab = paper_lab(tmp_path, monkeypatch)
+    force_alpha(lab, monkeypatch, tier="tradeable", composite=74.0)
+    monkeypatch.setattr(lab, "_select_option_contract", lambda idea: selection_stub())
+    idea = lab.create_idea(idea_payload())
+
+    blocked = lab.place_trade(idea["id"], dry_run=False, as_option=True)
+    assert blocked["action"] == "needs_human_approval"
+
+    lab.approve_idea_for_execution(idea["id"], "approved for option paper test")
+    approved = lab.place_trade(idea["id"], dry_run=False, as_option=True)
+
+    assert approved["action"] != "needs_human_approval"        # approval cleared the gate
+
+
+def test_option_asset_type_idea_also_requires_approval(tmp_path: Path, monkeypatch):
+    lab = paper_lab(tmp_path, monkeypatch)
+    idea = lab.create_idea({**idea_payload(), "asset_type": "option"})
+
+    result = lab.place_trade(idea["id"], dry_run=False)
+
+    assert result["action"] == "needs_human_approval"
+
+
+def test_option_approval_escape_hatch(tmp_path: Path, monkeypatch):
+    lab = paper_lab(tmp_path, monkeypatch)
+    monkeypatch.setenv("ALPHALAB_REQUIRE_OPTION_APPROVAL", "false")
+    force_alpha(lab, monkeypatch, tier="tradeable", composite=74.0)
+    monkeypatch.setattr(lab, "_select_option_contract", lambda idea: selection_stub())
+    idea = lab.create_idea(idea_payload())
+
+    result = lab.place_trade(idea["id"], dry_run=False, as_option=True)
+
+    assert result["action"] != "needs_human_approval"          # operator opt-out honored
