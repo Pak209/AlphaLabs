@@ -3368,3 +3368,35 @@ Phase 2 PR2 implemented on branch refactor/p2-decompose-waterfall per the approv
 
 ### Next Recommended Task
 Human: review/merge PR2, then approve PR3 (extract shared report_io.py from the five diagnostics CLIs) per the Phase 2 sequence
+
+
+## 2026-07-07 21:39 PT — Claude
+
+Branch: refactor/p2-report-io
+Commit: 8587eb2
+Working Tree: clean
+
+### Summary
+Phase 2 PR3 implemented on branch refactor/p2-report-io. Extracted alpha_lab/report_io.py (stdlib-only): write_json_report(report, out_dir, prefix) - the single copy of the timestamped, microsecond-collision-proof, key-sorted JSON writer previously duplicated in all five diagnostics CLIs - and format_number(value, pattern), the shared body behind each script's local _fmt. All five scripts (replay_scenarios, feature_attribution, outcome_report, portfolio_report, waterfall_snapshot) now delegate with unchanged function names, signatures, filename prefixes, and default format patterns, so every existing CLI test passes unmodified - the behavior-freeze proof. replay's inner fmt closure delegates too; unused json/datetime imports dropped only where truly unused (verified by import). Added test_report_io.py (filename convention regex, collision-proofing over rapid calls, exact JSON formatting, format_number fallback incl. the bool quirk). Verification: 545 tests passed (542 + 3); live waterfall_snapshot.py run against the production DB produced a correctly-named snapshot. No output shape, service.py, or cross-module changes; stopped after PR3.
+
+### Files Modified
+- alpha_lab/report_io.py
+- alpha_lab/tests/test_report_io.py
+- scripts/replay_scenarios.py
+- scripts/feature_attribution.py
+- scripts/outcome_report.py
+- scripts/portfolio_report.py
+- scripts/waterfall_snapshot.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- .venv/bin/python scripts/waterfall_snapshot.py (live smoke)
+
+### Results
+- 545 tests passed; snapshot CLI produced waterfall-20260708-043712-605361.json with the unchanged naming convention
+
+### Risks / Blockers
+- None notable; report filenames and JSON bytes are unchanged, so existing snapshot/report directories stay chronologically comparable
+
+### Next Recommended Task
+Human: review/merge PR3. Next in Phase 2 sequence: PR4 (split api.create_app into APIRouters) - needs a fresh seam plan before implementation per the PR-per-seam discipline
