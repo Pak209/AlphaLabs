@@ -3453,3 +3453,28 @@ Phase 2 PR4 implemented on branch refactor/p2-router-ops per the approved plan. 
 
 ### Next Recommended Task
 Human: review/merge PR4. Later router PRs can now follow this exact pattern (one cluster per PR, manifest test as the guard); next Phase 2 candidate per the sequence is the service-cluster seam analysis (market-context first)
+
+
+## 2026-07-07 22:22 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR5 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR4 merged, main at d6a461c). Market-context cluster measured into three coupling tiers: pure (btc signal construction: _btc_signal_from_market + _entry_zone/_stop_level/_target_level/_fmt_price, ~70 LOC, zero self-state, verified they call only each other), I/O-bearing (_validation_price, _equity_market_open/_regular_equity_session_open, _safe_market_payload), and repo-coupled (_current_market_regime, _latest_briefing_context). PR5 extracts the pure tier only into new alpha_lab/crypto_signals.py (typing-only imports, zero new graph edges): btc_signal_from_market public, level/format helpers private. Hard constraint discovered by measurement: two crypto-scanner tests monkeypatch lab._btc_signal_from_market on the instance, so that method stays as a one-line delegate; the four helpers have no other callers (grep-verified) and move fully. Protection: commit-A value-pin characterization asserting exact signal dicts (including full thesis/catalyst/invalidation strings and price formatting) for bullish/bearish/neutral payloads; existing monkeypatching tests pass unmodified via the delegate. Risks: string drift (thesis text feeds idea records and dedupe keys - full-string comparison), scope creep (safe_market_payload and both other tiers explicitly deferred to PR6+). Rollback: single revert. Stopping point: one module + delegate + four deletions + value-pin test, ~+90/-70.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep measurement of market-context cluster definitions, internal callers, and test monkeypatch surface
+
+### Results
+- Plan section written; no code changed; suite last known green at 548
+
+### Risks / Blockers
+- None new; plan doc uncommitted, rides the PR5 branch as before
+
+### Next Recommended Task
+Human: approve PR5 scope, then implementation proceeds (branch refactor/p2-crypto-signals)
