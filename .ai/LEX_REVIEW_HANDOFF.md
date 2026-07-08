@@ -3341,3 +3341,30 @@ Phase 2 PR2 planning only (appended to docs/PHASE2_PLAN.md; PR1 merged as cb5bb8
 
 ### Next Recommended Task
 Human: approve PR2 scope, then implementation proceeds per the plan (branch refactor/p2-decompose-waterfall)
+
+
+## 2026-07-07 21:16 PT — Claude
+
+Branch: refactor/p2-decompose-waterfall
+Commit: 6e62a5d
+Working Tree: clean
+
+### Summary
+Phase 2 PR2 implemented on branch refactor/p2-decompose-waterfall per the approved plan in docs/PHASE2_PLAN.md. Decomposed build_rejection_waterfall (~200 LOC) into module-private helpers: _load_inputs (sole DB access, four verbatim queries, frozen dataclass result), _parse_scanner_runs, _near_miss + _quantiles (closures promoted verbatim), _aggregate_gates with _apply_structured_records/_apply_legacy_clauses over a private _GateAggregation dataclass, _finalize_gate_failures, _build_stage_funnel, _build_threshold_impact; public entry point is now a ~25-line orchestrator with unchanged signature. Golden-value test untouched and green (pins first-example-wins capture and stable-sort tie-breaking). Added test_waterfall_helpers.py: _near_miss boundaries (margin edge exact/past, zero-threshold absolute margin, lt-comparator mirror, non-numeric/unknown comparators) and _quantiles edges (empty/single/ties/rounding/order-insensitivity). Verification: full suite 542 passed (534 + 8); production-DB report generated before branching and after the change diffed byte-identical minus generated_at. Constraints honored: no output shape, API, telemetry, gate-name, reason-string, SQL, or service.py changes; no report_io/router/margin-unification work. Stopped after PR2.
+
+### Files Modified
+- alpha_lab/waterfall.py
+- alpha_lab/tests/test_waterfall_helpers.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- production-DB build_rejection_waterfall before/after JSON diff
+
+### Results
+- 542 tests passed; prod-DB diff identical; golden and characterization suites unmodified
+
+### Risks / Blockers
+- None beyond review; helper names are module-private so no new API surface exists
+
+### Next Recommended Task
+Human: review/merge PR2, then approve PR3 (extract shared report_io.py from the five diagnostics CLIs) per the Phase 2 sequence
