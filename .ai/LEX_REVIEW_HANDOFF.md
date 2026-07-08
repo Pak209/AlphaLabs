@@ -3316,3 +3316,55 @@ Phase 2 PR1 implemented per docs/PHASE2_PLAN.md on branch refactor/p2-extract-wa
 
 ### Next Recommended Task
 Human: review/merge PR1, then approve PR2 (decompose build_rejection_waterfall internals under the golden test) per docs/PHASE2_PLAN.md sequence
+
+
+## 2026-07-07 21:07 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR2 planning only (appended to docs/PHASE2_PLAN.md; PR1 merged as cb5bb82). Decomposition plan for build_rejection_waterfall under the golden-value test: _load_inputs (all four SQL reads verbatim, returns private dataclass, makes everything downstream pure), _parse_scanner_runs, _near_miss and _quantiles (existing closures promoted verbatim to module functions), _aggregate_gates with _apply_structured_records/_apply_legacy_clauses branch helpers returning a private aggregation dataclass, _finalize_gate_failures, _build_stage_funnel, _build_threshold_impact, and a ~25-line orchestrator keeping the public signature and stamping generated_at. All helpers module-private; no new import surface. Test protection: golden test unmodified is the definition of done - it already pins the two subtle order dependencies (first-example-wins capture and stable-sort tie-breaking via the embedded confidence/market_open tie); PR2 adds only small unit tests for the two promoted pure helpers (_near_miss boundaries, _quantiles edge cases). Verification protocol: production-DB report diff before/after (byte-identical minus generated_at). Risks documented: iteration-order drift feeding tie-breaks, rounding placement, scope creep (near-miss-margin unification with outcomes/research explicitly OUT of scope), dataclass leakage into the report dict. Rollback: single revert of one module + one test file. Stopping point: waterfall.py + test_waterfall_helpers.py only, ~+100/-80, nothing else.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- git fetch/switch/ff to main cb5bb82 (PR1 merge confirmed); grep review of order-sensitive logic in waterfall.py
+
+### Results
+- Plan section written; no code changed; suite last known green at 534
+
+### Risks / Blockers
+- None new; plan doc is uncommitted in the working tree and will ride the PR2 branch as with PR1
+
+### Next Recommended Task
+Human: approve PR2 scope, then implementation proceeds per the plan (branch refactor/p2-decompose-waterfall)
+
+
+## 2026-07-07 21:16 PT — Claude
+
+Branch: refactor/p2-decompose-waterfall
+Commit: 6e62a5d
+Working Tree: clean
+
+### Summary
+Phase 2 PR2 implemented on branch refactor/p2-decompose-waterfall per the approved plan in docs/PHASE2_PLAN.md. Decomposed build_rejection_waterfall (~200 LOC) into module-private helpers: _load_inputs (sole DB access, four verbatim queries, frozen dataclass result), _parse_scanner_runs, _near_miss + _quantiles (closures promoted verbatim), _aggregate_gates with _apply_structured_records/_apply_legacy_clauses over a private _GateAggregation dataclass, _finalize_gate_failures, _build_stage_funnel, _build_threshold_impact; public entry point is now a ~25-line orchestrator with unchanged signature. Golden-value test untouched and green (pins first-example-wins capture and stable-sort tie-breaking). Added test_waterfall_helpers.py: _near_miss boundaries (margin edge exact/past, zero-threshold absolute margin, lt-comparator mirror, non-numeric/unknown comparators) and _quantiles edges (empty/single/ties/rounding/order-insensitivity). Verification: full suite 542 passed (534 + 8); production-DB report generated before branching and after the change diffed byte-identical minus generated_at. Constraints honored: no output shape, API, telemetry, gate-name, reason-string, SQL, or service.py changes; no report_io/router/margin-unification work. Stopped after PR2.
+
+### Files Modified
+- alpha_lab/waterfall.py
+- alpha_lab/tests/test_waterfall_helpers.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- production-DB build_rejection_waterfall before/after JSON diff
+
+### Results
+- 542 tests passed; prod-DB diff identical; golden and characterization suites unmodified
+
+### Risks / Blockers
+- None beyond review; helper names are module-private so no new API surface exists
+
+### Next Recommended Task
+Human: review/merge PR2, then approve PR3 (extract shared report_io.py from the five diagnostics CLIs) per the Phase 2 sequence
