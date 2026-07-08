@@ -5,8 +5,9 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from xml.etree import ElementTree
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
@@ -19,6 +20,7 @@ BENZINGA_NEWS_URL = "https://api.benzinga.com/api/v2/news"
 BENZINGA_INSIDER_URL = "https://api.benzinga.com/api/v2.1/calendar/insider-transactions"
 TIINGO_NEWS_URL = "https://api.tiingo.com/tiingo/news"
 NEWSFILTER_SEARCH_URL = "https://api.newsfilter.io/search"
+YAHOO_NEWS_RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
 
 DEFAULT_WATCHLIST = [
     "AAPL", "AMZN", "AMD", "AVGO", "COIN", "GOOGL", "META", "MSFT", "MSTR",
@@ -36,6 +38,7 @@ def fetch_live_catalysts(watchlist: list[str] | None = None, limit: int = 40) ->
         _fetch_benzinga_insiders(symbols),
         _fetch_tiingo_news(symbols),
         _fetch_newsfilter(symbols),
+        _fetch_yahoo_news(symbols),
     ]
     catalysts = []
     seen = set()
@@ -279,6 +282,66 @@ def _fetch_newsfilter(symbols: list[str]) -> dict[str, Any]:
         return {"name": "Newsfilter", "status": "ok", "catalysts": catalysts, "count": len(catalysts)}
     except Exception as exc:
         return _error("Newsfilter", exc)
+
+
+
+def _fetch_yahoo_news(symbols: list[str]) -> dict[str, Any]:
+    """Keyless Yahoo Finance RSS headlines — per-ticker plus macro feeds.
+
+    Disabled by default (set YAHOO_NEWS_ENABLED=true). Macro symbols (defaults
+    to ^GSPC) are index feeds whose items carry NO ticker, so the catalyst
+    classifier routes them to broad_market_mention / low_actionability —
+    captured as context and archived as events, never trade candidates. This
+    is the channel that records Iran/oil/yields-style headlines the
+    ticker-scoped vendors never see.
+    """
+    if os.getenv("YAHOO_NEWS_ENABLED", "").strip().lower() != "true":
+        return _disabled("Yahoo Finance News", "Set YAHOO_NEWS_ENABLED=true to enable the keyless Yahoo RSS news feed.")
+    try:
+        catalysts = []
+        ticker_symbols = symbols[: int(os.getenv("YAHOO_NEWS_MAX_SYMBOLS", "10"))]
+        macro_symbols = [s.strip() for s in os.getenv("YAHOO_NEWS_MACRO_SYMBOLS", "^GSPC").split(",") if s.strip()]
+        for symbol in [*ticker_symbols, *macro_symbols]:
+            is_macro = symbol in macro_symbols or symbol.startswith("^")
+            for item in _fetch_rss(YAHOO_NEWS_RSS_URL.format(symbol=quote(symbol))):
+                catalysts.append({
+                    "ticker": "" if is_macro else symbol,
+                    "headline": item.get("title", ""),
+                    "summary": item.get("description", ""),
+                    "source": "Yahoo Finance News",
+                    "source_url": item.get("link", ""),
+                    "published_at": _parse_rfc822_time(item.get("pubDate")),
+                    "security_type": "stock",
+                    "exchange": "",
+                })
+        return {"name": "Yahoo Finance News", "status": "ok", "catalysts": catalysts, "count": len(catalysts)}
+    except Exception as exc:
+        return _error("Yahoo Finance News", exc)
+
+
+def _fetch_rss(url: str) -> list[dict[str, str]]:
+    """Fetch an RSS feed and return its items as plain dicts.
+
+    Yahoo requires a browser-ish User-Agent or it returns 429 (same as the
+    price fallback). Separated out so tests can substitute recorded items.
+    """
+    req = Request(url, headers={"Accept": "application/rss+xml, application/xml",
+                                "User-Agent": "Mozilla/5.0 (AlphaLab paper-research)"})
+    with urlopen(req, timeout=12) as response:
+        root = ElementTree.fromstring(response.read())
+    items = []
+    for node in root.iter("item"):
+        items.append({child.tag: (child.text or "").strip() for child in node})
+    return items
+
+
+def _parse_rfc822_time(value: str | None) -> str:
+    if not value:
+        return datetime.now(timezone.utc).isoformat()
+    try:
+        return parsedate_to_datetime(value).astimezone(timezone.utc).isoformat()
+    except Exception:
+        return value
 
 
 def _watchlist(watchlist: list[str] | None) -> list[str]:

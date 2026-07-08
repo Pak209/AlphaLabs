@@ -20,7 +20,7 @@ import alpha_lab.live_sources as ls
 
 ALL_KEYS = (
     "SEC_USER_AGENT", "POLYGON_API_KEY", "BENZINGA_API_KEY",
-    "TIINGO_API_KEY", "NEWSFILTER_API_KEY",
+    "TIINGO_API_KEY", "NEWSFILTER_API_KEY", "YAHOO_NEWS_ENABLED",
 )
 
 
@@ -45,6 +45,7 @@ def _no_network(*args, **kwargs):
     (ls._fetch_benzinga_insiders, "Benzinga Insider Transactions"),
     (ls._fetch_tiingo_news, "Tiingo News"),
     (ls._fetch_newsfilter, "Newsfilter"),
+    (ls._fetch_yahoo_news, "Yahoo Finance News"),
 ])
 def test_feed_disabled_without_key(no_keys, fetcher, name):
     result = fetcher(["NVDA"])
@@ -170,7 +171,7 @@ def test_fetch_live_catalysts_dedupes_and_sorts(monkeypatch):
     ok = {"name": "A", "status": "ok", "catalysts": [item, dict(item), newer], "count": 3}
     disabled = ls._disabled("B", "off")
     for fetcher in ("_fetch_sec_filings", "_fetch_polygon_news", "_fetch_benzinga_news",
-                    "_fetch_benzinga_insiders", "_fetch_tiingo_news"):
+                    "_fetch_benzinga_insiders", "_fetch_tiingo_news", "_fetch_yahoo_news"):
         monkeypatch.setattr(ls, fetcher, lambda symbols: disabled)
     monkeypatch.setattr(ls, "_fetch_newsfilter", lambda symbols: ok)
     result = ls.fetch_live_catalysts(["NVDA"])
@@ -189,3 +190,55 @@ def test_error_envelope_redacts_secrets(monkeypatch):
     assert result["status"] == "error"
     assert "supersecret123" not in result["reason"]
     assert "redacted" in result["reason"]
+
+
+def test_yahoo_news_parses_ticker_and_macro_feeds(monkeypatch):
+    monkeypatch.setenv("YAHOO_NEWS_ENABLED", "true")
+    monkeypatch.setenv("YAHOO_NEWS_MACRO_SYMBOLS", "^GSPC")
+
+    def fake_rss(url):
+        if "%5EGSPC" in url:      # quoted ^GSPC
+            return [{"title": "Oil prices jump as US-Iran deal is 'over'",
+                     "description": "Crude surges; bond yields climb.",
+                     "link": "https://finance.yahoo.com/macro-1",
+                     "pubDate": "Wed, 08 Jul 2026 13:08:00 +0000"}]
+        return [{"title": "NVIDIA supplier expands capacity",
+                 "description": "Supply chain read.",
+                 "link": "https://finance.yahoo.com/nvda-1",
+                 "pubDate": "Wed, 08 Jul 2026 12:00:00 +0000"}]
+
+    monkeypatch.setattr(ls, "_fetch_rss", fake_rss)
+    result = ls._fetch_yahoo_news(["NVDA"])
+    assert result["status"] == "ok" and result["count"] == 2
+    by_url = {row["source_url"]: row for row in result["catalysts"]}
+    ticker_row = by_url["https://finance.yahoo.com/nvda-1"]
+    assert ticker_row["ticker"] == "NVDA"
+    assert ticker_row["source"] == "Yahoo Finance News"
+    assert ticker_row["published_at"] == "2026-07-08T12:00:00+00:00"
+    macro_row = by_url["https://finance.yahoo.com/macro-1"]
+    assert macro_row["ticker"] == ""          # macro items carry no ticker
+
+
+def test_yahoo_macro_headlines_classify_as_non_tradeable_context(monkeypatch):
+    # End-to-end guarantee: a war/macro headline ingested via the macro feed
+    # can never become a trade candidate — the classifier routes tickerless
+    # broad-market language away from direct_company_catalyst.
+    from alpha_lab.catalysts import classify_catalyst, score_catalyst
+
+    row = {"ticker": "", "headline": "Bond yields jump as surging oil prices spark inflation fears",
+           "summary": "Macro headline via Yahoo RSS", "source": "Yahoo Finance News",
+           "published_at": "2026-07-08T13:08:00Z"}
+    category, _ = classify_catalyst(row)
+    assert category in {"broad_market_mention", "low_actionability"}
+    scored = score_catalyst(row)
+    assert scored["trade_candidate"] is False
+
+
+def test_yahoo_respects_symbol_cap(monkeypatch):
+    monkeypatch.setenv("YAHOO_NEWS_ENABLED", "true")
+    monkeypatch.setenv("YAHOO_NEWS_MAX_SYMBOLS", "2")
+    monkeypatch.setenv("YAHOO_NEWS_MACRO_SYMBOLS", "")
+    calls = []
+    monkeypatch.setattr(ls, "_fetch_rss", lambda url: calls.append(url) or [])
+    ls._fetch_yahoo_news(["NVDA", "MSFT", "AMD", "TSLA"])
+    assert len(calls) == 2                    # capped, no macro configured
