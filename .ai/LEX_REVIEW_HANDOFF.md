@@ -3287,3 +3287,32 @@ Correction to the previous entry's risk assessment: service respawns are NOT at 
 
 ### Next Recommended Task
 Human: accept the Xcode license, then approve Phase 2 PR1 scope per docs/PHASE2_PLAN.md.
+
+
+## 2026-07-07 20:52 PT — Claude
+
+Branch: refactor/p2-extract-waterfall
+Commit: 1226bba
+Working Tree: clean
+
+### Summary
+Phase 2 PR1 implemented per docs/PHASE2_PLAN.md on branch refactor/p2-extract-waterfall. Commit A: golden-value characterization test (test_waterfall_golden.py) seeding a deterministic DB via raw SQL - structured accepted/enforced-rejection-with-near-miss/advisory-alpha-failure/submitted rows, one legacy free-text rejection, scanner-run summary, one paper trade - and deep-comparing the COMPLETE waterfall report dict (generated_at excluded) against an embedded golden. Commit B: verbatim extraction of rejection_waterfall plus _LEGACY_CLAUSE_GATES into new alpha_lab/waterfall.py as build_rejection_waterfall(db_path, limit) with LEGACY_CLAUSE_GATES module constant; only mechanical substitutions (self.db_path -> parameter, class constant -> module constant); AlphaLabService.rejection_waterfall retained as a two-line delegate with the identical signature and a docstring pointing at the extraction. Zero caller changes (api.py, diagnose script, waterfall_snapshot all still call the service method); import-boundary contracts untouched (alpha_lab-internal move); gate names, reason parsing, telemetry shape, and public surface preserved (PINNED_SURFACE and golden shape tests pass unmodified). service.py reduced 2,459 -> 2,229 LOC. Also committed on this branch: docs/PHASE2_PLAN.md and the two journal entries from planning (incl. the Xcode license incident, since resolved by the human). Stopped after PR1 as instructed - no decomposition, no report_io, no router split.
+
+### Files Modified
+- alpha_lab/waterfall.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_waterfall_golden.py
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- .venv/bin/python scripts/diagnose_trading_pipeline.py (waterfall section smoke against production DB)
+
+### Results
+- 534 tests passed (533 prior + 1 golden); diagnose waterfall renders identically (1191 audit rows, 64 structured); characterization and import-boundary suites untouched
+
+### Risks / Blockers
+- None beyond standard review; the golden test now pins the full output contract, so PR2's internal decomposition must keep it green without edits
+
+### Next Recommended Task
+Human: review/merge PR1, then approve PR2 (decompose build_rejection_waterfall internals under the golden test) per docs/PHASE2_PLAN.md sequence
