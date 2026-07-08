@@ -9,12 +9,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .agent_status import build_agent_status
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .market_data import get_bitcoin_market, get_business_profiles, get_liquidity_flows, get_oil_market, get_trending_stocks
 from .notifications import ALERT_LEVELS, NotificationCenter, clamp_limit, public_vapid_key
-from .scheduler import scheduler_safety_status
 from .service import AlphaLabService
+from .routers.ops import build_ops_router
 
 
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -60,37 +59,7 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
                 return JSONResponse(status_code=401, content={"detail": "Unauthorized: missing or invalid API token."})
         return await call_next(request)
 
-    @app.get("/api/health")
-    def health() -> dict[str, Any]:
-        # Expose the resolved DB identity (path + device:inode) so a health check
-        # can PROVE the dashboard and scheduler are reading/writing the SAME file,
-        # not just two same-named DBs. Identity errors must never down the probe.
-        try:
-            identity = lab.db_identity()
-        except Exception as exc:  # pragma: no cover - defensive
-            identity = {"db_error": str(exc)}
-        return {"status": "ok", "mode": "paper-research", "default_execution": "dry-run", **identity}
-
-    @app.get("/api/db-status")
-    def db_status() -> dict[str, Any]:
-        # Full operational snapshot of the active database for dashboards / phone:
-        # path, existence, idea + trade counts, and the scheduler heartbeat.
-        return lab.db_status()
-
-    @app.get("/api/safety-status")
-    def safety_status() -> dict[str, Any]:
-        return scheduler_safety_status()
-
-    @app.get("/api/diagnostics/rejection-waterfall")
-    def rejection_waterfall(limit: int = 5000) -> dict[str, Any]:
-        # Read-only pipeline observability: stage funnel, per-gate failure
-        # counts (structured traces + legacy reason parsing), first-failed-gate
-        # histogram, and threshold near-miss impact. Never mutates state.
-        return lab.rejection_waterfall(limit=max(100, min(int(limit), 20000)))
-
-    @app.get("/api/ops/agent-status")
-    def agent_status(limit: int = 50) -> dict[str, Any]:
-        return build_agent_status(lab.db_path, limit=limit)
+    app.include_router(build_ops_router(lab))
 
     @app.get("/api/dashboard")
     def dashboard() -> dict[str, Any]:
