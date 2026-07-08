@@ -912,8 +912,8 @@
   }
   function menuSheetHTML() {
     return `<div class="sheet-title">Menu</div>
-      <a class="sheet-link" href="/">Open Dashboard (approvals & settings)</a>
-      <a class="sheet-link" href="/review">Reload Review</a>`;
+      <a class="sheet-link" href="/">Overview — full command center (approvals, notifications, settings)</a>
+      <a class="sheet-link" href="/review">Reload Dashboard</a>`;
   }
   refreshAlertsBadge();
   setInterval(refreshAlertsBadge, 60000);

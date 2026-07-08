@@ -466,7 +466,7 @@ html, body {
 <body>
   <!-- Prototype chrome: screen switcher (not part of the product UI) -->
   <div class="proto-bar">
-    <span class="proto-brand">AlphaLabs Prototype</span>
+    <span class="proto-brand">AlphaLabs Dashboard</span>
     <div class="proto-tabs">
       <button data-goto="brief" class="proto-tab active">A &middot; Brief</button>
       <button data-goto="detail" class="proto-tab">B &middot; Detail</button>
@@ -1877,8 +1877,8 @@ window.REVIEW_MOCK = (function () {
   }
   function menuSheetHTML() {
     return `<div class="sheet-title">Menu</div>
-      <a class="sheet-link" href="/">Open Dashboard (approvals & settings)</a>
-      <a class="sheet-link" href="/review">Reload Review</a>`;
+      <a class="sheet-link" href="/">Overview — full command center (approvals, notifications, settings)</a>
+      <a class="sheet-link" href="/review">Reload Dashboard</a>`;
   }
   refreshAlertsBadge();
   setInterval(refreshAlertsBadge, 60000);

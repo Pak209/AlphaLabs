@@ -759,6 +759,7 @@ const NAV_SECTIONS = [
     badge: "alerts",
     items: [
       { route: "overview", label: "Overview" },
+      { href: "/review", label: "Dashboard (mobile) ↗" },
       { route: "inbox", label: "Scanner Inbox" },
       { route: "alerts", label: "Alerts" },
       { route: "chat", label: "Analyst Chat" },
@@ -859,6 +860,11 @@ function renderNav() {
       const itemBadge = item.conditional === "approvals" && pending > 0
         ? `<span class="nav-link-badge">${pending}</span>`
         : "";
+      if (item.href) {
+        // External surface (e.g. the /review mobile Dashboard): a plain
+        // navigation, not an SPA route.
+        return `<a class="nav-link nav-link-external" href="${item.href}">${item.label}${itemBadge}</a>`;
+      }
       return `<a class="nav-link${item.route === activeRoute ? " active" : ""}" data-route="${item.route}" href="#${item.route}">${item.label}${itemBadge}</a>`;
     }).join("");
     return `
