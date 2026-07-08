@@ -3692,3 +3692,28 @@ Implemented the Yahoo Finance news source on branch feat/yahoo-news-source per h
 
 ### Next Recommended Task
 Human: merge PR, then set YAHOO_NEWS_ENABLED=true (and optionally YAHOO_NEWS_MACRO_SYMBOLS) in .env alongside the CATALYST_WATCHLIST expansion, and restart the launchd agents to pick both up
+
+
+## 2026-07-08 13:34 PT — Claude
+
+Branch: feat/yahoo-news-source
+Commit: none
+Working Tree: modified
+
+### Summary
+Wrote docs/OPTIONS_AUTOMATION_PLAN.md (plan only, awaiting approval) turning the human's four decisions into protocol-compliant PRs. PR-A: duplicate gate narrows to option-positions-only for option signals (equity/crypto byte-identical; gate name/reason/trace unchanged; unblocks the daily PLTR options validation that has been rejected three days running on held equity; equity+option stacking documented as accepted human-decided risk, visible in portfolio snapshot). PR-B: ALPHALAB_OPTIONS_AUTOMATION=off|shadow|on flag, default off - shadow mode records would-be contract selections as advisory option_routing telemetry with zero orders for >=5 sessions before any arming; routing rule v1 deliberately narrow (high_conviction tier >=80 only, equity fallback). PR-C: LEAPS via selector DTE parameterization (defaults unchanged) as a human-invoked profile, with the honest constraint that the ~1,900 per-trade budget rejects most large-cap LEAPS and raising it is a never-loosen change NOT proposed. Alpaca entitlement verified level 3 / 91.8K options buying power - not a blocker.
+
+### Files Modified
+- docs/OPTIONS_AUTOMATION_PLAN.md
+
+### Commands / Tests Run
+- read-only Alpaca account options-field check; measurement of options lifecycle plumbing and validation blockage
+
+### Results
+- Plan written; no code changed; suite last known green at 570
+
+### Risks / Blockers
+- PR-A touches evaluate_signal (the safety kernel) - smallest-diff discipline and characterization suite mandatory
+
+### Next Recommended Task
+Human: approve PR-A (and optionally PR-B) to begin; separately apply the CATALYST_WATCHLIST + YAHOO_NEWS_ENABLED env changes and restart agents
