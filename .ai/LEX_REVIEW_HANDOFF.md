@@ -3637,3 +3637,31 @@ Phase 2 PR8 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR7 merged, main
 
 ### Next Recommended Task
 Human: approve PR8 scope, then implementation proceeds (branch refactor/p2-scanning-vocabulary)
+
+
+## 2026-07-08 00:32 PT — Claude
+
+Branch: refactor/p2-scanning-vocabulary
+Commit: 486865a
+Working Tree: clean
+
+### Summary
+Phase 2 PR8 implemented on branch refactor/p2-scanning-vocabulary per the approved plan. Commit A: value-pin tests (test_scanning_vocabulary.py) asserting the exact summary dicts through the service methods - scanner_summary sorting/zero-drop/top-5-cap/negative-clamping, crypto_scanner_summary composition with the full safety_gates block + allowlist + 30/24 constants, crypto_signal_log symbol normalization and catalyst-precedence, catalyst_source_accounting provider counting with problems cap and non-dict tolerance. Commit B: new alpha_lab/scanning.py with the four builders moved verbatim; CRYPTO_SCAN_COOLDOWN_MINUTES and MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY move as module constants (single source of truth) with the service class attributes reassigned to reference them so Tier-B DB accessors are untouched; service keeps one-line delegates for all four builders purely for Codex-conflict avoidance. Verified the plan's headline constraint via diff-hunk inspection: zero lines changed inside any poll body (all hunks in imports/constants/helper regions). Verification: 566 tests passed (562 + 4); value-pins green through the delegates with no retargeting; service.py 2,107 -> 2,010 LOC (down 449 from 2,459 at Phase 2 start). Stopped after PR8.
+
+### Files Modified
+- alpha_lab/scanning.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_scanning_vocabulary.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- git diff hunk-location inspection (no poll-body edits)
+
+### Results
+- 566 tests passed; scanner_runs payload contract now a named module with pinned shapes
+
+### Risks / Blockers
+- Delegate retirement (and Tier B) remain open scanning work items requiring Codex coordination; Tier C orchestrators recommended never-extracted per plan
+
+### Next Recommended Task
+Human: review/merge PR8. Phase 2 status: waterfall, report_io, ops router, market-context (3 slices), scanning vocabulary all done - decide whether Tier B/delegate cleanup proceeds or Phase 2 pauses here
