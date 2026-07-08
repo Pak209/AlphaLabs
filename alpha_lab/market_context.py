@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from paper_trader.alpaca_client import AlpacaClient, load_credentials_from_env
 
 from .live_sources import fetch_polygon_intraday, fetch_yahoo_price
+from .repository import AlphaLabRepository
 
 
 def validation_price(ticker: str) -> float | None:
@@ -64,3 +65,34 @@ def safe_market_payload(fn) -> dict[str, Any]:
         return fn()
     except Exception as exc:
         return {"status": "unavailable", "error": str(exc)}
+
+
+def current_market_regime(repo: "AlphaLabRepository") -> str:
+    """Regime posture in force right now, stamped on each new signal.
+
+    Reads the most recent saved market briefing (the scheduler regenerates
+    these) and uses its ``broad_market_tone`` — the same defensive / risk-on
+    watch / mixed posture computed by the daily brief. Falls back to
+    ``unknown`` when no briefing has been generated yet.
+    """
+    try:
+        briefings = repo.list_market_briefings(1)
+    except Exception:
+        return "unknown"
+    if not briefings:
+        return "unknown"
+    tone = str(briefings[0].get("payload", {}).get("broad_market_tone") or "").strip().lower()
+    return tone or "unknown"
+
+
+def latest_briefing_context(conn) -> dict[str, Any]:
+    briefings = AlphaLabRepository(conn).list_market_briefings(1)
+    if not briefings:
+        return {}
+    payload = briefings[0].get("payload", {})
+    return {
+        "headline": payload.get("broad_market_tone", ""),
+        "market_context": payload.get("broad_market_tone", ""),
+        "source": "stored_market_briefing",
+        "generated_at": payload.get("generated_at", ""),
+    }
