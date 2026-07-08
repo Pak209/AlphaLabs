@@ -289,6 +289,80 @@ five handlers removed from `api.py` + one `include_router` line. Expected
 diff ≈ +90/−35 plus ~50 test lines. **Stop.** Not in PR4: any second router,
 dashboard/market routes, auth changes, or `service.py` edits.
 
+---
+
+# PR5 plan — market-context seam, slice 1: pure BTC signal construction (added 2026-07-09; PR1–PR4 merged)
+
+The market-context cluster in `service.py` has three coupling tiers, measured
+by grep:
+
+| Tier | Members | Coupling |
+|---|---|---|
+| **Pure** | `_btc_signal_from_market`, `_entry_zone`, `_stop_level`, `_target_level`, `_fmt_price` (~70 LOC) | none — functions of their inputs only |
+| I/O-bearing | `_validation_price` (Polygon→Yahoo→Alpaca), `_equity_market_open` (+`_regular_equity_session_open`), `_safe_market_payload` | network / broker |
+| Repo-coupled | `_current_market_regime`, `_latest_briefing_context` | repository/connection parameters |
+
+**PR5 extracts the pure tier only.** The I/O and repo tiers are later slices
+(PR6+), each with its own plan.
+
+## Why this slice first
+
+1. **Provably pure**: the five functions read no `self` state — they call only
+   each other. A verbatim move cannot change behavior; the value-pin test
+   makes that checkable.
+2. **They construct trade-signal *text and levels*** (entry/stop/target,
+   invalidation wording) for every after-hours BTC idea — exactly the kind of
+   logic that deserves module-level unit testing it can't get as a private
+   method tangle.
+3. **Test-compatibility is a hard constraint discovered by measurement**: two
+   crypto-scanner tests monkeypatch `lab._btc_signal_from_market` on the
+   instance. The method therefore STAYS as a one-line delegate; the four
+   helpers (no external callers — verified) move fully and are deleted from
+   the class.
+
+## Files / functions
+
+```
+alpha_lab/crypto_signals.py    # new: btc_signal_from_market(btc) public,
+                               # _entry_zone/_stop_level/_target_level/_fmt_price private
+alpha_lab/service.py           # −~70 LOC; _btc_signal_from_market → delegate
+```
+
+Flat module per the established pattern. Imports: `typing` only (pure
+functions) — zero new import-graph edges.
+
+## Test protection
+
+- **Commit A (before the move)** — value-pin characterization:
+  `_btc_signal_from_market` against three fixed payloads (bullish with full
+  indicators, bearish, neutral/missing-EMA) asserting the exact returned
+  signal dicts — ticker/bias/confidence/timeframe AND the composed thesis,
+  catalyst, and invalidation strings with their price formatting.
+- Existing suites unmodified: the two monkeypatching scanner tests (delegate
+  preserves patchability), characterization surface, crypto-normalizer
+  contract, golden waterfall.
+
+## Risks
+
+1. **Monkeypatch surface** — mitigated by keeping the delegate; the plan's
+   defining constraint.
+2. **String drift** — thesis/invalidation text feeds idea records and dedupe
+   keys; the value-pin test compares full strings, not fragments.
+3. **Scope creep** — `_safe_market_payload` (trivial but 3 call sites) and
+   the I/O tier stay put; one tier per PR.
+
+## Rollback
+
+Single revert: one new module, one delegate, four deleted private methods,
+zero public-surface or caller changes outside the class.
+
+## Exact stopping point
+
+PR5 = `crypto_signals.py` + value-pin test + delegate + four helper
+deletions. Expected diff ≈ +90/−70 plus ~70 test lines. **Stop.** Not in
+PR5: `_safe_market_payload`, `_validation_price`, market-open/session logic,
+regime/briefing context, or any scanning-cluster method.
+
 ## 9. Phase 2 sequence after PR1 (each its own small PR)
 
 1. **PR2** — decompose `build_rejection_waterfall` internals into

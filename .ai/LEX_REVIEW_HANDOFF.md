@@ -3453,3 +3453,55 @@ Phase 2 PR4 implemented on branch refactor/p2-router-ops per the approved plan. 
 
 ### Next Recommended Task
 Human: review/merge PR4. Later router PRs can now follow this exact pattern (one cluster per PR, manifest test as the guard); next Phase 2 candidate per the sequence is the service-cluster seam analysis (market-context first)
+
+
+## 2026-07-07 22:22 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR5 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR4 merged, main at d6a461c). Market-context cluster measured into three coupling tiers: pure (btc signal construction: _btc_signal_from_market + _entry_zone/_stop_level/_target_level/_fmt_price, ~70 LOC, zero self-state, verified they call only each other), I/O-bearing (_validation_price, _equity_market_open/_regular_equity_session_open, _safe_market_payload), and repo-coupled (_current_market_regime, _latest_briefing_context). PR5 extracts the pure tier only into new alpha_lab/crypto_signals.py (typing-only imports, zero new graph edges): btc_signal_from_market public, level/format helpers private. Hard constraint discovered by measurement: two crypto-scanner tests monkeypatch lab._btc_signal_from_market on the instance, so that method stays as a one-line delegate; the four helpers have no other callers (grep-verified) and move fully. Protection: commit-A value-pin characterization asserting exact signal dicts (including full thesis/catalyst/invalidation strings and price formatting) for bullish/bearish/neutral payloads; existing monkeypatching tests pass unmodified via the delegate. Risks: string drift (thesis text feeds idea records and dedupe keys - full-string comparison), scope creep (safe_market_payload and both other tiers explicitly deferred to PR6+). Rollback: single revert. Stopping point: one module + delegate + four deletions + value-pin test, ~+90/-70.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep measurement of market-context cluster definitions, internal callers, and test monkeypatch surface
+
+### Results
+- Plan section written; no code changed; suite last known green at 548
+
+### Risks / Blockers
+- None new; plan doc uncommitted, rides the PR5 branch as before
+
+### Next Recommended Task
+Human: approve PR5 scope, then implementation proceeds (branch refactor/p2-crypto-signals)
+
+
+## 2026-07-07 23:05 PT — Claude
+
+Branch: refactor/p2-crypto-signals
+Commit: 100df43
+Working Tree: clean
+
+### Summary
+Phase 2 PR5 implemented on branch refactor/p2-crypto-signals per the approved plan. Commit A: value-pin characterization (test_crypto_signals_golden.py) asserting the EXACT signal dicts - full thesis/catalyst/invalidation strings and price formatting - for three payload shapes: bias derived from EMA (bullish), explicit bearish with missing support exercising fallback levels, and neutral with no indicators exercising n/a formatting. Commit B: new alpha_lab/crypto_signals.py (typing-only imports, zero new graph edges) with btc_signal_from_market public and the four level/format helpers private, all moved verbatim including the harmless unused name local; AlphaLabService._btc_signal_from_market reduced to a one-line delegate, kept deliberately because two crypto-scanner tests monkeypatch it on the instance - both pass unmodified. The four helpers had no other callers (grep-verified) and were deleted from the class. Verification: 551 tests passed (548 + 3); zero leftover helper references in service.py; service.py 2,229 -> 2,165 LOC. Constraints honored: no thesis/invalidation/catalyst text, dedupe, scanner, I/O-tier, repo-tier, route, scheduler, broker, scoring, telemetry, config, or schema changes. Stopped after PR5.
+
+### Files Modified
+- alpha_lab/crypto_signals.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_crypto_signals_golden.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 551 tests passed; value-pin goldens green through the delegate; monkeypatching scanner tests unmodified
+
+### Risks / Blockers
+- None notable; the golden pins full signal text, so any future wording change must be deliberate (update golden + handoff in the same approved commit)
+
+### Next Recommended Task
+Human: review/merge PR5. Remaining market-context tiers (I/O: validation price + market-open; repo: regime/briefing context) are PR6+ candidates, each needing its own seam plan
