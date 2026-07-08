@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from alpha_lab import market_context
 from alpha_lab import service as service_mod
 from alpha_lab import live_sources
 from alpha_lab.service import AlphaLabService
@@ -91,6 +92,10 @@ def test_yahoo_price_disabled_via_env(monkeypatch):
 
 def test_validation_price_uses_yahoo_when_polygon_unavailable(svc, monkeypatch):
     # Polygon returns no key; Yahoo provides the price; Alpaca never consulted.
-    _patch_snapshot(monkeypatch, {"status": "disabled", "reason": "no key"})
-    monkeypatch.setattr(service_mod, "fetch_yahoo_price", lambda ticker: {"status": "ok", "last_price": 88.0})
+    # Patches target market_context since PR6 moved the quote chain there
+    # (declared retarget — assertions unchanged; the service method delegates).
+    monkeypatch.setattr(market_context, "fetch_polygon_intraday",
+                        lambda ticker: {"status": "disabled", "reason": "no key"})
+    monkeypatch.setattr(market_context, "fetch_yahoo_price",
+                        lambda ticker: {"status": "ok", "last_price": 88.0})
     assert svc._validation_price("PLTR") == 88.0

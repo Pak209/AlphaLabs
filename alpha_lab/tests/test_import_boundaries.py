@@ -216,6 +216,10 @@ ALLOWED_PAPER_TRADER_BRIDGES = {
     "alpha_lab.scheduler",        # orchestration: inbox processing job
     "alpha_lab.options_selector", # execution adapter use: contract quotes
     "alpha_lab.portfolio",        # reads RiskConfig for exposure context
+    # PR6 (Phase 2): validation_price moved verbatim out of service together
+    # with its Alpaca quote fallback — the same bridge service always had,
+    # relocated. Direction remains the allowed one (alpha_lab -> paper_trader).
+    "alpha_lab.market_context",   # quote fallback: AlpacaClient last-trade read
 }
 
 

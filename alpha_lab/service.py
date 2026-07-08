@@ -21,8 +21,9 @@ from .notifications import NotificationCenter, live_execution_enabled
 from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .crypto_signals import btc_signal_from_market
+from .market_context import regular_equity_session_open, safe_market_payload, validation_price
 from .daily_brief import build_daily_market_brief
-from .live_sources import fetch_polygon_intraday, fetch_yahoo_price
+from .live_sources import fetch_polygon_intraday
 from .market_data import (
     CRYPTO_ALLOWLIST,
     CRYPTO_COINS,
@@ -653,8 +654,8 @@ class AlphaLabService:
             return AlphaLabRepository(conn).list_futures_snapshots(limit)
 
     def after_hours_btc(self) -> dict[str, Any]:
-        btc = self._safe_market_payload(get_bitcoin_market)
-        liquidity = self._safe_market_payload(get_liquidity_flows)
+        btc = safe_market_payload(get_bitcoin_market)
+        liquidity = safe_market_payload(get_liquidity_flows)
         crypto_flow = next((group for group in liquidity.get("groups", []) if group.get("name") == "Crypto Majors"), {})
         with connect(self.db_path) as conn:
             repo = AlphaLabRepository(conn)
@@ -814,7 +815,7 @@ class AlphaLabService:
                 skipped += 1
                 signal_logs.append(self._crypto_signal_log(canonical, reason="per-symbol cooldown active"))
                 continue
-            market = self._safe_market_payload(lambda t=ticker: get_crypto_market(t))
+            market = safe_market_payload(lambda t=ticker: get_crypto_market(t))
             if market.get("status") not in {None, "ok"}:
                 unavailable += 1
                 signal_logs.append(
@@ -1791,12 +1792,6 @@ class AlphaLabService:
             "paper_eligibility_reason": "; ".join(reasons),
         }
 
-    def _regular_equity_session_open(self) -> bool:
-        now = datetime.now(ZoneInfo("America/New_York"))
-        if now.weekday() >= 5:
-            return False
-        return time(9, 30) <= now.time() < time(16, 0)
-
     def _log_execution_attempt(
         self,
         idea_id: int,
@@ -1861,30 +1856,9 @@ class AlphaLabService:
         return None
 
     def _validation_price(self, ticker: str) -> float | None:
-        """Best-effort live quote for signal validation; never uses simulated prices.
-
-        Tries Polygon (needs a key), then Yahoo Finance (keyless, works on
-        networks that block the broker API), then Alpaca. The Yahoo fallback
-        means trade levels still populate when Polygon is unconfigured and Alpaca
-        is unreachable (e.g. restrictive school/campus Wi-Fi).
-        """
-        snap = fetch_polygon_intraday(ticker)
-        if snap.get("status") == "ok":
-            price = snap.get("last_price")
-            if isinstance(price, (int, float)) and price > 0:
-                return float(price)
-        yahoo = fetch_yahoo_price(ticker)
-        if yahoo.get("status") == "ok":
-            price = yahoo.get("last_price")
-            if isinstance(price, (int, float)) and price > 0:
-                return float(price)
-        try:
-            credentials = load_credentials_from_env()
-            price = AlpacaClient(credentials).get_latest_trade_price(ticker)
-            return float(price) if price else None
-        except Exception:
-            return None
-
+        # Delegate kept monkeypatchable for tests; the quote chain lives in
+        # market_context.validation_price (Phase 2 PR6).
+        return validation_price(ticker)
     def _initial_signal_evaluation(self, idea: dict[str, Any], alert_price: float | None = None) -> dict[str, Any]:
         confidence = float(idea.get("confidence") or 0)
         return {
@@ -1949,16 +1923,10 @@ class AlphaLabService:
         try:
             broker = self._broker(dry_run=True)
             if isinstance(broker, SimulatedPaperBroker) and not broker.market_open_explicit:
-                return self._regular_equity_session_open()
+                return regular_equity_session_open()
             return bool(broker.get_clock().get("is_open"))
         except Exception:
             return False
-
-    def _safe_market_payload(self, fn) -> dict[str, Any]:
-        try:
-            return fn()
-        except Exception as exc:
-            return {"status": "unavailable", "error": str(exc)}
 
     def _btc_signal_from_market(self, btc: dict[str, Any]) -> dict[str, Any]:
         # Delegate kept monkeypatchable for the crypto-scanner tests; the pure
