@@ -3612,3 +3612,28 @@ Phase 2 PR7 implemented on branch refactor/p2-market-context-repo-tier per the a
 
 ### Next Recommended Task
 Human: review/merge PR7, then decide: pause Phase 2 here (market-context complete, service.py down 352 LOC from 2,459) or plan the scanning-cluster seam with Codex coordination
+
+
+## 2026-07-08 00:23 PT — Claude
+
+Branch: main
+Commit: none
+Working Tree: modified
+
+### Summary
+Phase 2 PR8 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR7 merged, main at 3e5284a). Scanning cluster mapped into three tiers. Tier A (PR8 scope): the four pure summary-vocabulary builders - _scanner_summary, _crypto_scanner_summary (composes the first), _crypto_signal_log, _catalyst_source_accounting - zero self-state grep-verified, zero test monkeypatches. These emit the scanner_runs payload contract that the waterfall's pre_idea_skips, agent-status, and crypto signal_logs all parse, so extraction turns an implicit four-private-method contract into a named module with value-pinned shapes. Key design decision: service keeps all four as one-line delegates NOT for monkeypatch preservation (nothing patches them) but for Codex-conflict avoidance - PR8 touches zero lines inside any poll body, giving zero merge surface against concurrent Codex work; delegate retirement is a later coordinated cleanup. Tier B (thin DB accessors + cooldown/cap constants) deferred as a PR9 candidate using the same trick. Tier C (the poll/test orchestrators): recommended NEVER extracted in Phase 2 - public, PINNED_SURFACE-frozen, scheduler-called, Codex-active, and the handbook deliberately places complexity in orchestration; any future move requires an explicit human-declared Codex freeze window. Protection: commit-A value-pins of the exact summary dicts called through the service methods (green after the move via delegates, no retargeting). Risks: purity re-verified at implementation with a drop-and-document rule if any helper proves impure. Rollback: single revert, no call sites touched anywhere.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep measurement of scanning-cluster methods, helper purity, and test patch surface
+
+### Results
+- Plan section written; no code changed; suite last known green at 562
+
+### Risks / Blockers
+- None new; plan doc uncommitted, rides the PR8 branch as before
+
+### Next Recommended Task
+Human: approve PR8 scope, then implementation proceeds (branch refactor/p2-scanning-vocabulary)

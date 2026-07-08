@@ -498,6 +498,75 @@ After PR7 the market-context seam is DONE; the next Phase 2 candidate is the
 scanning cluster (highest Codex churn — needs coordination) or a deliberate
 pause of Phase 2.
 
+---
+
+# PR8 plan — scanning-cluster seam, slice 1: summary vocabulary (added 2026-07-08; PR1–PR7 merged)
+
+The scanning cluster is the **highest-risk seam in Phase 2** — not for
+technical reasons but for coordination ones: the poll bodies are the most
+Codex-active region of `service.py` (the crypto_24_7 rewrite landed there),
+and the orchestrators are public, `PINNED_SURFACE`-frozen, and
+scheduler-called. The plan is therefore shaped around one principle:
+**PR8 touches zero lines inside any poll body.**
+
+## Cluster tiers (measured)
+
+| Tier | Members | Status |
+|---|---|---|
+| **A — pure summary vocabulary** | `_scanner_summary`, `_crypto_scanner_summary` (composes A), `_crypto_signal_log`, `_catalyst_source_accounting` | **PR8**: pure dict builders, zero self-state (grep-verified), no test monkeypatches |
+| B — thin DB accessors | `_record_scanner_run`, `_recent_catalyst_theses`, `_open_crypto_position_symbols`, `_crypto_symbols_in_cooldown`, `_crypto_ideas_created_today` + cooldown/cap constants | deferred (PR9 candidate, same delegate trick) |
+| C — orchestration bodies | `poll_live_catalysts`, `poll_crypto_24_7` / `poll_weekend_crypto`, `catalyst_intelligence`, `test_trending_strategies`, `import_and_test`, `import_daily_brief_and_test`, `test_new_ideas` | **recommended: never extracted in Phase 2.** Public + pinned + scheduler-called + Codex-active; the handbook places complexity in orchestration deliberately. Any future move needs an explicit human-declared Codex freeze window. |
+
+## PR8 scope: Tier A → `alpha_lab/scanning.py`, delegates kept for conflict avoidance
+
+The four builders move verbatim as module functions; **the service keeps all
+four as one-line delegates** — not for monkeypatch preservation this time
+(nothing patches them) but so the poll bodies are byte-untouched: zero merge
+surface against concurrent Codex work. Delegate retirement is a later,
+coordinated cleanup.
+
+Why Tier A matters beyond LOC: these builders emit the `scanner_runs`
+payload contract that downstream readers parse — the waterfall's
+`pre_idea_skips` (`candidates_found`, `top_rejection_reasons`), agent-status,
+and the crypto dashboard's `signal_logs`. Extracting them makes the contract
+a named module with value-pinned shapes instead of four private methods.
+
+## Test protection
+
+- **Commit A (before the move)** — value-pin tests asserting the exact
+  summary dicts: `_scanner_summary` with reasons/dedupe counts (the
+  `top_rejection_reasons` ordering is what the waterfall golden's seed
+  mimics), `_crypto_scanner_summary` composition incl. `signal_logs`
+  attachment, `_crypto_signal_log` row shape, `_catalyst_source_accounting`
+  on a providers payload. Called through the service methods; still green
+  after the move via the delegates — no retargeting needed.
+- Existing integration coverage: crypto-scanner tests assert stored
+  `top_rejection_reasons` payloads end-to-end; waterfall golden consumes the
+  same shapes.
+
+## Risks
+
+1. **Purity assumption** — `_crypto_scanner_summary` composes
+   `_scanner_summary`; both move together, composition preserved in-module.
+   Full-body purity re-verified at implementation before cutting.
+2. **Contract drift** — the summary dicts are parsed by the waterfall; the
+   value-pins make any shape change loud.
+3. **Scope creep** — Tier B's DB accessors and ANY poll-body line are out;
+   if a helper turns out to be impure at implementation, it is dropped from
+   PR8 and documented, not adapted.
+
+## Rollback
+
+Single revert: one module, four delegates, no call-site or contract changes
+anywhere.
+
+## Exact stopping point
+
+PR8 = `scanning.py` (four functions) + four delegates + value-pin tests.
+Expected diff ≈ +140/−120 (mostly moved lines) plus ~80 test lines. **Stop.**
+Not in PR8: Tier B, any poll-body edit, delegate retirement, Tier C ever
+(absent an explicit new decision).
+
 ## 9. Phase 2 sequence after PR1 (each its own small PR)
 
 1. **PR2** — decompose `build_rejection_waterfall` internals into
