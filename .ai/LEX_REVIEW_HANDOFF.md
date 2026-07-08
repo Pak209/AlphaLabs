@@ -3236,3 +3236,83 @@ Phase 1 (test frontier from CODEBASE_HEALTH_AUDIT P1) implemented on branch test
 
 ### Next Recommended Task
 Phase 2 (behavior-frozen refactors) is next per the audit: service.py split guarded by characterization tests; needs human go-ahead since it touches the god object
+
+
+## 2026-07-07 20:08 PT — Claude
+
+Branch: main (unverifiable — git broken, see Risks)
+Commit: none
+Working Tree: modified (docs/PHASE2_PLAN.md added; uncommittable until git is fixed)
+
+### Summary
+Phase 2 planning only (docs/PHASE2_PLAN.md); nothing implemented. Chosen first seam: extract rejection_waterfall plus the _LEGACY_CLAUSE_GATES constant from service.py into a new flat alpha_lab/waterfall.py exposing build_rejection_waterfall(db_path, limit), with a two-line service delegate preserving the public signature. Evidence: #2 complexity hotspot (195 LOC / 54 branches) but couples to the class through only self.db_path and one constant (grep-verified); read-only aggregation, so a botched move cannot alter trading behavior; sibling diagnostics modules already follow the flat build_*(db_path) pattern; characterization suite already pins the golden payload shape and method signature; region has Claude-only history. PR1 scope: golden-VALUE fixture test first, then verbatim move + delegate — no decomposition, no caller changes, no key renames. Rollback: single revert, zero call-site migration. Follow-on: waterfall decomposition under the golden test, report_io extraction, APIRouter split, service clusters with execution last. NOTE: entry appended via shell because the append helper (python3) and git are both license-blocked.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep coupling analysis of rejection_waterfall (self-refs, callers, characterization coverage)
+- git --version and python3 (both fail, exit 69: un-accepted Xcode/CLT license)
+
+### Results
+- Plan document written; suite last known green at 533; no runtime code touched.
+
+### Risks / Blockers
+- OPS INCIDENT: the Xcode/CLT license prompt (likely from a recent update) breaks ALL CLT tools machine-wide — git AND python3 exit 69. The dashboard/scheduler run on CLT Python via launchd KeepAlive: they keep running now, but ANY respawn will crash-loop until the license is accepted. Run: sudo xcodebuild -license accept
+
+### Next Recommended Task
+Human: sudo xcodebuild -license accept IMMEDIATELY (service-availability risk), then verify services with the diagnose script, then approve PR1 scope per docs/PHASE2_PLAN.md.
+
+
+## 2026-07-07 20:09 PT — Claude
+
+Branch: main (unverifiable — git broken)
+Commit: none
+Working Tree: modified
+
+### Summary
+Correction to the previous entry's risk assessment: service respawns are NOT at risk. Both run_dashboard.sh and run_scheduler.sh exec .venv/bin/python, which resolves to the CLT framework binary directly and still works (verified: exit 0, and dashboard /api/health 200). The license breakage is scoped to the /usr/bin CLT shims — git and /usr/bin/python3 — which blocks commits/pushes/deploys and the handoff helper, but not the running platform or its KeepAlive respawns.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- .venv/bin/python --version (works); grep of launchd exec lines; /api/health probe (200)
+
+### Results
+- Incident scope narrowed: dev tooling blocked, runtime unaffected.
+
+### Risks / Blockers
+- git and /usr/bin/python3 still exit 69 until sudo xcodebuild -license accept is run.
+
+### Next Recommended Task
+Human: accept the Xcode license, then approve Phase 2 PR1 scope per docs/PHASE2_PLAN.md.
+
+
+## 2026-07-07 20:52 PT — Claude
+
+Branch: refactor/p2-extract-waterfall
+Commit: 1226bba
+Working Tree: clean
+
+### Summary
+Phase 2 PR1 implemented per docs/PHASE2_PLAN.md on branch refactor/p2-extract-waterfall. Commit A: golden-value characterization test (test_waterfall_golden.py) seeding a deterministic DB via raw SQL - structured accepted/enforced-rejection-with-near-miss/advisory-alpha-failure/submitted rows, one legacy free-text rejection, scanner-run summary, one paper trade - and deep-comparing the COMPLETE waterfall report dict (generated_at excluded) against an embedded golden. Commit B: verbatim extraction of rejection_waterfall plus _LEGACY_CLAUSE_GATES into new alpha_lab/waterfall.py as build_rejection_waterfall(db_path, limit) with LEGACY_CLAUSE_GATES module constant; only mechanical substitutions (self.db_path -> parameter, class constant -> module constant); AlphaLabService.rejection_waterfall retained as a two-line delegate with the identical signature and a docstring pointing at the extraction. Zero caller changes (api.py, diagnose script, waterfall_snapshot all still call the service method); import-boundary contracts untouched (alpha_lab-internal move); gate names, reason parsing, telemetry shape, and public surface preserved (PINNED_SURFACE and golden shape tests pass unmodified). service.py reduced 2,459 -> 2,229 LOC. Also committed on this branch: docs/PHASE2_PLAN.md and the two journal entries from planning (incl. the Xcode license incident, since resolved by the human). Stopped after PR1 as instructed - no decomposition, no report_io, no router split.
+
+### Files Modified
+- alpha_lab/waterfall.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_waterfall_golden.py
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- .venv/bin/python scripts/diagnose_trading_pipeline.py (waterfall section smoke against production DB)
+
+### Results
+- 534 tests passed (533 prior + 1 golden); diagnose waterfall renders identically (1191 audit rows, 64 structured); characterization and import-boundary suites untouched
+
+### Risks / Blockers
+- None beyond standard review; the golden test now pins the full output contract, so PR2's internal decomposition must keep it green without edits
+
+### Next Recommended Task
+Human: review/merge PR1, then approve PR2 (decompose build_rejection_waterfall internals under the golden test) per docs/PHASE2_PLAN.md sequence
