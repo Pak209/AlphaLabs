@@ -3236,3 +3236,54 @@ Phase 1 (test frontier from CODEBASE_HEALTH_AUDIT P1) implemented on branch test
 
 ### Next Recommended Task
 Phase 2 (behavior-frozen refactors) is next per the audit: service.py split guarded by characterization tests; needs human go-ahead since it touches the god object
+
+
+## 2026-07-07 20:08 PT — Claude
+
+Branch: main (unverifiable — git broken, see Risks)
+Commit: none
+Working Tree: modified (docs/PHASE2_PLAN.md added; uncommittable until git is fixed)
+
+### Summary
+Phase 2 planning only (docs/PHASE2_PLAN.md); nothing implemented. Chosen first seam: extract rejection_waterfall plus the _LEGACY_CLAUSE_GATES constant from service.py into a new flat alpha_lab/waterfall.py exposing build_rejection_waterfall(db_path, limit), with a two-line service delegate preserving the public signature. Evidence: #2 complexity hotspot (195 LOC / 54 branches) but couples to the class through only self.db_path and one constant (grep-verified); read-only aggregation, so a botched move cannot alter trading behavior; sibling diagnostics modules already follow the flat build_*(db_path) pattern; characterization suite already pins the golden payload shape and method signature; region has Claude-only history. PR1 scope: golden-VALUE fixture test first, then verbatim move + delegate — no decomposition, no caller changes, no key renames. Rollback: single revert, zero call-site migration. Follow-on: waterfall decomposition under the golden test, report_io extraction, APIRouter split, service clusters with execution last. NOTE: entry appended via shell because the append helper (python3) and git are both license-blocked.
+
+### Files Modified
+- docs/PHASE2_PLAN.md
+
+### Commands / Tests Run
+- grep coupling analysis of rejection_waterfall (self-refs, callers, characterization coverage)
+- git --version and python3 (both fail, exit 69: un-accepted Xcode/CLT license)
+
+### Results
+- Plan document written; suite last known green at 533; no runtime code touched.
+
+### Risks / Blockers
+- OPS INCIDENT: the Xcode/CLT license prompt (likely from a recent update) breaks ALL CLT tools machine-wide — git AND python3 exit 69. The dashboard/scheduler run on CLT Python via launchd KeepAlive: they keep running now, but ANY respawn will crash-loop until the license is accepted. Run: sudo xcodebuild -license accept
+
+### Next Recommended Task
+Human: sudo xcodebuild -license accept IMMEDIATELY (service-availability risk), then verify services with the diagnose script, then approve PR1 scope per docs/PHASE2_PLAN.md.
+
+
+## 2026-07-07 20:09 PT — Claude
+
+Branch: main (unverifiable — git broken)
+Commit: none
+Working Tree: modified
+
+### Summary
+Correction to the previous entry's risk assessment: service respawns are NOT at risk. Both run_dashboard.sh and run_scheduler.sh exec .venv/bin/python, which resolves to the CLT framework binary directly and still works (verified: exit 0, and dashboard /api/health 200). The license breakage is scoped to the /usr/bin CLT shims — git and /usr/bin/python3 — which blocks commits/pushes/deploys and the handoff helper, but not the running platform or its KeepAlive respawns.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- .venv/bin/python --version (works); grep of launchd exec lines; /api/health probe (200)
+
+### Results
+- Incident scope narrowed: dev tooling blocked, runtime unaffected.
+
+### Risks / Blockers
+- git and /usr/bin/python3 still exit 69 until sudo xcodebuild -license accept is run.
+
+### Next Recommended Task
+Human: accept the Xcode license, then approve Phase 2 PR1 scope per docs/PHASE2_PLAN.md.
