@@ -4,8 +4,9 @@ Written 2026-07-08. Human decisions already made: (1) automate options,
 (2) the duplicate gate for option signals checks **option positions only**,
 (3) LEAPS DTE parameterization acceptable, (4) Alpaca entitlement verified —
 **paper account has options_trading_level 3, $91.8K options buying power**.
-This plan turns those decisions into protocol-compliant PRs. Nothing here is
-implemented yet; each PR lands only on explicit approval.
+Status 2026-07-08: **PR-A and PR-B implemented** on feat/options-automation
+(stacked on feat/yahoo-news-source) after explicit approval. PR-C and the
+arming PR remain unimplemented pending shadow evidence.
 
 ## Current state (measured)
 

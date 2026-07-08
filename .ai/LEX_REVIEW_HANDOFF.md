@@ -3717,3 +3717,34 @@ Wrote docs/OPTIONS_AUTOMATION_PLAN.md (plan only, awaiting approval) turning the
 
 ### Next Recommended Task
 Human: approve PR-A (and optionally PR-B) to begin; separately apply the CATALYST_WATCHLIST + YAHOO_NEWS_ENABLED env changes and restart agents
+
+
+## 2026-07-08 13:56 PT — Claude
+
+Branch: feat/options-automation
+Commit: a8fb41a
+Working Tree: clean
+
+### Summary
+Implemented options automation PR-A and PR-B on branch feat/options-automation (stacked on feat/yahoo-news-source) after explicit human approval; ALSO restarted both LaunchAgents at human request to pick up the .env changes (CATALYST_WATCHLIST 26 symbols incl. energy sleeve, YAHOO_NEWS_ENABLED=true) - verified post-restart: dashboard 200, scheduler PID 35567, dashboard PID 35574, live radar shows 26-symbol watchlist and Yahoo Finance News ok with 220 items. PR-A: duplicate gate for OPTION signals now consults option positions only via an OCC-suffix matcher (prefix-collision safe, e.g. ticker A vs AAPL contract tested); equity/crypto semantics byte-identical; gate name/reason/trace unchanged; unblocks the daily PLTR options validation which will now proceed to the unchanged alpha gate. PR-B: ALPHALAB_OPTIONS_AUTOMATION=off|shadow|on (default off) - shadow records the v1 routing verdict (tier==high_conviction then ATM selection attempt) as enforced=False option_routing records in the gate trace for accepted equity decisions, zero order changes in any mode; 'on' DELIBERATELY behaves as shadow until the arming PR so an env edit alone cannot start routing (tested); selection failures fully contained. 579 tests passed (570 + 4 PR-A + 5 PR-B). NOTE: services currently run the feature-branch working tree; merge feat/yahoo-news-source then feat/options-automation promptly so main matches the running code.
+
+### Files Modified
+- paper_trader/decision_engine.py
+- paper_trader/tests/test_decision_engine.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_options_automation.py
+- docs/OPTIONS_AUTOMATION_PLAN.md
+
+### Commands / Tests Run
+- launchctl kickstart -k (scheduler + dashboard, human-approved)
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- live radar verification post-restart
+
+### Results
+- 579 tests passed; agents restarted healthy; watchlist + Yahoo feed live in production
+
+### Risks / Blockers
+- Working tree = feature branch until PRs merge (services import from it on respawn); set ALPHALAB_OPTIONS_AUTOMATION=shadow only after merge+restart to start the evidence clock cleanly
+
+### Next Recommended Task
+Human: merge feat/yahoo-news-source PR then open/merge feat/options-automation PR; set ALPHALAB_OPTIONS_AUTOMATION=shadow in .env and restart to begin the >=5-session shadow evidence period

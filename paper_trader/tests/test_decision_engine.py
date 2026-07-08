@@ -224,3 +224,48 @@ def test_gate_context_captures_broker_state_inputs(tmp_path: Path):
     # Behavior unchanged: same rejection reasons as before instrumentation.
     assert "duplicate position already open" in decision.reasons
     assert "max daily drawdown reached" in decision.reasons
+
+
+def option_contract(symbol="NVDA260821C00180000", cost=300.0):
+    return {"contract_symbol": symbol, "estimated_cost_usd": cost}
+
+
+def test_option_signal_not_blocked_by_equity_position(tmp_path: Path):
+    # PR-A: holding NVDA shares no longer blocks a defined-risk NVDA option.
+    broker = FakeBroker(positions=[{"symbol": "NVDA"}])
+    decision = evaluate_signal(
+        signal(asset_type="option"), config(), broker, AuditLog(tmp_path / "log.jsonl"),
+        dry_run=True, option=option_contract(),
+    )
+    assert decision.accepted is True
+    assert decision.order_payload["symbol"] == "NVDA260821C00180000"
+
+
+def test_option_signal_blocked_by_option_position_on_same_underlying(tmp_path: Path):
+    broker = FakeBroker(positions=[{"symbol": "NVDA260821C00180000"}])
+    decision = evaluate_signal(
+        signal(asset_type="option"), config(), broker, AuditLog(tmp_path / "log.jsonl"),
+        dry_run=True, option=option_contract("NVDA260918P00170000"),
+    )
+    assert decision.accepted is False
+    assert "duplicate position already open" in decision.reasons
+
+
+def test_equity_signal_unaffected_by_option_position(tmp_path: Path):
+    # Pre-existing semantics preserved: an option position never blocked equity.
+    broker = FakeBroker(positions=[{"symbol": "NVDA260821C00180000"}])
+    decision = evaluate_signal(signal(), config(), broker, AuditLog(tmp_path / "log.jsonl"), dry_run=True)
+    assert decision.accepted is True
+
+
+def test_option_duplicate_does_not_false_match_prefix_tickers(tmp_path: Path):
+    # 'A' option signal must not match an AAPL contract via startswith.
+    broker = FakeBroker(positions=[{"symbol": "AAPL260821C00180000"}])
+    decision = evaluate_signal(
+        signal(ticker="A", asset_type="option"),
+        RiskConfig(min_confidence=0.75, max_position_size_usd=500, max_equity_pct_per_trade=0.02,
+                   max_trades_per_day=5, max_open_positions=3, approved_tickers={"A"},
+                   stop_loss_pct=0.04, take_profit_pct=0.08, max_daily_drawdown_pct=0.03),
+        broker, AuditLog(tmp_path / "log.jsonl"), dry_run=True, option=option_contract("A260821C00050000", 90.0),
+    )
+    assert decision.accepted is True
