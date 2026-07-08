@@ -3478,3 +3478,30 @@ Phase 2 PR5 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR4 merged, main
 
 ### Next Recommended Task
 Human: approve PR5 scope, then implementation proceeds (branch refactor/p2-crypto-signals)
+
+
+## 2026-07-07 23:05 PT — Claude
+
+Branch: refactor/p2-crypto-signals
+Commit: 100df43
+Working Tree: clean
+
+### Summary
+Phase 2 PR5 implemented on branch refactor/p2-crypto-signals per the approved plan. Commit A: value-pin characterization (test_crypto_signals_golden.py) asserting the EXACT signal dicts - full thesis/catalyst/invalidation strings and price formatting - for three payload shapes: bias derived from EMA (bullish), explicit bearish with missing support exercising fallback levels, and neutral with no indicators exercising n/a formatting. Commit B: new alpha_lab/crypto_signals.py (typing-only imports, zero new graph edges) with btc_signal_from_market public and the four level/format helpers private, all moved verbatim including the harmless unused name local; AlphaLabService._btc_signal_from_market reduced to a one-line delegate, kept deliberately because two crypto-scanner tests monkeypatch it on the instance - both pass unmodified. The four helpers had no other callers (grep-verified) and were deleted from the class. Verification: 551 tests passed (548 + 3); zero leftover helper references in service.py; service.py 2,229 -> 2,165 LOC. Constraints honored: no thesis/invalidation/catalyst text, dedupe, scanner, I/O-tier, repo-tier, route, scheduler, broker, scoring, telemetry, config, or schema changes. Stopped after PR5.
+
+### Files Modified
+- alpha_lab/crypto_signals.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_crypto_signals_golden.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 551 tests passed; value-pin goldens green through the delegate; monkeypatching scanner tests unmodified
+
+### Risks / Blockers
+- None notable; the golden pins full signal text, so any future wording change must be deliberate (update golden + handoff in the same approved commit)
+
+### Next Recommended Task
+Human: review/merge PR5. Remaining market-context tiers (I/O: validation price + market-open; repo: regime/briefing context) are PR6+ candidates, each needing its own seam plan
