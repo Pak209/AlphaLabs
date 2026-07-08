@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from alpha_lab.service import AlphaLabService
+from alpha_lab.report_io import write_json_report
 from scripts.diagnose_trading_pipeline import load_local_env
 
 SNAPSHOT_DIR = ROOT / "alpha_lab" / "data" / "waterfall"
@@ -36,12 +36,8 @@ SNAPSHOT_DIR = ROOT / "alpha_lab" / "data" / "waterfall"
 
 def take_snapshot(service: AlphaLabService, out_dir: Path = SNAPSHOT_DIR) -> Path:
     """Write one timestamped waterfall snapshot; return its path."""
-    out_dir.mkdir(parents=True, exist_ok=True)
     report = service.rejection_waterfall()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-    path = out_dir / f"waterfall-{stamp}.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    return path
+    return write_json_report(report, out_dir, "waterfall")
 
 
 def previous_snapshot(out_dir: Path, current: Path) -> Path | None:

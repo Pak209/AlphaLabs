@@ -12,9 +12,7 @@ Writes a timestamped JSON report to alpha_lab/data/portfolio/.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,17 +20,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from alpha_lab.portfolio import build_portfolio_snapshot
+from alpha_lab.report_io import write_json_report
 from scripts.diagnose_trading_pipeline import load_local_env
 
 REPORT_DIR = ROOT / "alpha_lab" / "data" / "portfolio"
 
 
 def write_report(report: dict, out_dir: Path = REPORT_DIR) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-    path = out_dir / f"portfolio-{stamp}.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    return path
+    return write_json_report(report, out_dir, "portfolio")
 
 
 def print_report(report: dict) -> None:

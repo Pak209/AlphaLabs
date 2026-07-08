@@ -13,9 +13,7 @@ importance ranking, dead inputs, selected-vs-rejected gaps, and gate regret.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,21 +21,18 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from alpha_lab.attribution import feature_attribution_report
+from alpha_lab.report_io import write_json_report, format_number
 from scripts.diagnose_trading_pipeline import load_local_env
 
 REPORT_DIR = ROOT / "alpha_lab" / "data" / "attribution"
 
 
 def write_report(report: dict, out_dir: Path = REPORT_DIR) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-    path = out_dir / f"attribution-{stamp}.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    return path
+    return write_json_report(report, out_dir, "attribution")
 
 
 def _fmt(value, pattern="{:+.3f}") -> str:
-    return pattern.format(value) if isinstance(value, (int, float)) else "-"
+    return format_number(value, pattern)
 
 
 def print_report(report: dict) -> None:

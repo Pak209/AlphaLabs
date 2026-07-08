@@ -20,9 +20,7 @@ shows the comparison table.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,17 +28,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from alpha_lab.replay import load_scenarios_file, run_replay
+from alpha_lab.report_io import format_number, write_json_report
 from scripts.diagnose_trading_pipeline import load_local_env
 
 REPORT_DIR = ROOT / "alpha_lab" / "data" / "replay"
 
 
 def write_report(report: dict, out_dir: Path = REPORT_DIR) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-    path = out_dir / f"replay-{stamp}.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    return path
+    return write_json_report(report, out_dir, "replay")
 
 
 def print_report(report: dict) -> None:
@@ -59,7 +54,7 @@ def print_report(report: dict) -> None:
         sel = m["selected"]
 
         def fmt(value, pattern="{:.2f}") -> str:
-            return pattern.format(value) if isinstance(value, (int, float)) else "-"
+            return format_number(value, pattern)
 
         print(f"  {result['scenario']['name'][:22]:22s} {m['n_selected']:8d} "
               f"{fmt((m['selection_rate'] or 0) * 100):>6s} "
