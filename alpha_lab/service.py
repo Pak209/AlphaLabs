@@ -21,6 +21,11 @@ from .notifications import NotificationCenter, live_execution_enabled
 from .options_selector import OptionSelectionError, select_atm_contract
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .crypto_signals import btc_signal_from_market
+from .scanning import (
+    CRYPTO_SCAN_COOLDOWN_MINUTES, MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY,
+    catalyst_source_accounting, crypto_scanner_summary, crypto_signal_log,
+    scanner_summary,
+)
 from .market_context import (
     current_market_regime, latest_briefing_context,
     regular_equity_session_open, safe_market_payload, validation_price,
@@ -66,8 +71,10 @@ FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 
 
 class AlphaLabService:
-    _CRYPTO_SCAN_COOLDOWN_MINUTES = 30
-    _MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY = 24
+    # Single source of truth lives in scanning.py (Phase 2 PR8); the class
+    # attributes remain for the Tier-B DB accessors that read them via self.
+    _CRYPTO_SCAN_COOLDOWN_MINUTES = CRYPTO_SCAN_COOLDOWN_MINUTES
+    _MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY = MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY
 
     def __init__(
         self,
@@ -1517,65 +1524,11 @@ class AlphaLabService:
         except Exception:
             return
 
-    def _crypto_scanner_summary(
-        self,
-        *,
-        candidates_found: int,
-        ideas_persisted: int,
-        rejected: int,
-        skipped: int,
-        reasons: dict[str, int],
-        signal_logs: list[dict[str, Any]],
-        note: str = "",
-    ) -> dict[str, Any]:
-        summary = self._scanner_summary(
-            candidates_found=candidates_found,
-            ideas_persisted=ideas_persisted,
-            rejected=rejected,
-            skipped=skipped,
-            reasons=reasons,
-            dry_run=True,
-            note=note,
-        )
-        summary.update(
-            {
-                "crypto_signal_logs": signal_logs,
-                "allowlist": list(CRYPTO_ALLOWLIST),
-                "cooldown_minutes": self._CRYPTO_SCAN_COOLDOWN_MINUTES,
-                "max_simulated_crypto_ideas_per_day": self._MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY,
-                "safety_gates": {
-                    "dry_run_only": True,
-                    "paper_orders_allowed": False,
-                    "no_shorts": True,
-                    "no_leverage": True,
-                    "duplicate_open_position_check": True,
-                    "per_symbol_cooldown": True,
-                    "max_simulated_crypto_ideas_per_day": self._MAX_SIMULATED_CRYPTO_IDEAS_PER_DAY,
-                },
-            }
-        )
-        return summary
-
-    def _crypto_signal_log(
-        self,
-        symbol: str,
-        *,
-        signal: dict[str, Any] | None = None,
-        reason: str,
-        freshness: str | None = None,
-    ) -> dict[str, Any]:
-        signal = signal or {}
-        return {
-            "symbol": normalize_crypto_symbol(symbol),
-            "catalyst_or_technical_reason": signal.get("catalyst") or signal.get("reason") or reason,
-            "alpha_tier": None,
-            "alpha_composite": None,
-            "source_data_freshness": freshness or signal.get("timestamp") or "",
-            "paper_eligible": False,
-            "paper_eligibility_reason": reason,
-            "safety_reason": reason,
-        }
-
+    def _crypto_scanner_summary(self, **kwargs: Any) -> dict[str, Any]:
+        # Delegate (Phase 2 PR8): keeps the Codex-active poll bodies untouched.
+        return crypto_scanner_summary(**kwargs)
+    def _crypto_signal_log(self, symbol: str, **kwargs: Any) -> dict[str, Any]:
+        return crypto_signal_log(symbol, **kwargs)
     def _open_crypto_position_symbols(self) -> set[str]:
         try:
             positions = self._broker(dry_run=True).get_positions()
@@ -1642,33 +1595,8 @@ class AlphaLabService:
             pass
         return {"futures": futures, "options": options}
 
-    def _scanner_summary(
-        self,
-        *,
-        candidates_found: int,
-        ideas_persisted: int,
-        rejected: int,
-        skipped: int,
-        reasons: dict[str, int],
-        dry_run: bool,
-        note: str = "",
-    ) -> dict[str, Any]:
-        top_reasons = [
-            {"reason": reason, "count": int(count)}
-            for reason, count in sorted(reasons.items(), key=lambda item: item[1], reverse=True)
-            if int(count) > 0
-        ][:5]
-        return {
-            "status": "ok",
-            "candidates_found": max(0, int(candidates_found)),
-            "ideas_persisted": max(0, int(ideas_persisted)),
-            "rejected": max(0, int(rejected)),
-            "skipped": max(0, int(skipped)),
-            "top_rejection_reasons": top_reasons,
-            "dry_run": dry_run,
-            "note": note,
-        }
-
+    def _scanner_summary(self, **kwargs: Any) -> dict[str, Any]:
+        return scanner_summary(**kwargs)
     def _options_preview_watchlist(self, watchlist: list[str] | None = None) -> list[str]:
         raw = watchlist
         if raw is None:
@@ -1682,32 +1610,7 @@ class AlphaLabService:
         return symbols[: max(1, min(len(symbols), int(os.getenv("POLYGON_OPTIONS_PREVIEW_LIMIT", "3") or 3)))]
 
     def _catalyst_source_accounting(self, payload: dict[str, Any]) -> dict[str, Any]:
-        live_status = payload.get("live_status") or {}
-        providers = live_status.get("providers") if isinstance(live_status, dict) else []
-        problems = []
-        responses = 0
-        requests = 0
-        if isinstance(providers, list):
-            for provider in providers:
-                if not isinstance(provider, dict):
-                    continue
-                requests += 1
-                status = str(provider.get("status") or "unknown")
-                if status == "ok":
-                    responses += 1
-                else:
-                    name = provider.get("name", "provider")
-                    reason = provider.get("reason") or provider.get("error") or status
-                    problems.append(f"{name}: {reason}")
-        return {
-            "enabled": payload.get("mode") == "live",
-            "requests_attempted": requests,
-            "responses_received": responses,
-            "raw_items": len(payload.get("catalysts") or []),
-            "candidates_filtered": max(0, len(payload.get("catalysts") or []) - len(payload.get("signals") or [])),
-            "source_problems": problems[:8],
-        }
-
+        return catalyst_source_accounting(payload)
     def _with_business_brief(self, idea: dict[str, Any]) -> dict[str, Any]:
         if idea.get("ticker"):
             return {**idea, "business_brief": get_business_brief(str(idea["ticker"]))}
