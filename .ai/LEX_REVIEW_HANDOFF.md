@@ -3665,3 +3665,30 @@ Phase 2 PR8 implemented on branch refactor/p2-scanning-vocabulary per the approv
 
 ### Next Recommended Task
 Human: review/merge PR8. Phase 2 status: waterfall, report_io, ops router, market-context (3 slices), scanning vocabulary all done - decide whether Tier B/delegate cleanup proceeds or Phase 2 pauses here
+
+
+## 2026-07-08 13:25 PT — Claude
+
+Branch: feat/yahoo-news-source
+Commit: 2288493
+Working Tree: clean
+
+### Summary
+Implemented the Yahoo Finance news source on branch feat/yahoo-news-source per human approval, motivated by the 2026-07-08 war-day finding (zero Iran/Hormuz/oil headlines captured because all vendors are ticker-scoped). New _fetch_yahoo_news in live_sources following the handbook's safe-extension pattern: disabled by default (YAHOO_NEWS_ENABLED=true to activate - zero runtime change until the human sets it), standard provider envelope, per-ticker RSS for the watchlist (capped via YAHOO_NEWS_MAX_SYMBOLS, default 10) plus macro index feeds (YAHOO_NEWS_MACRO_SYMBOLS, default ^GSPC) whose items deliberately carry ticker='' so the classifier routes them to broad_market_mention/low_actionability - captured and archived as catalyst_events, never trade candidates, with an end-to-end test asserting trade_candidate is False for a yields/oil headline. RSS parsing via stdlib ElementTree with the browser UA Yahoo requires; _fetch_rss separated for test substitution. Tests: disabled contract extended to seven providers, no-network fixture updated, parser fixture (ticker + macro rows, RFC822 time), symbol cap, classification guarantee. 570 tests passed; live smoke with the flag returned 40 real items. ALSO verified read-only: Alpaca paper account has options_trading_level 3 with 91.8K options buying power - entitlement is NOT a blocker for options paper trading. CORRECTION recorded: POLYGON_API_KEY is present and working on the runner (live snapshot ok; today's COIN decision recorded price_volume_score 38.0, i.e. real disconfirming data, not neutral) - the earlier claim that PV confirmation was unconfigured was stale.
+
+### Files Modified
+- alpha_lab/live_sources.py
+- alpha_lab/tests/test_live_sources.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- live RSS smoke with flag enabled (40 items); Alpaca account options-field read
+
+### Results
+- 570 tests passed; feature inert until YAHOO_NEWS_ENABLED=true is set by the human
+
+### Risks / Blockers
+- Yahoo RSS is an unofficial feed - rate limits/format can change; the provider degrades to the standard error envelope if it does
+
+### Next Recommended Task
+Human: merge PR, then set YAHOO_NEWS_ENABLED=true (and optionally YAHOO_NEWS_MACRO_SYMBOLS) in .env alongside the CATALYST_WATCHLIST expansion, and restart the launchd agents to pick both up
