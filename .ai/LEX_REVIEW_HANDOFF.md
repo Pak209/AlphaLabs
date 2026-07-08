@@ -3530,3 +3530,32 @@ Phase 2 PR6 planning only (appended to docs/PHASE2_PLAN.md; PR1-PR5 merged, main
 
 ### Next Recommended Task
 Human: approve PR6 scope (note the declared patch-retarget exception), then implementation proceeds (branch refactor/p2-market-context)
+
+
+## 2026-07-07 23:42 PT — Claude
+
+Branch: refactor/p2-market-context
+Commit: 558b88b
+Working Tree: clean
+
+### Summary
+Phase 2 PR6 implemented on branch refactor/p2-market-context per the approved plan (including the declared test patch-retarget exception). New alpha_lab/market_context.py with the three self-free I/O helpers moved verbatim: validation_price (Polygon->Yahoo->Alpaca quote chain), regular_equity_session_open (gains optional now-injection; no-arg production path byte-identical), safe_market_payload. Service edits: _validation_price reduced to a monkeypatchable delegate (test_performance instance patch unaffected); _safe_market_payload and _regular_equity_session_open deleted with four one-line call-site updates (incl. the single-line touch in Codex-authored poll_crypto_24_7 and _equity_market_open's fallback, which stays in service per plan); unused fetch_yahoo_price import pruned while fetch_polygon_intraday remains for the PV gate. Declared exception 1: quote-fallback test retargeted its fetcher patches from the service namespace to market_context, assertions unchanged. Declared exception 2 (caught by the import-boundary contract exactly as designed): ALLOWED_PAPER_TRADER_BRIDGES extended with alpha_lab.market_context - the same Alpaca bridge service always carried, relocated with its function, direction still the allowed alpha_lab -> paper_trader; deliberate contract edit with in-file comment per the contract's own doctrine. New unit tests: session-open boundaries (9:29/9:30/15:59/16:00, weekend) via injected clock, safe_market_payload success/error envelopes, no-arg smoke. Verification: 556 tests passed (551 + 5 new); service.py 2,165 -> 2,133 LOC. Stopped after PR6.
+
+### Files Modified
+- alpha_lab/market_context.py
+- alpha_lab/service.py
+- alpha_lab/tests/test_market_context.py
+- alpha_lab/tests/test_price_volume_feed.py
+- alpha_lab/tests/test_import_boundaries.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 556 tests passed; boundary contract updated deliberately after catching the relocated bridge; all other suites unmodified
+
+### Risks / Blockers
+- None notable; the bridge allowlist now documents market_context's Alpaca dependency explicitly
+
+### Next Recommended Task
+Human: review/merge PR6 (note the two declared exceptions). PR7 candidate: repo-coupled tier (_current_market_regime, _latest_briefing_context) joining market_context.py - seam plan first
