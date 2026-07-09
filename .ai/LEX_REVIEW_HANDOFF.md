@@ -3886,3 +3886,28 @@ Fixed the iOS PWA error reported from the phone ('response served by service wor
 
 ### Next Recommended Task
 Human: reload the Overview page twice on the phone, then proceed with Add to Home Screen + enable push
+
+
+## 2026-07-08 19:53 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: none
+Working Tree: modified
+
+### Summary
+Staged public access for AlphaLabs at alpha.pak-labs.com via Cloudflare Tunnel - deliberately STOPPED before exposure per the deployment constraints (docs/ALPHA_PUBLIC_ACCESS.md is the runbook). Discovery: dashboard localhost-only on 8787; existing codexpro-mini (mcp-mini) and pakos tunnels untouched. Created a SEPARATE named tunnel 'alphalabs' (bd34f2c8) so AlphaLabs exposure shares no blast radius with MCP; user-domain LaunchAgent com.alphalab.tunnel-alpha (no sudo, KeepAlive, logs to ~/Library/Logs/alphalabs-tunnel.log) running and registered to lax07/lax08; ingress alpha.pak-labs.com -> 127.0.0.1:8787 with 404 fallback. Security review conclusion: GET endpoints are open by design and expose positions/P-L/trades/audit/notification preferences, writes are only bearer-gated, so public DNS without edge auth would leak data and add brute-force surface - therefore DNS is NOT routed (verified hostname does not resolve). Exposure sequence is fail-closed: human creates the Cloudflare Access application first (owner-only email policy, steps in the doc), agent then arms connector-side JWT validation (originRequest.access with the app's AUD tag - origin rejects non-Access traffic even if the edge app is later removed) and only then routes DNS, so the first public request ever received meets Access. App bearer token remains the third layer for writes; tailnet path unaffected. Rollback: delete CNAME / bootout agent / tunnel delete, each independent. Nothing in trading, scheduler, broker, scoring, gates, telemetry, or schema was touched.
+
+### Files Modified
+- docs/ALPHA_PUBLIC_ACCESS.md
+
+### Commands / Tests Run
+- cloudflared tunnel create alphalabs; launchctl bootstrap gui (user agent); connector registration + no-DNS-resolution verification
+
+### Results
+- Connector live, hostname intentionally unresolvable; awaiting Access app AUD tag from human to arm and expose
+
+### Risks / Blockers
+- None while unexposed; the only risky step (DNS) is gated on Access being confirmed and JWT validation armed
+
+### Next Recommended Task
+Human: create the Access application per docs/ALPHA_PUBLIC_ACCESS.md and provide the AUD tag + team domain; agent then arms JWT validation, routes DNS, and runs the verification block
