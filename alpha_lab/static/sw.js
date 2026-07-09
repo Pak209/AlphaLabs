@@ -6,13 +6,13 @@
  * Tailscale. Only same-origin GET requests are cached; POSTs and cross-origin
  * requests pass straight through untouched.
  */
-const CACHE = "alphalab-v15";
+const CACHE = "alphalab-v16";
 
 // App shell precached on install so the very first offline open works.
 const SHELL = [
   "/",
-  "/static/styles.css?v=47",
-  "/static/app.js?v=49",
+  "/static/styles.css?v=48",
+  "/static/app.js?v=50",
   "/static/manifest.webmanifest",
   "/static/icon-192.png",
   "/static/icon-512.png",
@@ -42,11 +42,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Never cache API responses. These carry private operator data — notification
-  // preferences, phone numbers, push subscriptions, alerts, and approval state —
-  // that must not be persisted to the on-disk cache or served stale. Only the
-  // static app shell is cached for offline open; /api/* always hits the network.
-  const isApi = new URL(req.url).pathname.startsWith("/api/");
+  // API requests bypass the service worker entirely: they carry private
+  // operator data (preferences, subscriptions, approvals) that must never be
+  // cached, and if the network is down the APP's own error handling should
+  // report it — an SW-fabricated Response.error() surfaces as the cryptic
+  // "response served by service worker is an error" toast on iOS (seen
+  // 2026-07-08 when a reload raced a dashboard restart).
+  if (new URL(req.url).pathname.startsWith("/api/")) {
+    return;
+  }
+  const isApi = false;
 
   event.respondWith(
     fetch(req)

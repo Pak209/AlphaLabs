@@ -3860,3 +3860,104 @@ Extended feat/lex-summary-and-review-chrome with two-way navigation between the 
 
 ### Next Recommended Task
 Human: merge the feat/lex-summary-and-review-chrome PR (now includes lex summary, live bell/menu, and cross-navigation); then install Overview as the Home Screen PWA and enable push in Settings->Notifications
+
+
+## 2026-07-08 19:27 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: 007a73d
+Working Tree: clean
+
+### Summary
+Fixed the iOS PWA error reported from the phone ('response served by service worker is an error') on feat/lex-summary-and-review-chrome. Root cause: reload raced a dashboard restart; the SW intercepted the failed /api fetch and its catch returned Response.error() (uncached API, non-navigation). Fix: /api/* now bypasses the service worker entirely - the app's own error handling reports outages and API data (preferences, subscriptions, approvals) can structurally never enter the SW cache; SHELL cache bumped to alphalab-v16 and index.html asset versions bumped (styles v48, app.js v50) since app.js changed on this branch without a version bump. Dashboard restarted to serve the fix; user needs two reloads (first installs the new SW, skipWaiting+claim activates it) or reopen from Home Screen.
+
+### Files Modified
+- alpha_lab/static/sw.js
+- alpha_lab/static/index.html
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_api.py -q
+
+### Results
+- 20 API tests passed; SW change is client-side only
+
+### Risks / Blockers
+- Any client that cached the broken state may need a second reload for the v16 SW to claim; worst case Settings->Safari->Website Data->remove the tailnet domain
+
+### Next Recommended Task
+Human: reload the Overview page twice on the phone, then proceed with Add to Home Screen + enable push
+
+
+## 2026-07-08 19:53 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: none
+Working Tree: modified
+
+### Summary
+Staged public access for AlphaLabs at alpha.pak-labs.com via Cloudflare Tunnel - deliberately STOPPED before exposure per the deployment constraints (docs/ALPHA_PUBLIC_ACCESS.md is the runbook). Discovery: dashboard localhost-only on 8787; existing codexpro-mini (mcp-mini) and pakos tunnels untouched. Created a SEPARATE named tunnel 'alphalabs' (bd34f2c8) so AlphaLabs exposure shares no blast radius with MCP; user-domain LaunchAgent com.alphalab.tunnel-alpha (no sudo, KeepAlive, logs to ~/Library/Logs/alphalabs-tunnel.log) running and registered to lax07/lax08; ingress alpha.pak-labs.com -> 127.0.0.1:8787 with 404 fallback. Security review conclusion: GET endpoints are open by design and expose positions/P-L/trades/audit/notification preferences, writes are only bearer-gated, so public DNS without edge auth would leak data and add brute-force surface - therefore DNS is NOT routed (verified hostname does not resolve). Exposure sequence is fail-closed: human creates the Cloudflare Access application first (owner-only email policy, steps in the doc), agent then arms connector-side JWT validation (originRequest.access with the app's AUD tag - origin rejects non-Access traffic even if the edge app is later removed) and only then routes DNS, so the first public request ever received meets Access. App bearer token remains the third layer for writes; tailnet path unaffected. Rollback: delete CNAME / bootout agent / tunnel delete, each independent. Nothing in trading, scheduler, broker, scoring, gates, telemetry, or schema was touched.
+
+### Files Modified
+- docs/ALPHA_PUBLIC_ACCESS.md
+
+### Commands / Tests Run
+- cloudflared tunnel create alphalabs; launchctl bootstrap gui (user agent); connector registration + no-DNS-resolution verification
+
+### Results
+- Connector live, hostname intentionally unresolvable; awaiting Access app AUD tag from human to arm and expose
+
+### Risks / Blockers
+- None while unexposed; the only risky step (DNS) is gated on Access being confirmed and JWT validation armed
+
+### Next Recommended Task
+Human: create the Access application per docs/ALPHA_PUBLIC_ACCESS.md and provide the AUD tag + team domain; agent then arms JWT validation, routes DNS, and runs the verification block
+
+
+## 2026-07-08 20:31 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: none
+Working Tree: modified
+
+### Summary
+alpha.pak-labs.com is LIVE with full enforcement, completing the public-access rollout. Human created the Access application; the new Cloudflare UI hides the AUD tag and no CF API credentials exist on the machine, so the AUD was extracted credential-free from the unauthenticated 302 redirect (the 64-hex kid= parameter of the Access login URL = the application audience tag) - documented as a field note. Incident during rollout, caught and fixed: cloudflared tunnel route dns with the tunnel NAME silently routed the CNAME to the default config.yml tunnel (codexpro-mini) instead of alphalabs; harmless (unknown-hostname ingress 404s, verified no exposure) and corrected with explicit UUID + --overwrite-dns; runbook now says always use the UUID. Safe ordering preserved: Access app existed before DNS, so edge enforcement was live from the first resolvable request. Final verification matrix: public /, /api/health, /review, /api/trades all 302 to pak209.cloudflareaccess.com (no app data reachable unauthenticated); connector-side JWT validation armed (teamName pak209, audTag c1a0cdf2...) and connector re-registered; tailnet URL 200 and localhost 200 unaffected. Three auth layers now: edge Access (owner email OTP), connector JWT (fail-closed), app bearer token on writes. No trading/scheduler/broker/scoring/gates/telemetry/schema changes.
+
+### Files Modified
+- docs/ALPHA_PUBLIC_ACCESS.md
+
+### Commands / Tests Run
+- cloudflared tunnel route dns --overwrite-dns <uuid>; launchctl kickstart tunnel-alpha; enforcement matrix curls (302s) + tailnet/localhost 200s
+
+### Results
+- alpha.pak-labs.com enforced end to end; wrong-tunnel CNAME incident corrected with zero exposure
+
+### Risks / Blockers
+- Access session is 30 days for the owner email; anyone else hits the login wall. The PWA for push should remain the tailnet origin (push subscriptions are origin-bound; alpha.pak-labs.com is a separate origin)
+
+### Next Recommended Task
+Human: log in once at https://alpha.pak-labs.com (email OTP) from any device to confirm the full flow; use tailnet origin for the push-PWA install
+
+
+## 2026-07-08 20:44 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: b474b79
+Working Tree: clean
+
+### Summary
+Added scripts/deploy_mini.sh at human request: the one-command deploy for the Mac mini (merge PR on GitHub, then run the script). Behavior: refuses unless on main with clean tracked files; fetch + merge-base ancestry check; fast-forward-only to origin/main (never merges/rebases implicitly); kickstarts scheduler + dashboard; polls /api/health up to 30s; prints safety-status; runs diagnose_trading_pipeline as the handbook-mandated post-deploy verification; prints deployed commit + PIDs + a hard-refresh reminder for the service-worker asset cycle. Guard rails tested live (correctly aborted on the current feature branch). Context recorded for the operator: Tailscale/Cloudflare are network paths only - nothing auto-deploys on merge; the mini currently serves the unmerged feat/lex-summary-and-review-chrome tree, so the first real use is: merge that PR, git switch main on the mini, run the script.
+
+### Files Modified
+- scripts/deploy_mini.sh
+
+### Commands / Tests Run
+- ./scripts/deploy_mini.sh (guard-rail test: aborted on feature branch as designed)
+
+### Results
+- Script in place, executable, branch guard verified; happy path exercises on first real merge
+
+### Risks / Blockers
+- Script restarts the scheduler mid-cadence - safe (cron jobs, KeepAlive) but deploys are best between poll ticks; it deliberately does NOT touch launchd plists, env, or tunnels
+
+### Next Recommended Task
+Human: merge the open feat/lex-summary-and-review-chrome PR, then on the mini: git switch main && ./scripts/deploy_mini.sh - the first scripted deploy
