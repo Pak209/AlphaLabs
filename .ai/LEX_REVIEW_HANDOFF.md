@@ -3757,3 +3757,32 @@ Implemented the human's three decisions from the Polygon-renewal discussion. (1)
 
 ### Next Recommended Task
 Human: merge feat/alpaca-pv-source then feat/exit-management-and-slots, run deploy_mini.sh, add ALPHALAB_EXIT_MANAGEMENT=shadow (or on) to .env and restart; run pv_source_compare.py a few sessions before the next Polygon renewal
+
+
+## 2026-07-09 16:05 PT — Claude
+
+Branch: feat/intel-platform-m1
+Commit: 154d371
+Working Tree: clean
+
+### Summary
+Intelligence Platform kicked off on feat/intel-platform-m1: master plan (docs/INTELLIGENCE_PLATFORM_PLAN.md) + working M1. Architecture: payment-agnostic product layer over the existing pure engines -> separate REST app on :8790 with its own sqlite (keys/usage/payments) -> x402 gateway seam; personal surface (positions/P-L/approvals/preferences/writes) is architecturally absent from the product app, enforced by forbidden-fragment tests. Products live in M1: market-snapshot (0.01), catalysts (0.02, Yahoo-sourced rows filtered from paid output per license posture), daily-brief (0.05), calibration (0.05 - the differentiated one: live gate-telemetry funnel no wrapper API can produce). Gateway: bearer keys (env-seeded + table-backed hashed), per-key sliding-minute rate limit, per-call usage metering with latency, admin rollup endpoint, and INTEL_X402_MODE=demo returning a spec-shaped 402 challenge (base/USDC/price from catalog) as the M3 integration seam - grounded in current ecosystem research (Coinbase CDP facilitator, ~300ms overhead, production precedents like CoinMarketCap at 0.01/call; MCP discovery via mcp.so/Smithery/Glama/PulseMCP + awesome-mcp-servers). Roadmap M1-M6 with exit criteria; GTM and KPIs defined in the plan. 599 tests pass (593+6). OPEN HUMAN DECISIONS blocking real revenue (not blocking M2): data-licensing review of derived-analytics posture, USDC wallet/entity/tax, pricing sign-off, VPS hosting timing. Nothing in the trading system changed; intel DB is separate; app not served anywhere yet.
+
+### Files Modified
+- docs/INTELLIGENCE_PLATFORM_PLAN.md
+- alpha_lab/intel_products.py
+- alpha_lab/intel_api.py
+- alpha_lab/tests/test_intel_platform.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- web research: x402 ecosystem + MCP registries (sources in chat)
+
+### Results
+- 599 tests passed; M1 products + gateway green; platform inert until explicitly served
+
+### Risks / Blockers
+- Do not serve publicly or accept payment before the licensing review and wallet/entity decisions - listed as blocking in the plan
+
+### Next Recommended Task
+Recommended next-highest-ROI: M2 (MCP server + signal-evaluation product + examples repo) - it makes the platform agent-callable end to end while the human works the licensing/wallet decisions in parallel
