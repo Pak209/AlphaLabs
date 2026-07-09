@@ -3911,3 +3911,28 @@ Staged public access for AlphaLabs at alpha.pak-labs.com via Cloudflare Tunnel -
 
 ### Next Recommended Task
 Human: create the Access application per docs/ALPHA_PUBLIC_ACCESS.md and provide the AUD tag + team domain; agent then arms JWT validation, routes DNS, and runs the verification block
+
+
+## 2026-07-08 20:31 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: none
+Working Tree: modified
+
+### Summary
+alpha.pak-labs.com is LIVE with full enforcement, completing the public-access rollout. Human created the Access application; the new Cloudflare UI hides the AUD tag and no CF API credentials exist on the machine, so the AUD was extracted credential-free from the unauthenticated 302 redirect (the 64-hex kid= parameter of the Access login URL = the application audience tag) - documented as a field note. Incident during rollout, caught and fixed: cloudflared tunnel route dns with the tunnel NAME silently routed the CNAME to the default config.yml tunnel (codexpro-mini) instead of alphalabs; harmless (unknown-hostname ingress 404s, verified no exposure) and corrected with explicit UUID + --overwrite-dns; runbook now says always use the UUID. Safe ordering preserved: Access app existed before DNS, so edge enforcement was live from the first resolvable request. Final verification matrix: public /, /api/health, /review, /api/trades all 302 to pak209.cloudflareaccess.com (no app data reachable unauthenticated); connector-side JWT validation armed (teamName pak209, audTag c1a0cdf2...) and connector re-registered; tailnet URL 200 and localhost 200 unaffected. Three auth layers now: edge Access (owner email OTP), connector JWT (fail-closed), app bearer token on writes. No trading/scheduler/broker/scoring/gates/telemetry/schema changes.
+
+### Files Modified
+- docs/ALPHA_PUBLIC_ACCESS.md
+
+### Commands / Tests Run
+- cloudflared tunnel route dns --overwrite-dns <uuid>; launchctl kickstart tunnel-alpha; enforcement matrix curls (302s) + tailnet/localhost 200s
+
+### Results
+- alpha.pak-labs.com enforced end to end; wrong-tunnel CNAME incident corrected with zero exposure
+
+### Risks / Blockers
+- Access session is 30 days for the owner email; anyone else hits the login wall. The PWA for push should remain the tailnet origin (push subscriptions are origin-bound; alpha.pak-labs.com is a separate origin)
+
+### Next Recommended Task
+Human: log in once at https://alpha.pak-labs.com (email OTP) from any device to confirm the full flow; use tailnet origin for the push-PWA install

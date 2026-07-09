@@ -1,7 +1,24 @@
 # alpha.pak-labs.com — public access design & runbook
 
-Created 2026-07-08. Status: **tunnel staged, NOT exposed** — DNS deliberately
-not routed until Cloudflare Access is in place (see "Why this order").
+Created 2026-07-08. Status: **LIVE and enforced** — completed 2026-07-08 after
+the human created the Access application. Final state: edge Access (team
+`pak209`, owner-only email policy) + connector-side JWT validation armed
+(teamName `pak209`, AUD `c1a0cdf2…69a2`) + app bearer token on writes.
+
+Field notes from the rollout (for the next operator):
+1. **AUD without the dashboard/API**: the newer Cloudflare UI hides the AUD
+   tag and no API token exists on this machine — but the unauthenticated 302
+   redirect embeds it as the 64-hex `kid=` parameter of the Access login URL.
+   Extracted from there; no credentials needed.
+2. **cloudflared route-dns gotcha**: `cloudflared tunnel route dns <name> …`
+   silently used the default `~/.cloudflared/config.yml` tunnel (codexpro-mini)
+   instead of the named one — the CNAME briefly pointed at the wrong tunnel
+   (harmless: its ingress 404s unknown hostnames). Fixed with the explicit
+   UUID + `--overwrite-dns`. Always pass the UUID.
+3. Ordering was inverted safely: because the Access app existed BEFORE DNS,
+   edge enforcement was live from the first public request (verified 302 on
+   /, /api/health, /review, /api/trades before anything else); connector JWT
+   was armed minutes later.
 
 ## Discovery (measured)
 
