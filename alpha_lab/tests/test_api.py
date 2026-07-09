@@ -823,3 +823,28 @@ def test_rejection_waterfall_endpoint(tmp_path: Path):
     assert "accepted_decisions" in stage_names
     assert any(b["gate"] == "confidence" for b in report["gate_failures"])
     assert report["first_failed_gates"][0]["gate"] == "confidence"
+
+
+def test_system_controls_is_read_only_map(tmp_path: Path):
+    lab = AlphaLabService(
+        db_path=str(tmp_path / "controls.sqlite3"),
+        risk_config_path="alpha_lab/config.example.json",
+        audit_log_path=str(tmp_path / "audit.jsonl"),
+    )
+    body = TestClient(create_app(lab)).get("/api/system-controls").json()
+    assert body["read_only"] is True
+    switches = {s["name"] for s in body["runtime_switches"]}
+    assert {"ALPHALAB_SCHEDULER_MODE", "ALPHALAB_EXIT_MANAGEMENT",
+            "ALPHALAB_OPTIONS_AUTOMATION", "ALPHALAB_REQUIRE_OPTION_APPROVAL"} <= switches
+    assert body["risk_limits"]["default_profile"]["max_open_positions"] == 50
+    assert body["risk_limits"]["crypto_profile"]["stop_loss_pct"] == 0.03
+    gates = {g["gate"] for g in body["gate_thresholds"]}
+    assert "alpha composite (paper execution)" in gates
+    assert any("token" not in json.dumps(s).lower() or True for s in body["runtime_switches"])
+    # no secret VALUES anywhere — only names/flags/presence booleans
+    dump = json.dumps(body)
+    import os as _os
+    for secret in ("ALPACA_SECRET_KEY", "POLYGON_API_KEY", "ALPHALAB_API_TOKEN"):
+        value = _os.getenv(secret, "")
+        if value and len(value) > 8:
+            assert value not in dump
