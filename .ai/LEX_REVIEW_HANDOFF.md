@@ -3936,3 +3936,28 @@ alpha.pak-labs.com is LIVE with full enforcement, completing the public-access r
 
 ### Next Recommended Task
 Human: log in once at https://alpha.pak-labs.com (email OTP) from any device to confirm the full flow; use tailnet origin for the push-PWA install
+
+
+## 2026-07-08 20:44 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: b474b79
+Working Tree: clean
+
+### Summary
+Added scripts/deploy_mini.sh at human request: the one-command deploy for the Mac mini (merge PR on GitHub, then run the script). Behavior: refuses unless on main with clean tracked files; fetch + merge-base ancestry check; fast-forward-only to origin/main (never merges/rebases implicitly); kickstarts scheduler + dashboard; polls /api/health up to 30s; prints safety-status; runs diagnose_trading_pipeline as the handbook-mandated post-deploy verification; prints deployed commit + PIDs + a hard-refresh reminder for the service-worker asset cycle. Guard rails tested live (correctly aborted on the current feature branch). Context recorded for the operator: Tailscale/Cloudflare are network paths only - nothing auto-deploys on merge; the mini currently serves the unmerged feat/lex-summary-and-review-chrome tree, so the first real use is: merge that PR, git switch main on the mini, run the script.
+
+### Files Modified
+- scripts/deploy_mini.sh
+
+### Commands / Tests Run
+- ./scripts/deploy_mini.sh (guard-rail test: aborted on feature branch as designed)
+
+### Results
+- Script in place, executable, branch guard verified; happy path exercises on first real merge
+
+### Risks / Blockers
+- Script restarts the scheduler mid-cadence - safe (cron jobs, KeepAlive) but deploys are best between poll ticks; it deliberately does NOT touch launchd plists, env, or tunnels
+
+### Next Recommended Task
+Human: merge the open feat/lex-summary-and-review-chrome PR, then on the mini: git switch main && ./scripts/deploy_mini.sh - the first scripted deploy
