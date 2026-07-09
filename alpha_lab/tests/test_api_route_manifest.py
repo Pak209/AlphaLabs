@@ -102,6 +102,7 @@ MANIFEST: list[str] = [
     "GET /api/signals/evaluations",
     "GET /api/stats/strategies",
     "GET /api/stats/strategies/diagnostics",
+    "GET /api/system-controls",
     "GET /api/trades",
     "GET /review",
     "GET /sw.js",
