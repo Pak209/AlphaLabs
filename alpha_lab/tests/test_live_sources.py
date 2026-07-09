@@ -242,3 +242,33 @@ def test_yahoo_respects_symbol_cap(monkeypatch):
     monkeypatch.setattr(ls, "_fetch_rss", lambda url: calls.append(url) or [])
     ls._fetch_yahoo_news(["NVDA", "MSFT", "AMD", "TSLA"])
     assert len(calls) == 2                    # capped, no macro configured
+
+
+def test_alpaca_intraday_parses_snapshot(monkeypatch):
+    monkeypatch.setenv("ALPACA_API_KEY", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.setattr(ls, "_fetch_json", lambda url, **kw: {
+        "latestTrade": {"p": 159.36},
+        "dailyBar": {"c": 159.36, "v": 88711},
+        "prevDailyBar": {"c": 155.0, "v": 152109},
+    })
+    snap = ls.fetch_alpaca_intraday("coin")
+    assert snap["status"] == "ok" and snap["ticker"] == "COIN"
+    assert round(snap["gap_pct"], 4) == round((159.36 - 155.0) / 155.0 * 100, 4)
+    assert round(snap["relative_volume"], 6) == round(88711 / 152109, 6)
+
+
+def test_alpaca_intraday_disabled_without_keys(monkeypatch):
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    monkeypatch.setattr(ls, "_fetch_json", _no_network)
+    assert ls.fetch_alpaca_intraday("COIN")["status"] == "disabled"
+
+
+def test_alpaca_intraday_handles_missing_bars(monkeypatch):
+    monkeypatch.setenv("ALPACA_API_KEY", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.setattr(ls, "_fetch_json", lambda url, **kw: {"latestTrade": {"p": 10.0}})
+    snap = ls.fetch_alpaca_intraday("XYZ")
+    assert snap["status"] == "ok"
+    assert snap["gap_pct"] is None and snap["relative_volume"] is None   # neutral downstream

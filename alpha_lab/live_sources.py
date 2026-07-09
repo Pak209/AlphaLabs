@@ -427,6 +427,49 @@ def fetch_polygon_intraday(ticker: str) -> dict[str, Any]:
         return {"status": "error", "reason": _safe_error(exc)}
 
 
+def fetch_alpaca_intraday(ticker: str) -> dict[str, Any]:
+    """Alpaca-data twin of fetch_polygon_intraday (side-by-side candidate).
+
+    Uses the free IEX-feed stocks snapshot that ships with the paper account:
+    latestTrade + dailyBar + prevDailyBar map 1:1 onto the Polygon snapshot
+    fields, so the envelope is identical and the two sources can be compared
+    or swapped without touching consumers. Caveat measured 2026-07-09: IEX
+    volume is an exchange subset (much smaller absolute numbers than
+    consolidated), but relative_volume is a same-source ratio — the
+    pv_source_compare report quantifies how closely it tracks Polygon before
+    any swap decision.
+    """
+    key = os.getenv("ALPACA_API_KEY", "").strip()
+    secret = os.getenv("ALPACA_SECRET_KEY", "").strip()
+    if not key or not secret:
+        return {"status": "disabled", "reason": "Set ALPACA_API_KEY/ALPACA_SECRET_KEY to enable Alpaca intraday snapshots."}
+    try:
+        url = f"https://data.alpaca.markets/v2/stocks/{ticker.upper()}/snapshot?feed=iex"
+        data = _fetch_json(url, headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret})
+        day = data.get("dailyBar") or {}
+        prev = data.get("prevDailyBar") or {}
+        last = data.get("latestTrade") or {}
+        day_vol = float(day.get("v") or 0)
+        prev_vol = float(prev.get("v") or 0)
+        prev_close = float(prev.get("c") or 0)
+        last_price = float(last.get("p") or day.get("c") or 0)
+        gap_pct = ((last_price - prev_close) / prev_close * 100.0) if prev_close > 0 and last_price > 0 else None
+        relative_volume = (day_vol / prev_vol) if prev_vol > 0 and day_vol > 0 else None
+        return {
+            "status": "ok",
+            "source": "Alpaca IEX snapshot",
+            "ticker": ticker.upper(),
+            "last_price": last_price,
+            "gap_pct": gap_pct,
+            "relative_volume": relative_volume,
+            "day_volume": day_vol,
+            "prev_day_volume": prev_vol,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        return {"status": "error", "reason": _safe_error(exc)}
+
+
 def fetch_yahoo_price(ticker: str) -> dict[str, Any]:
     """Keyless last-price read from Yahoo Finance's public chart endpoint.
 
