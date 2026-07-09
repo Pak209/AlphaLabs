@@ -14,272 +14,36 @@ _Last updated: 2026-07-02_
 ## Current State Summary
 
 > Concise current snapshot — read first; may be refreshed when state materially changes.
+> Refreshed in full 2026-07-09 (prior snapshot was 2026-07-02-era and stale).
 
-## Local Mac Paper Trading Re-Arm — SCHEDULER RESTARTED, DASHBOARD STALE (2026-07-02)
-Per human request, the **current Mac** `.env` paper-mode switches were set for automated paper
-trading: scheduler mode `paper`, automation paper-trading armed, and paper approval requirement
-disabled. Verification from sourced `.env` shows `paper_trades_can_be_triggered_by_scheduler=true`.
-Human then ran `launchctl kickstart -k gui/$(id -u)/com.alphalab.scheduler`; launchd now reports
-`com.alphalab.scheduler` running with a new PID/run count, so the scheduler restart is complete.
-Dashboard API is reachable again, but `/api/safety-status` still reports dry-run/disarmed because
-the dashboard service itself appears to be running with its old pre-change environment. The
-scheduler is nevertheless producing weekend crypto paper-mode attempts: on 2026-07-04 the local
-API showed 73 crypto ideas from `after_hours_btc` and 73 `paper_execution_blocked` audit rows with
-`dry_run=0`; no crypto trades/orders were opened because the alpha gate rejected each candidate
-(`alpha_tier=ignore`, `alpha_composite=40.6`, threshold >=70). Dashboard LaunchAgent status is
-unstable (`spawn scheduled`, last exit code 1) even while an API responds on 127.0.0.1:8787.
-No order path was invoked manually.
+### Where everything lives
+- **Canonical repo:** `/Users/pak/Projects/AlphaLab` on the Mac mini; `main` = origin/main = running services (verified via first scripted deploy, PR #17 merge `2f542d9`).
+- **Deploys:** merge PR on GitHub → `./scripts/deploy_mini.sh` (ff-only pull + agent restarts + health + diagnose verification). Nothing auto-deploys.
+- **Access paths:** tailnet `https://dans-mac-mini.tailc4ac76.ts.net/` (phone PWA + push lives on THIS origin) and public `https://alpha.pak-labs.com` (Cloudflare Tunnel `alphalabs` + Access team `pak209`, owner-email policy, connector JWT armed — see docs/ALPHA_PUBLIC_ACCESS.md). `/` = Overview (full command center), `/review` = Dashboard (mobile).
+- **Services:** user LaunchAgents com.alphalab.{scheduler,dashboard} on 127.0.0.1:8787; venv Python 3.9.6 (EOL — migration is P3).
 
-## Current Branch
-`tooling/codexpro-devspace` (10 commits ahead of `main`, 0 behind).
+### Runtime posture (operator-set)
+- Scheduler **paper mode, automation armed** (human re-arm 2026-07-02): equity/crypto paper-learning UNATTENDED (`ALPHALAB_REQUIRE_PAPER_APPROVAL=false`).
+- **Option orders always require human approval** (push + Approvals UI; default-on `ALPHALAB_REQUIRE_OPTION_APPROVAL`); blocked ideas auto-enqueue for review.
+- **Options automation `shadow`** since 2026-07-08: advisory option_routing records accrue on accepted equity decisions; `on` deliberately behaves as shadow until an arming PR (needs ≥5 shadow sessions + approval).
+- Push notifications: VERIFIED end-to-end post-migration (real URGENT_IDEA delivered to iPhone 2026-07-08). `ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS` may still be set in .env — human to remove after final confirmation.
+- Data: 26-symbol CATALYST_WATCHLIST incl. energy sleeve; Yahoo Finance News enabled (largest feed); POLYGON_API_KEY live and load-bearing for PV confirmation.
 
-## Git Status Summary
-- Committed baseline is **clean** at HEAD `1d329d2`; this protocol/handoff cleanup currently
-  has **uncommitted** docs/tooling edits in flight (the handoff + shared skill files).
-- HEAD: `1d329d2` — docs: add cross-agent handoff contract.
-- `main` / `origin/main`: `366597b` — feat: classify SEC offering filings as bearish catalysts.
-- **Not pushed.** No upstream tracking configured; the 10 ahead commits are local only.
-- Old-Mac runner: on `main` @ `366597b` (= `origin/main`), clean — **verified reachable
-  2026-06-19 00:54 PT**, safety re-verified on-runner later 2026-06-19 (see Runner Access note;
-  re-verify immediately before validation/deploy).
+### Pipeline state (evidence, 2026-07-09)
+- PV confirmation WORKS: ~49 confirmed decisions since 07-01; three confirmed 70+ setups (AVGO 73.9, META 70.7, MSFT 70.1) were blocked ONLY by `duplicate_position` — the 10-slot book with no exits is the #1 bottleneck (portfolio audit B6).
+- Zero paper trades placed yet; gates functioning as designed (near-misses COIN ~60.5; defensive PV blocks on red days).
+- Diagnostics stack: waterfall/replay/attribution/outcomes/portfolio + golden/characterization/boundary test suites; **584+ tests green**; session routine = waterfall_snapshot.py + outcome_report.py after close.
 
-## First-Validation Readiness — code GREEN, approval gate ENABLED (2026-06-19)
-Audited whether AlphaLabs can run the first manual paper validation. **Code paths are sound**
-(manual endpoint, approval gate, Alpaca paper-only enforcement all verified). The old Mac was
-**verified reachable and safe (2026-06-19 00:54 PT):** safe-stabilization mode true, scheduler in
-safe dry-run mode, automation paper-trading not armed, `main` @ `366597b` clean, dashboard +
-scheduler launchd running, DB path consistent.
-1. **Approval requirement now ENABLED.** `ALPHALAB_REQUIRE_PAPER_APPROVAL=true` was set on the
-   runner (`.env` line 15, flipped `false`→`true`, backed up first, only that line changed), and
-   **only `com.alphalab.dashboard` was restarted** — scheduler untouched. Read at `service.py:1753`
-   (`os.getenv`, fail-safe default = required) inside the `place_trade` choke point
-   (`service.py:844`→`1716`). Post-restart verification on the runner: `/api/health` → `ok`,
-   `safe_stabilization_mode: true` still holds, `ALPHALAB_SCHEDULER_MODE=dry_run` and
-   `ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES=false` unchanged. The analyst-assisted approval gate
-   now engages.
-Remaining gates before the first validation: the test must run during equity market hours, and
-old-Mac safety should be re-verified immediately before validation. The dashboard `.env` approval
-change was applied this pass; scheduler mode, automation guard, and launchd were not changed.
+### Open decisions / next actions
+1. **Polygon renewal ($30/mo, due 2026-07-09):** recommendation = keep one month, build free Alpaca-data PV replacement side-by-side, cancel next cycle with parity proof. Canceling now kills equity confirmation.
+2. **Exit management seam plan (B6)** — highest-leverage next PR; converts confirmed setups into actual paper trades.
+3. Options arming PR after ≥5 shadow sessions; PR-C (LEAPS DTE param) after that.
+4. Phase 2 refactors complete through PR8 (service.py 2,459→2,010); scanning Tier B / delegate cleanup needs Codex coordination.
+5. Backtest M0 (bar cache + config snapshots) remains the standing five-year-review priority.
 
-## Runner Access — dev-Mac `./ops` RESTORED (2026-06-19 17:05 PT)
-`./ops` drives the runner from the dev Mac over SSH (target from git-ignored
-`scripts/server.conf`, default tailnet host `100.91.41.60`). **Working again from the dev Mac:**
-ping 0% loss, SSH `ok`, `./ops safety-status` and `./ops health` both pass (18 jobs, dashboard on
-`127.0.0.1:8787`, /api/health+db-status+intelligence 200, same-DB proof passes, fresh scheduler
-heartbeat `2026-06-19T17:05 dry_run`). Earlier this pass the dev Mac could NOT reach the runner
-(runner had dropped off the tailnet / `tailscale not installed on this Mac` WARN, ping+SSH timed
-out); it came back after Tailscale was brought back up on the old Mac. If it breaks again, the
-on-runner read-only fallback below works without the dev→runner SSH path.
-- On the runner, `./ops` itself fails (`missing scripts/server.conf`) because it is built for the
-  dev→runner SSH path, not self-management. Do NOT point it at itself.
-- **On-runner read-only safety check (no SSH, no secrets printed)** — mirrors `ops`'s
-  `remote_safety_kv` (`ops:90-108`) plus the approval-flag logic (`service.py:1753`). Run from
-  `~/AlphaLab` on the runner: source `.env`, then derive and echo only the booleans
-  `scheduler_mode`, `automation_paper_trading_armed`, `safe_stabilization_mode`,
-  `approval_required`. Last on-runner result (2026-06-19): `dry_run` / `false` / `true` / `true`
-  — safe-stabilization holds and the approval gate is active.
-- Health, read-only on the runner: `curl -s -o /dev/null -w '%{http_code}'`
-  `http://127.0.0.1:8787/api/{health,db-status,catalysts/intelligence}`; processes via
-  `launchctl list | grep -i alphalab`.
+### Contracts to respect (see docs/ENGINEERING_HANDBOOK.md — required reading)
+Evidence→shadow→approval for ANY behavior change; never-loosen list; append-only journal via the helper; gate names/reason strings are frozen telemetry contract; deploys always verified via diagnose script.
 
-## Known Risks
-- **Exposure-limit widening is INTENTIONAL (paper-test capacity) — file is RUNTIME-ACTIVE.**
-  Commit `dacdca2` widens equity `max_open_positions` 10→20 and crypto 2→25 and swaps
-  SOL/BNB→HYPE in `alpha_lab/config.example.json`. This is a **deliberate decision** to
-  give AlphaLabs wider capacity to test multiple concurrent ideas/signals in paper mode —
-  **not an accidental config risk.** Keep equity=20 / crypto=25; do NOT revert `dacdca2`.
-  Despite the `.example` name, the file IS the live default risk config: `service.py:46`
-  sets it as `DEFAULT_RISK_CONFIG`, both production entry points use it with no override
-  (`scheduler.py:144`, `api.py:39`), and the limit is enforced in
-  `paper_trader/decision_engine.py:56`. No alternate `config.json` exists and it is not
-  gitignored — so these limits take effect wherever the code runs.
-- **Wider limits are acceptable for PAPER ONLY.** The widened concurrency is safe only
-  while the runner stays disarmed/dry_run and no automated paper trading is enabled.
-  Safety now depends on the *other* gates, not the position-count cap (see below).
-- **Dev-Mac scheduler health is ambiguous.** Do not treat the dev Mac as an
-  authoritative runtime; do not reload it blindly. The old Mac is the only trusted runner.
-- **Branch reconciliation pending.** 10 local commits (incl. `dacdca2`) are unpushed and
-  unmerged into `main`; `./ops deploy` only pulls `main` ff-only, so this work cannot reach
-  the runner until reconciled. See Reconciliation Plan below.
-
-## Stabilization Priorities (current status)
-
-### 1. Working tree — committed baseline CLEAN; cleanup edits in flight
-- All feature/doc work is committed across 10 commits on `tooling/codexpro-devspace`
-  (see Reconciliation Plan). The committed baseline at HEAD `1d329d2` is clean, but this
-  protocol/handoff cleanup currently has **uncommitted** docs/tooling edits (the handoff +
-  shared skill files).
-
-### 2. Dev Mac ↔ Old Mac drift — PRESENT (expected, gated)
-- Old-Mac runner is on `main` @ `366597b` (= `origin/main`), clean (verified 2026-06-19 00:54 PT).
-  Dev is 10 commits ahead on the feature branch, unpushed. `./ops deploy` pulls `main` ff-only, so
-  nothing reaches the runner until the 10 commits are merged into `origin/main`. No deploy
-  performed; branch reconciliation/deploy remains gated behind a manual paper validation PASS.
-
-### 3. Scheduler paper-mode — SAFE (disarmed), verified 2026-06-19 00:54 PT
-- The runner was found paper-armed on 2026-06-18 and disarmed the same day: scheduler mode set
-  to dry-run and the automation paper-trade guard disabled, scheduler reloaded. **Verified
-  2026-06-19 00:54 PT (read-only):** safe-stabilization mode true, scheduler in safe dry-run mode,
-  could not trigger paper trades; scheduler + dashboard launchd running. Re-verify immediately
-  before validation/deploy.
-- Keep scheduler dry-run + disarmed until a paper window is intentionally opened.
-- The paper-execution approval requirement was **last known disabled** — it must be enabled
-  before any re-arm/validation.
-
----
-
-## Reconciliation Plan (prepared — NOT executed)
-
-`./ops deploy` pulls `origin/main` ff-only on the old Mac, so the 10 feature-branch commits
-must land in `main` before any deploy. No merge/rebase/push was performed; this is the plan only.
-
-**The 10 commits ahead of `main` (oldest → newest), classified:**
-| Commit | Type | Summary |
-|---|---|---|
-| `bf7f64d` | tooling/docs | CodexPro tooling templates (`.ai/*`, `TOOLING_HANDOFF.md`) |
-| `2c4c52c` | tooling | CodexPro stable tunnel helper scripts + `.gitignore` token rules |
-| `6227f46` | runtime | multi-coin after-hours crypto + Yahoo keyless price fallback + tests |
-| `dacdca2` | config/risk | widen position limits (equity 20 / crypto 25), swap SOL/BNB→HYPE |
-| `e1999c1` | docs | remote-ops runbook, dated handoff, Cloudflare stable launcher |
-| `be3757c` | docs | Lex review handoff |
-| `a8cb5a6` | docs | define manual paper validation gate |
-| `7a0d9f4` | docs | require analyst-assisted idea for paper validation |
-| `7418a73` | docs | update Lex handoff for reconciliation plan |
-| `1d329d2` | docs | add cross-agent handoff contract |
-
-- **Commits that should NOT go to `main`:** none identified — all 10 are intended. The only
-  runtime-behavior changers are `6227f46` (tested) and `dacdca2` (config). Tooling/docs commits
-  are inert at runtime.
-- **`dacdca2` widening:** re-confirmed INTENTIONAL for paper-test capacity (keep equity=20,
-  crypto=25). Do NOT revert. Safety rests on the scheduler/automation/approval gates, not the
-  position cap.
-- **Secret scan (commit range `main..HEAD`):** clean. High-entropy literal patterns
-  (AKIA…/sk-…/xox…/PRIVATE KEY) = 0 hits. All matches are env-var NAMES, `.gitignore` token
-  globs, docs about the secret blocklist, or runtime code reading a token file / setting HTTP
-  header names — no literal credentials.
-- **Tests:** `6227f46` shipped with green tests (`test_api`, `test_price_volume_feed`,
-  `test_decision_engine`) per its commit; re-run before deploy as a gate.
-
-**Recommendation: regular merge `tooling/codexpro-devspace` into LOCAL `main` (no squash).**
-Rationale: the 10 commits are already logically separated by concern (tooling/docs/runtime/
-config), so preserving them keeps `dacdca2`'s isolated 1-file config change individually
-revertible and keeps the runtime feature (`6227f46`) auditable apart from docs. Squash would
-bury the deliberate `dacdca2` isolation. Cherry-pick is unnecessary since none are excluded.
-Do this only AFTER manual paper validation passes; then push `main` and `./ops deploy`.
-
----
-
-## Latest Task
-
-### Task Summary
-Reconciliation-prep pass: cleaned stale commit counts/sections in this handoff (now
-consistently 10 commits @ HEAD `1d329d2`), ran a read-only validation of the `main..HEAD` range
-(status/log/diff/secret scan), and produced a branch Reconciliation Plan (above). No merge,
-rebase, push, deploy, re-arm, or old-Mac change. The manual-validation and approval-policy
-findings from prior passes are retained below for Lex.
-
-### Carried forward — Manual paper validation (DEFINED)
-- Full checklist: `docs/MANUAL_PAPER_VALIDATION.md`. First test: ONE human-selected
-  **analyst-assisted** equity idea, manual paper path, scheduler in safe dry-run mode, automation
-  guard off, human approval required, paper endpoint only. Pass = single attributable equity paper
-  order (idea→approval→trade→audit→Performance) with the scheduler proven idle/safe-mode and
-  same-DB proof intact; any live-endpoint contact, scheduler order, missing approval, blank price,
-  or missing record = fail → stop, stay in scheduler idle/safe mode and disarmed.
-
-### Carried forward — Approval policy (paper-execution approval requirement) RECOMMENDATION
-- `_paper_approval_required()` (`service.py:1752`) → `_paper_execution_approval_error()`
-  (`service.py:1716`), called by `place_trade()` on EVERY non-dry-run execution
-  (`service.py:846`). `place_trade` is the single choke point for BOTH manual and automation
-  paper paths → the requirement governs **both**, but the gate only bites on **analyst-assisted
-  OR crypto** ideas (`service.py:1722`); plain non-assisted equity ideas skip it.
-  Rejected/expired ideas always blocked.
-- **Recommendation:** enable the paper-execution approval requirement on the runner **before any
-  paper re-arm** (it was last known disabled). Safest posture for first validation; the
-  validation idea must be analyst-assisted for the gate to apply (now required by the
-  checklist). NOT changed this pass.
-
-### Carried forward — Deploy-readiness (no deploy)
-- **Dev:** `tooling/codexpro-devspace` @ `1d329d2`, 10 ahead / 0 behind `main`, NOT pushed.
-  Committed baseline at `1d329d2` is clean; the current working tree has **uncommitted**
-  protocol/handoff docs/tooling edits in flight.
-- **Old Mac:** last known on `main` @ `366597b` (= `origin/main`), clean, origin =
-  `Pak209/AlphaLabs.git` (not re-verified this pass).
-- **Delta (dev has, runner lacks), 10 commits:** `bf7f64d`, `2c4c52c`, `6227f46`, `dacdca2`,
-  `e1999c1`, `be3757c`, `a8cb5a6`, `7a0d9f4`, `7418a73`, `1d329d2` (CodexPro tooling/docs,
-  multi-coin crypto + Yahoo fallback, exposure widening, runbook/launcher, Lex handoff,
-  manual-validation docs, cross-agent handoff protocol/contract).
-- **Old-Mac safety — LAST KNOWN (2026-06-18T18:25 PT, not re-verified this pass):**
-  safe-stabilization mode true — scheduler mode last known dry-run, automation paper-trade guard
-  last known disabled, scheduler could not trigger paper trades. Scheduler + dashboard
-  LaunchAgents running; heartbeat at that time. Paper-execution approval requirement last known
-  disabled; manual paper path last known enabled; runner secrets file restricted to
-  owner-only perms. Treat as last-known, not current — re-verify before relying on it.
-- **DB path (last known):** resolver == heartbeat == db_status ==
-  `/Users/danielkimoto/AlphaLab/alpha_lab/data/alpha_lab.sqlite3` (no split-brain). ideas=119,
-  trades=32, catalyst_events=213 — as of the 2026-06-18 audit; not re-verified this pass.
-- **KEY DEPLOY MECHANISM / BLOCKER:** `./ops deploy` does `git fetch + pull --ff-only` on the
-  server, which is on **`main`**. The 10 dev commits are on a feature branch that is **unpushed
-  and not in `main`**, so an `--ff-only` pull would bring **nothing**. Deploying this work
-  REQUIRES first reconciling the 10 commits into `origin/main` (merge/PR + push). No way around
-  this short of changing the server's tracked branch. `./ops deploy` also kickstarts dashboard +
-  scheduler after pulling, but preserves `.env`/DB/logs/reports/launchd, and
-  `require_safe_service_reload` refuses if paper jobs are armed (they are not — safe).
-- **Before deploying this branch:** (a) pass manual paper validation first; (b) **merge the 10
-  commits into `origin/main` and push** (runner only pulls `main` ff-only); (c) re-confirm the
-  `dacdca2` widening is intended for the runner (it is — keep equity 20 / crypto 25); (d) keep
-  gates safe and enable the paper-execution approval requirement if re-arming; (e) back up the
-  runner secrets file; (f) deploy code-only via `./ops deploy` (never overwrite the live secrets
-  file/DB); (g) stop services before any tree move. Read-only `./ops deploy-preflight` checks the
-  commit gap/dirty/safety first.
-- **Immediately after deploy:** run `scripts/verify_old_mac_runtime.sh` (or
-  `./ops remote-status/safety-status/health`) — confirm commit matches, safe-stabilization mode
-  holds, DB path unchanged + same-DB proof, fresh heartbeat, expected job count, dashboard on
-  loopback, paper checks 200.
-
-### Files Changed
-- `.ai/LEX_REVIEW_HANDOFF.md` (Current State Summary refresh + Reconciliation Plan) and the
-  shared handoff skill (`.agents/skills/alphalabs-handoff-update/SKILL.md`,
-  `scripts/append_handoff.py`). **No config/code/env/launchd changes; `dacdca2` kept.**
-
-### Commands Run
-- Local read-only: `git status --short`, `git log --oneline main..HEAD`,
-  `git diff --stat main..HEAD`, `git diff --name-only main..HEAD`, per-commit `git show --stat`,
-  and a pattern-based secret scan of `git diff main..HEAD` (no dedicated scanner installed).
-- No old-Mac commands this pass (state carried from the prior read-only audit). No writes.
-
-### Git State
-- Branch `tooling/codexpro-devspace`, HEAD `1d329d2`, **10 commits ahead of `main`, not pushed**.
-  Committed baseline is clean; in-flight edits to the handoff + shared skill are **uncommitted**
-  this pass. `docs/MANUAL_PAPER_VALIDATION.md` is COMMITTED (in `a8cb5a6`/`7a0d9f4`), not
-  untracked. Runner unchanged (last known `main` @ `366597b`).
-
-### Safety Notes
-- Read-only + handoff/skill edits only. No merge, rebase, push, deploy, trades, scheduler
-  re-arm, runner-secrets, launchd, or runtime-code changes. Old Mac not touched this pass and
-  not re-verified — last known scheduler dry-run / disarmed.
-
-### What Lex Should Inspect Next
-- Approve the Reconciliation Plan: regular merge of the 10 commits into `main` (no squash), only
-  after manual paper validation passes.
-- Review `docs/MANUAL_PAPER_VALIDATION.md` pass/fail criteria and the
-  enable-paper-approval-before-re-arm recommendation.
-
-### Open Questions
-- Confirm regular-merge (vs squash) is the desired reconciliation style into `main`.
-- Confirm whether `main` should be reconciled now or held until manual validation passes
-  (current recommendation: hold until validation passes).
-
-### Recommended Next Step
-- **First validation = NOT READY.** Before it can run: (a) restore old-Mac reachability over
-  Tailscale and re-verify `./ops safety-status` + `./ops health` + `./ops check alpaca`
-  (scheduler last known dry-run/disarmed — confirm, plus same-DB proof, paper 200); (b) enable
-  the paper-execution approval requirement on the runner; (c) run during equity market hours.
-- Then follow `docs/MANUAL_PAPER_VALIDATION.md` exactly (one analyst-assisted equity idea →
-  approve → `POST /api/ideas/{id}/paper-trade`).
-- Branch reconciliation and re-arm remain gated behind a clean validation PASS. No merge/push/
-  deploy/re-arm now.
-
----
 
 ## Agent Activity Log
 
