@@ -66,7 +66,7 @@ def test_snapshot_measures_concentration_theme_and_heat(tmp_path: Path):
     assert heat["heat_share_of_gross"] == 0.04
 
     caps = report["cap_utilization"]
-    assert caps["open_positions"] == 3 and caps["max_open_positions"] == 20
+    assert caps["open_positions"] == 3 and caps["max_open_positions"] == 50
 
 
 def test_conviction_whatif_reallocates_same_pool(tmp_path: Path):

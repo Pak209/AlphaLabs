@@ -3725,3 +3725,35 @@ Added scripts/deploy_mini.sh at human request: the one-command deploy for the Ma
 
 ### Next Recommended Task
 Human: merge the open feat/lex-summary-and-review-chrome PR, then on the mini: git switch main && ./scripts/deploy_mini.sh - the first scripted deploy
+
+
+## 2026-07-09 13:08 PT — Claude
+
+Branch: feat/exit-management-and-slots
+Commit: 37cd7f4
+Working Tree: clean
+
+### Summary
+Implemented the human's three decisions from the Polygon-renewal discussion. (1) Polygon kept one month as evidence-window cost; built fetch_alpaca_intraday (free IEX snapshot via existing paper keys, envelope identical to the Polygon fetcher) + scripts/pv_source_compare.py on branch feat/alpaca-pv-source - first live run: 29/29 tickers both-ok, 28/29 gap-direction agreement, rel-vol usable everywhere; scoring still uses Polygon, swap decision at next renewal with accumulated compare reports. (2) Exit management (B6) on branch feat/exit-management-and-slots: manage_exits every 10 min, existing stop/target percentages only (crypto profile for crypto), OCC positions skipped, equity waits for market open, crypto 24/7; ALPHALAB_EXIT_MANAGEMENT off|shadow|on with on requiring the paper arm switches too; shadow persists exit_decisions via the scanner_runs allowlist (key added deliberately); real closes settle trade rows + WATCH alert. (3) max_open_positions 20->50 - explicit human-approved loosening, recorded as such; noted honestly that the three blocked 70+ setups were duplicate_position (same-ticker) blocks, which EXITS unblock - the slot raise adds breadth for new names. 589 tests pass incl. 5 new exit tests; scheduler job-count pins updated 18->19 deliberately. Suggested .env: ALPHALAB_EXIT_MANAGEMENT=shadow to start accruing exit evidence alongside options shadow.
+
+### Files Modified
+- alpha_lab/service.py
+- alpha_lab/scheduler.py
+- alpha_lab/repository.py
+- alpha_lab/config.example.json
+- alpha_lab/live_sources.py
+- scripts/pv_source_compare.py
+- alpha_lab/tests/test_exit_management.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- live pv_source_compare run (29 tickers)
+
+### Results
+- 589 tests passed; PV comparison evidence pack started; exit engine shadow-ready
+
+### Risks / Blockers
+- 50-slot cap at ~1.9K/trade allows ~95K gross on a 100K paper account (near fully-invested) - human-accepted; exit 'on' mode is intentionally double-gated behind the paper arm switches
+
+### Next Recommended Task
+Human: merge feat/alpaca-pv-source then feat/exit-management-and-slots, run deploy_mini.sh, add ALPHALAB_EXIT_MANAGEMENT=shadow (or on) to .env and restart; run pv_source_compare.py a few sessions before the next Polygon renewal
