@@ -3860,3 +3860,29 @@ Extended feat/lex-summary-and-review-chrome with two-way navigation between the 
 
 ### Next Recommended Task
 Human: merge the feat/lex-summary-and-review-chrome PR (now includes lex summary, live bell/menu, and cross-navigation); then install Overview as the Home Screen PWA and enable push in Settings->Notifications
+
+
+## 2026-07-08 19:27 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: 007a73d
+Working Tree: clean
+
+### Summary
+Fixed the iOS PWA error reported from the phone ('response served by service worker is an error') on feat/lex-summary-and-review-chrome. Root cause: reload raced a dashboard restart; the SW intercepted the failed /api fetch and its catch returned Response.error() (uncached API, non-navigation). Fix: /api/* now bypasses the service worker entirely - the app's own error handling reports outages and API data (preferences, subscriptions, approvals) can structurally never enter the SW cache; SHELL cache bumped to alphalab-v16 and index.html asset versions bumped (styles v48, app.js v50) since app.js changed on this branch without a version bump. Dashboard restarted to serve the fix; user needs two reloads (first installs the new SW, skipWaiting+claim activates it) or reopen from Home Screen.
+
+### Files Modified
+- alpha_lab/static/sw.js
+- alpha_lab/static/index.html
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests/test_api.py -q
+
+### Results
+- 20 API tests passed; SW change is client-side only
+
+### Risks / Blockers
+- Any client that cached the broken state may need a second reload for the v16 SW to claim; worst case Settings->Safari->Website Data->remove the tailnet domain
+
+### Next Recommended Task
+Human: reload the Overview page twice on the phone, then proceed with Add to Home Screen + enable push
