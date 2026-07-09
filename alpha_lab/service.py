@@ -68,6 +68,8 @@ from .futures_pulse import (
 DEFAULT_RISK_CONFIG = "alpha_lab/config.example.json"
 DEFAULT_AUDIT_LOG = "alpha_lab/data/audit.jsonl"
 FALSE_ENV_VALUES = {"0", "false", "no", "off"}
+# OCC option suffix (underlying + YYMMDD + C/P + strike) — exit manager skips these.
+_OCC_SUFFIX_RE_SERVICE = __import__("re").compile(r"\d{6}[CP]\d{8}$")
 
 
 class AlphaLabService:
@@ -1724,6 +1726,127 @@ class AlphaLabService:
         except Exception:
             # Telemetry-only path: swallow everything rather than block a trade.
             pass
+
+    @staticmethod
+    def _exit_management_mode() -> str:
+        """ALPHALAB_EXIT_MANAGEMENT: off | shadow | on (default off).
+
+        shadow: evaluate stop/target exits on open paper positions and record
+        what WOULD close (scanner_runs accounting) — zero orders.
+        on: actually close breached positions via Alpaca paper (still requires
+        the scheduler paper-arm switches; exits never run in a disarmed setup).
+        """
+        value = os.getenv("ALPHALAB_EXIT_MANAGEMENT", "off").strip().lower()
+        return value if value in {"off", "shadow", "on"} else "off"
+
+    def manage_exits(self) -> dict[str, Any]:
+        """Stop-loss / take-profit exit pass over open paper positions (B6).
+
+        Uses ONLY the existing risk-config percentages (default profile for
+        equities, crypto profile for crypto pairs) — no new thresholds. Option
+        positions are skipped (they have their own lifecycle path). Equity
+        exits only run while the market is open; crypto exits run any time.
+        Every pass records scanner_runs accounting; real closes also settle
+        the matching trades rows and raise a WATCH alert.
+        """
+        mode = self._exit_management_mode()
+        if mode == "off":
+            return {"status": "disabled", "mode": mode}
+        equity_config = load_config(self.risk_config_path)
+        crypto_config = load_config(self.risk_config_path, profile="crypto")
+        armed = (
+            os.getenv("ALPHALAB_SCHEDULER_MODE", "dry_run").strip().lower() == "paper"
+            and os.getenv("ALPHALAB_ALLOW_AUTOMATION_PAPER_TRADES", "").strip().lower() == "true"
+        )
+        live = mode == "on" and armed
+        equity_open = self._equity_market_open()
+
+        try:
+            positions = self._broker(dry_run=True).get_positions()
+        except Exception as exc:
+            return {"status": "unavailable", "error": str(exc)[:160], "mode": mode}
+
+        evaluated, decisions, closed = 0, [], []
+        skipped: dict[str, int] = {}
+        for position in positions:
+            symbol = str(position.get("symbol") or "").upper()
+            if _OCC_SUFFIX_RE_SERVICE.search(symbol):
+                skipped["option position (own lifecycle)"] = skipped.get("option position (own lifecycle)", 0) + 1
+                continue
+            entry = float(position.get("avg_entry_price") or 0)
+            qty = float(position.get("qty") or 0)
+            current = float(position.get("current_price") or 0)
+            if current <= 0 and qty:
+                current = float(position.get("market_value") or 0) / qty
+            if entry <= 0 or current <= 0 or qty <= 0:
+                skipped["missing entry/price data"] = skipped.get("missing entry/price data", 0) + 1
+                continue
+            is_crypto = "/" in symbol or symbol.endswith("USD") and symbol[:-3].isalpha() and len(symbol) <= 8
+            config = crypto_config if is_crypto else equity_config
+            if not is_crypto and not equity_open:
+                skipped["equity exits wait for market open"] = skipped.get("equity exits wait for market open", 0) + 1
+                continue
+            evaluated += 1
+            change = (current - entry) / entry
+            if change <= -config.stop_loss_pct:
+                verdict = "stop_loss"
+            elif change >= config.take_profit_pct:
+                verdict = "take_profit"
+            else:
+                continue
+            record = {"symbol": symbol, "verdict": verdict, "entry": round(entry, 4),
+                      "current": round(current, 4), "change_pct": round(change * 100, 2),
+                      "stop_pct": config.stop_loss_pct * 100, "target_pct": config.take_profit_pct * 100,
+                      "mode": "live" if live else "shadow"}
+            decisions.append(record)
+            if live:
+                closed.append(self._execute_exit(symbol, current, record))
+
+        summary = self._scanner_summary(
+            candidates_found=evaluated,
+            ideas_persisted=len(closed),
+            rejected=0,
+            skipped=sum(skipped.values()),
+            reasons=skipped,
+            dry_run=not live,
+            note=f"mode={mode} armed={armed}; {len(decisions)} breach(es)",
+        )
+        summary["exit_decisions"] = decisions
+        self._record_scanner_run("exit_manager", mode, summary)
+        return {"status": "ok", "mode": mode, "live": live, "evaluated": evaluated,
+                "decisions": decisions, "closed": closed}
+
+    def _execute_exit(self, symbol: str, exit_price: float, record: dict[str, Any]) -> dict[str, Any]:
+        """Close one breached position on Alpaca paper and settle trade rows."""
+        result = {**record}
+        try:
+            response = self._broker(dry_run=False).close_position(symbol)
+            result["order_id"] = response.get("id")
+            with connect(self.db_path) as conn:
+                repo = AlphaLabRepository(conn)
+                open_trades = [t for t in repo.list_trades(500)
+                               if str(t.get("ticker", "")).upper() == symbol
+                               and t.get("status") == "paper_open"]
+                for trade in open_trades:
+                    entry_price = float(trade.get("entry_price") or record["entry"])
+                    quantity = float(trade.get("quantity") or 0)
+                    realized = round((exit_price - entry_price) * quantity, 4)
+                    repo.close_trade(int(trade["id"]), exit_price, realized, "closed")
+                result["trades_settled"] = len(open_trades)
+            try:
+                self.notifications.notify_event(
+                    "WATCH",
+                    f"Exit executed: {symbol} {record['verdict']}",
+                    f"{symbol} closed at {record['change_pct']:+.2f}% vs entry "
+                    f"({record['verdict'].replace('_', ' ')}). Paper order submitted.",
+                    source="exit-manager",
+                    dedup_key=f"exit:{symbol}:{record['verdict']}",
+                )
+            except Exception:
+                pass
+        except Exception as exc:
+            result["error"] = str(exc)[:160]
+        return result
 
     def _paper_order_eligibility_error(self, decision: dict[str, Any]) -> dict[str, Any] | None:
         alpha = decision.get("alpha") or {}

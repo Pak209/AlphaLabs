@@ -129,6 +129,13 @@ def build_scheduler(service: AlphaLabService | None = None) -> BlockingScheduler
     scheduler.add_job(lambda: service.generate_and_save_market_briefing(live_catalysts=True), "cron", day_of_week="sat,sun", hour="6,12,18", minute=0)
     scheduler.add_job(lambda: service.evaluate_pending_signals(limit=500), "cron", day_of_week="sat,sun", hour=18, minute=10)
 
+    # --- Exit management (B6): stop/target pass over open paper positions --- #
+    # Self-gating: ALPHALAB_EXIT_MANAGEMENT=off (default) makes this a no-op;
+    # shadow records would-close decisions; on closes for real ONLY when the
+    # paper switches are also armed. Every 10 minutes — the function itself
+    # holds equity exits until the market is open and handles crypto 24/7.
+    scheduler.add_job(lambda: service.manage_exits(), "cron", minute="*/10", id="exit_manager")
+
     return scheduler
 
 

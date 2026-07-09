@@ -3,7 +3,7 @@
   "max_position_size_usd": 1900,
   "max_equity_pct_per_trade": 0.02,
   "max_trades_per_day": 10,
-  "max_open_positions": 20,
+  "max_open_positions": 50,
   "approved_tickers": [
     "NVDA",
     "AMD",

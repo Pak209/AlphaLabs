@@ -414,6 +414,7 @@ class AlphaLabRepository:
                 "items_created",
                 "error_message",
                 "crypto_signal_logs",
+                "exit_decisions",
                 "safety_gates",
                 "allowlist",
                 "cooldown_minutes",
