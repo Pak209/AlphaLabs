@@ -381,11 +381,23 @@ def _normalize_explanation(explanation: dict[str, Any], signal: dict[str, Any], 
 
 
 def _sector_summary(groups: list[dict[str, Any]]) -> list[str]:
+    """Human-readable sector movement lines (rounded, signed, unit-labeled).
+
+    Previously interpolated raw floats ("AI Stocks: -33.70413740807493"),
+    which leaked all the way into the review UI's Lex Summary.
+    """
     summaries = []
     for group in groups[:6]:
         name = group.get("name", "Unknown")
-        change = group.get("weighted_change_24h_pct") or group.get("volume_vs_5d_avg_pct")
-        summaries.append(f"{name}: {change if change is not None else 'data unavailable'}")
+        change = group.get("weighted_change_24h_pct")
+        unit = "24h"
+        if change is None:
+            change = group.get("volume_vs_5d_avg_pct")
+            unit = "volume vs 5d avg"
+        if change is None:
+            summaries.append(f"{name}: data unavailable")
+        else:
+            summaries.append(f"{name} {float(change):+.1f}% ({unit})")
     return summaries
 
 

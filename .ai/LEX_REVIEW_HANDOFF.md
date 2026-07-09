@@ -3802,3 +3802,61 @@ Implemented option-order approval on branch feat/option-order-approval per human
 
 ### Next Recommended Task
 Human: merge feat/option-order-approval PR, restart agents, remove ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS from .env; then the approval push flow is live for the options shadow->arming path
+
+
+## 2026-07-08 16:05 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: 5039c54
+Working Tree: clean
+
+### Summary
+Fixed the review UI issues reported from the phone on branch feat/lex-summary-and-review-chrome. Root cause of the 'hardcoded' Lex Summary: analyst._sector_summary interpolated raw unrounded floats into stored briefing prose, and review_api passed them through - the data was live all along, just unreadable. Fixes: sector summary lines now rounded/signed/unit-labeled at source; _lex_summary rebuilt as a deterministic narrative composed from live payload fields (tone, numeric sector-flow extremes from the raw brief with a rounded-float fallback for previously stored briefings, top catalyst headline with tracked count, BTC bias, leading theme, candidate watch list). Live preview against today's stored briefing: 'Broad market tone is defensive. Strongest flow Oil / Energy +29.0%, weakest Risk ETFs -37.3%. Top catalyst of 5 tracked: Chevron's Microsoft Deal... BTC bias is bearish. Leading theme: ai. Watching IWM, ARKK, MSFT, COIN.' Prototype chrome: bell badge was hardcoded '2' with no handler and hamburger had no handler (mock shell as built Jun 28) - bell now fetches /api/alerts, shows the real unread count (hidden at zero, 60s refresh) and opens a read-only alerts sheet; hamburger opens a working menu (Dashboard link + reload); prototype remains deliberately token-free so no authenticated writes (no mark-as-read). Standalone bundle rebuilt (index.html inlines js/css - edits invisible without rebuild). 584 tests passed (review/analyst suites green with richer summary). Dashboard restart needed to serve the new bundle + review_api.
+
+### Files Modified
+- alpha_lab/analyst.py
+- alpha_lab/review_api.py
+- prototype/app.js
+- prototype/styles.css
+- prototype/index.html
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+- live _lex_summary preview against today's stored briefing
+
+### Results
+- 584 tests passed; live summary renders human-readable narrative from real data
+
+### Risks / Blockers
+- Old stored briefings keep raw floats in their payloads; the presentation-layer rounding fallback covers them, and new briefings are formatted at source
+
+### Next Recommended Task
+Merge PR, then the phone flow: install the DASHBOARD (root URL) as the Home Screen PWA and enable push in Settings->Notifications there - /review is a separate non-PWA surface by design
+
+
+## 2026-07-08 16:34 PT — Claude
+
+Branch: feat/lex-summary-and-review-chrome
+Commit: 8d38148
+Working Tree: clean
+
+### Summary
+Extended feat/lex-summary-and-review-chrome with two-way navigation between the two UI surfaces per human naming decision: root command center = Overview (detail-rich; approvals, notifications, settings), /review = Dashboard (mobile). Overview's Research nav section gains a 'Dashboard (mobile)' entry - the nav renderer now supports plain external hrefs alongside SPA routes; the Dashboard hamburger menu links back to 'Overview - full command center'; prototype brand bar renamed from AlphaLabs Prototype to AlphaLabs Dashboard; standalone bundle rebuilt. 584 tests passed. Dashboard agent restarted to serve the update.
+
+### Files Modified
+- alpha_lab/static/app.js
+- prototype/app.js
+- prototype/build_standalone.py
+- prototype/index.html
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 584 tests passed; both surfaces cross-linked
+
+### Risks / Blockers
+- None; UI navigation only
+
+### Next Recommended Task
+Human: merge the feat/lex-summary-and-review-chrome PR (now includes lex summary, live bell/menu, and cross-navigation); then install Overview as the Home Screen PWA and enable push in Settings->Notifications

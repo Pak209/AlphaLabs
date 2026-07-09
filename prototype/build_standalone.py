@@ -11,7 +11,7 @@ app_js = (here / "app.js").read_text()
 
 BODY = """  <!-- Prototype chrome: screen switcher (not part of the product UI) -->
   <div class="proto-bar">
-    <span class="proto-brand">AlphaLabs Prototype</span>
+    <span class="proto-brand">AlphaLabs Dashboard</span>
     <div class="proto-tabs">
       <button data-goto="brief" class="proto-tab active">A &middot; Brief</button>
       <button data-goto="detail" class="proto-tab">B &middot; Detail</button>

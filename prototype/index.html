@@ -445,12 +445,28 @@ html, body {
   .device { border-radius: 0; border-width: 0; height: 100%; max-height: none; }
 }
 
+
+/* Live header chrome sheets (2026-07-08) */
+.chrome-sheet { position: fixed; top: 56px; right: 8px; left: 8px; max-height: 60vh; overflow-y: auto;
+  background: #101720; border: 1px solid #223041; border-radius: 12px; padding: 12px; z-index: 60;
+  box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+.sheet-title { font-weight: 700; color: #d7e3f0; margin-bottom: 8px; }
+.sheet-empty { color: #7d8ea1; font-size: 13px; }
+.sheet-row { display: flex; gap: 10px; padding: 8px 4px; border-top: 1px solid #1b2735; }
+.sheet-row.unread .sheet-row-title { color: #eaf4ff; font-weight: 600; }
+.sheet-level { font-size: 10px; color: #5fd38d; white-space: nowrap; padding-top: 3px; }
+.sheet-row-title { font-size: 13px; color: #b9c8d8; }
+.sheet-row-body { font-size: 12px; color: #7d8ea1; }
+.sheet-row-time { font-size: 10px; color: #566577; margin-top: 2px; }
+.sheet-link { display: block; padding: 10px 4px; color: #7fb8ff; font-size: 14px; text-decoration: none;
+  border-top: 1px solid #1b2735; }
+
   </style>
 </head>
 <body>
   <!-- Prototype chrome: screen switcher (not part of the product UI) -->
   <div class="proto-bar">
-    <span class="proto-brand">AlphaLabs Prototype</span>
+    <span class="proto-brand">AlphaLabs Dashboard</span>
     <div class="proto-tabs">
       <button data-goto="brief" class="proto-tab active">A &middot; Brief</button>
       <button data-goto="detail" class="proto-tab">B &middot; Detail</button>
@@ -1247,10 +1263,10 @@ window.REVIEW_MOCK = (function () {
 
     return `
       <header class="app-header">
-        <button class="icon-btn">${ICN.menu}</button>
+        <button class="icon-btn" id="menu-btn" aria-label="Menu">${ICN.menu}</button>
         <div class="brand"><span class="logo">A</span>AlphaLabs</div>
         <span class="spacer"></span>
-        <button class="icon-btn bell-wrap">${ICN.bell}<span class="bell-badge">2</span></button>
+        <button class="icon-btn bell-wrap" id="bell-btn" aria-label="Alerts">${ICN.bell}<span class="bell-badge" id="bell-badge" style="display:none">0</span></button>
         <button class="icon-btn">${ICN.refresh}</button>
       </header>
       <div class="date-row">Thu, Jun 25, 2026 · 6:42 AM PT ${dataBadge()} ${metaChips(B.meta)}</div>
@@ -1821,7 +1837,58 @@ window.REVIEW_MOCK = (function () {
   }
 
   /* ---------------- events ---------------- */
+  // ── Live header chrome (2026-07-08): real alerts bell + working menu. ──
+  // Read-only by design: the prototype never sends authenticated writes, so
+  // the alerts sheet lists and links but does not mark-as-read.
+  let ALERTS = [];
+  async function refreshAlertsBadge() {
+    try {
+      const res = await fetch("/api/alerts");
+      const data = await res.json();
+      ALERTS = (data.alerts || data || []).slice(0, 20);
+      const unread = ALERTS.filter((a) => a.status === "unread").length;
+      const badge = document.getElementById("bell-badge");
+      if (badge) {
+        badge.textContent = String(unread);
+        badge.style.display = unread > 0 ? "" : "none";
+      }
+    } catch (err) { /* header chrome must never break the app */ }
+  }
+  function toggleSheet(id, html) {
+    const existing = document.getElementById(id);
+    if (existing) { existing.remove(); return; }
+    document.querySelectorAll(".chrome-sheet").forEach((n) => n.remove());
+    const sheet = document.createElement("div");
+    sheet.id = id;
+    sheet.className = "chrome-sheet";
+    sheet.innerHTML = html;
+    document.body.appendChild(sheet);
+  }
+  function alertsSheetHTML() {
+    if (!ALERTS.length) return '<div class="sheet-title">Alerts</div><div class="sheet-empty">No alerts yet.</div>';
+    const rows = ALERTS.map((a) =>
+      `<div class="sheet-row ${a.status === "unread" ? "unread" : ""}">
+         <span class="sheet-level">${esc(a.level || "")}</span>
+         <div><div class="sheet-row-title">${esc(a.title || "")}</div>
+         <div class="sheet-row-body">${esc((a.body || "").slice(0, 140))}</div>
+         <div class="sheet-row-time">${esc(a.created_at || "")}</div></div>
+       </div>`).join("");
+    return `<div class="sheet-title">Alerts (read-only)</div>${rows}`;
+  }
+  function menuSheetHTML() {
+    return `<div class="sheet-title">Menu</div>
+      <a class="sheet-link" href="/">Overview — full command center (approvals, notifications, settings)</a>
+      <a class="sheet-link" href="/review">Reload Dashboard</a>`;
+  }
+  refreshAlertsBadge();
+  setInterval(refreshAlertsBadge, 60000);
+
   document.addEventListener("click", (e) => {
+    const bell = e.target.closest && e.target.closest("#bell-btn");
+    if (bell) { e.preventDefault(); toggleSheet("alerts-sheet", alertsSheetHTML()); return; }
+    const menu = e.target.closest && e.target.closest("#menu-btn");
+    if (menu) { e.preventDefault(); toggleSheet("menu-sheet", menuSheetHTML()); return; }
+
     // prototype top switcher
     const proto = e.target.closest(".proto-tab");
     if (proto) {

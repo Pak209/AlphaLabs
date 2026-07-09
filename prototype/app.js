@@ -298,10 +298,10 @@
 
     return `
       <header class="app-header">
-        <button class="icon-btn">${ICN.menu}</button>
+        <button class="icon-btn" id="menu-btn" aria-label="Menu">${ICN.menu}</button>
         <div class="brand"><span class="logo">A</span>AlphaLabs</div>
         <span class="spacer"></span>
-        <button class="icon-btn bell-wrap">${ICN.bell}<span class="bell-badge">2</span></button>
+        <button class="icon-btn bell-wrap" id="bell-btn" aria-label="Alerts">${ICN.bell}<span class="bell-badge" id="bell-badge" style="display:none">0</span></button>
         <button class="icon-btn">${ICN.refresh}</button>
       </header>
       <div class="date-row">Thu, Jun 25, 2026 · 6:42 AM PT ${dataBadge()} ${metaChips(B.meta)}</div>
@@ -872,7 +872,58 @@
   }
 
   /* ---------------- events ---------------- */
+  // ── Live header chrome (2026-07-08): real alerts bell + working menu. ──
+  // Read-only by design: the prototype never sends authenticated writes, so
+  // the alerts sheet lists and links but does not mark-as-read.
+  let ALERTS = [];
+  async function refreshAlertsBadge() {
+    try {
+      const res = await fetch("/api/alerts");
+      const data = await res.json();
+      ALERTS = (data.alerts || data || []).slice(0, 20);
+      const unread = ALERTS.filter((a) => a.status === "unread").length;
+      const badge = document.getElementById("bell-badge");
+      if (badge) {
+        badge.textContent = String(unread);
+        badge.style.display = unread > 0 ? "" : "none";
+      }
+    } catch (err) { /* header chrome must never break the app */ }
+  }
+  function toggleSheet(id, html) {
+    const existing = document.getElementById(id);
+    if (existing) { existing.remove(); return; }
+    document.querySelectorAll(".chrome-sheet").forEach((n) => n.remove());
+    const sheet = document.createElement("div");
+    sheet.id = id;
+    sheet.className = "chrome-sheet";
+    sheet.innerHTML = html;
+    document.body.appendChild(sheet);
+  }
+  function alertsSheetHTML() {
+    if (!ALERTS.length) return '<div class="sheet-title">Alerts</div><div class="sheet-empty">No alerts yet.</div>';
+    const rows = ALERTS.map((a) =>
+      `<div class="sheet-row ${a.status === "unread" ? "unread" : ""}">
+         <span class="sheet-level">${esc(a.level || "")}</span>
+         <div><div class="sheet-row-title">${esc(a.title || "")}</div>
+         <div class="sheet-row-body">${esc((a.body || "").slice(0, 140))}</div>
+         <div class="sheet-row-time">${esc(a.created_at || "")}</div></div>
+       </div>`).join("");
+    return `<div class="sheet-title">Alerts (read-only)</div>${rows}`;
+  }
+  function menuSheetHTML() {
+    return `<div class="sheet-title">Menu</div>
+      <a class="sheet-link" href="/">Overview — full command center (approvals, notifications, settings)</a>
+      <a class="sheet-link" href="/review">Reload Dashboard</a>`;
+  }
+  refreshAlertsBadge();
+  setInterval(refreshAlertsBadge, 60000);
+
   document.addEventListener("click", (e) => {
+    const bell = e.target.closest && e.target.closest("#bell-btn");
+    if (bell) { e.preventDefault(); toggleSheet("alerts-sheet", alertsSheetHTML()); return; }
+    const menu = e.target.closest && e.target.closest("#menu-btn");
+    if (menu) { e.preventDefault(); toggleSheet("menu-sheet", menuSheetHTML()); return; }
+
     // prototype top switcher
     const proto = e.target.closest(".proto-tab");
     if (proto) {

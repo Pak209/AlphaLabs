@@ -14,6 +14,8 @@ explicit ``availability`` of "not_implemented" / "no_entitlement" /
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
+
 from typing import Any, Optional
 
 SCHEMA_VERSION = "review.v1"
@@ -332,13 +334,45 @@ def _as_sentence(text: str) -> str:
     return text
 
 
+_FLOAT_RE = re.compile(r"-?\d+\.\d{3,}")
+
+
+def _round_embedded_floats(text: str) -> str:
+    """Round any long raw float that leaked into stored prose (old briefings
+    persisted unformatted sector numbers; new ones are formatted at source)."""
+    return _FLOAT_RE.sub(lambda m: f"{float(m.group()):+.1f}", text)
+
+
+def _sector_extremes(payload: dict[str, Any]) -> str:
+    """Strongest/weakest liquidity group from the numeric raw brief, if present."""
+    groups = (((payload.get("raw_brief") or {}).get("sections") or {})
+              .get("liquidity") or {}).get("groups") or []
+    scored = []
+    for group in groups:
+        change = group.get("weighted_change_24h_pct")
+        if change is None:
+            change = group.get("volume_vs_5d_avg_pct")
+        if isinstance(change, (int, float)):
+            scored.append((float(change), str(group.get("name") or "Unknown")))
+    if len(scored) < 2:
+        return ""
+    scored.sort()
+    low, high = scored[0], scored[-1]
+    return f"Strongest flow {high[1]} {high[0]:+.1f}%, weakest {low[1]} {low[0]:+.1f}%"
+
+
 def _lex_summary(briefing: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Deterministic narrative summary of the latest stored briefing.
+
+    Composed from live payload fields (never hardcoded): market tone, sector
+    flow extremes, leading theme, top catalyst, BTC bias, and the tickers the
+    brief says to watch. Every number is rounded for humans.
+    """
     if not briefing:
         return {"availability": "unavailable", "text": _LEX_FALLBACK, "generated_at": None,
                 "source": None, "note": "No stored market briefing yet."}
     payload = briefing.get("payload") or {}
     tone = _flatten_text(payload.get("broad_market_tone")) or "mixed"
-    sector = _flatten_text(payload.get("major_indexes_sector_movement"))
     themes = payload.get("themes")
     theme_text = ""
     if themes:
@@ -346,10 +380,32 @@ def _lex_summary(briefing: Optional[dict[str, Any]]) -> dict[str, Any]:
         theme_text = _flatten_text(first)
 
     sentences = [_as_sentence(f"Broad market tone is {tone}")]
-    if sector:
-        sentences.append(_as_sentence(sector))
+
+    extremes = _sector_extremes(payload)
+    if extremes:
+        sentences.append(_as_sentence(extremes))
+    else:
+        sector = _flatten_text(payload.get("major_indexes_sector_movement"))
+        if sector:
+            sentences.append(_as_sentence(_round_embedded_floats(sector)))
+
+    catalysts = payload.get("strongest_catalysts_found") or []
+    top_headline = _flatten_text((catalysts[0] or {}).get("headline")) if catalysts else ""
+    if top_headline:
+        count_note = f" of {len(catalysts)} tracked" if len(catalysts) > 1 else ""
+        sentences.append(_as_sentence(f"Top catalyst{count_note}: {top_headline}"))
+
+    btc_bias = _flatten_text((payload.get("crypto_context") or {}).get("btc_bias"))
+    if btc_bias and btc_bias != "unknown":
+        sentences.append(_as_sentence(f"BTC bias is {btc_bias}"))
+
     if theme_text:
         sentences.append(_as_sentence(f"Leading theme: {theme_text}"))
+
+    candidates = [str(t) for t in (payload.get("candidate_tickers_to_monitor") or []) if t]
+    if candidates:
+        shown = ", ".join(dict.fromkeys(candidates))
+        sentences.append(_as_sentence(f"Watching {shown}"))
 
     return {
         "availability": "available",
