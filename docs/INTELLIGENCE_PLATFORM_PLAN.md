@@ -215,9 +215,10 @@ first-100-calls-free key faucet → announce.
 
 | M | Scope | Exit criteria |
 |---|---|---|
-| **M1 (this PR)** | product layer + REST app + key auth + metering + rate limit + 402-demo seam + tests | 4 products live on :8790 tailnet; suite green |
-| M2 | MCP server + examples repo + signal-evaluation/explanation products | agent can call via MCP end-to-end |
-| M3 | real x402 (CDP facilitator, Base USDC) + payments table + refund/idempotency | first settled $0.01 |
+| **M1 — SHIPPED** | product layer + REST app + key auth + metering + rate limit + 402-demo seam + tests | 4 products live on :8790 tailnet; suite green |
+| **M2 — SHIPPED** | intel_gateway extraction + MCP server (HTTP `/mcp` + stdio) + signal-evaluation/explanation products + INTEL_COMMERCIAL_MODE license enforcement + examples/intel quickstarts | agent can call via MCP end-to-end (verified in-process against live DB) |
+| M2.x | SEC EDGAR ingestion source — commercial catalysts feed is honestly EMPTY until license-clean events exist | commercial /v1/catalysts returns real SEC events |
+| M3 | real x402 (CDP facilitator, Base USDC) + payments table + refund/idempotency — **sandbox first on Base Sepolia** per launch review | first settled $0.01 (testnet, then mainnet) |
 | M4 | public tunnel api.pak-labs.com + registries + landing/pricing page | first external agent call |
 | M5 | replay/attribution/outcome products + subscriptions | first repeat customer |
 | M6 | VPS migration + SLA + enterprise webhooks | mini-independent |
