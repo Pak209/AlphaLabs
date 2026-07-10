@@ -3842,3 +3842,36 @@ Commercial launch review (docs/COMMERCIAL_LAUNCH_REVIEW.md) - analysis only, no 
 
 ### Next Recommended Task
 Human: read the risk matrix + pricing table, confirm M2 revised order; agent then starts M2a (gateway extraction + MCP for calibration/evaluation)
+
+## 2026-07-10 10:40 PT — Claude
+
+Branch: feat/intel-platform-m2
+Commit: 69419c0
+Working Tree: clean
+
+### Summary
+Intel platform M2 shipped on feat/intel-platform-m2 (PR #23). M2a: extracted alpha_lab/intel_gateway.py (IntelStore/RateLimiter/x402 challenge/authorize) so REST and MCP share one auth->x402->rate-limit->metering pipeline; built alpha_lab/intel_mcp.py — hand-rolled JSON-RPC 2.0 MCP server (Python 3.9-safe, mirrors mcp_server.py recipe) behind POST /mcp (streamable HTTP) and a stdio main; tools: get_catalog (free), calibration_report, evaluate_signal, explain_decision. M2b: signal-evaluation (POST, $0.10) scores caller-supplied ideas through the live engine PV-neutral (price_volume=None, no vendor data in computation or response), persisted with key-scoped evaluation_id; decision-explanation ($0.10) returns the glass-box sub-signal/weight/floor breakdown. M2c: INTEL_COMMERCIAL_MODE defaults ON — catalysts SEC-EDGAR-only, snapshot recomposed to engine-derived regime, daily-brief deferred pending licensing. M2d: examples/intel quickstarts (private until M4). Known gap: commercial catalysts feed is empty until an SEC EDGAR ingestion source exists (tracked as M2.x in plan roadmap). Separate surface only; no trading-path files touched; nothing deployed.
+
+### Files Modified
+- alpha_lab/intel_gateway.py
+- alpha_lab/intel_mcp.py
+- alpha_lab/intel_api.py
+- alpha_lab/intel_products.py
+- alpha_lab/tests/test_intel_platform.py
+- examples/intel/ (README, quickstart.sh, evaluate_signal.py, mcp_config.json)
+- docs/INTELLIGENCE_PLATFORM_PLAN.md
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests -q
+- in-process TestClient smoke against live trading DB (read-only, scratch intel store)
+
+### Results
+- 562 passed, zero regressions (intel suite 6->11 tests: commercial filters, evaluation determinism + PV-neutral contract, REST roundtrip + cross-key 404 scoping, MCP discovery/gating/metering)
+- commercial snapshot recomposed to regime-only; brief deferred; NVDA evaluation 74.3/tradeable with explanation roundtrip; MCP evaluate metered under interface=mcp; commercial catalysts count=0 (no SEC source yet)
+
+### Risks / Blockers
+- Commercial /v1/catalysts is honestly EMPTY until SEC EDGAR ingestion lands (M2.x) — do not market the catalysts product before that
+- MCP HTTP transport returns plain JSON responses (no SSE streaming); fine for current clients, revisit if a registry requires full streamable-HTTP spec
+
+### Next Recommended Task
+Human: review/merge PR #23. Then M2.x (SEC EDGAR ingestion source feeding catalyst_events) or M3-sandbox (x402 on Base Sepolia via CDP facilitator) — M3-sandbox is the higher-leverage path while wallet/KYB completes

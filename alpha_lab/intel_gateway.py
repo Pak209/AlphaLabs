@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from . import intel_x402
 from .intel_products import CATALOG
 
 INTEL_DB_DEFAULT = "alpha_lab/data/intel_platform.sqlite3"
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS payments (
   amount_usdc REAL NOT NULL,
   payer TEXT,
   network TEXT,
+  tx_hash TEXT,
   settled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS evaluations (
@@ -80,6 +82,9 @@ class IntelStore:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(usage)").fetchall()]
             if "interface" not in cols:
                 conn.execute("ALTER TABLE usage ADD COLUMN interface TEXT NOT NULL DEFAULT 'rest'")
+            pay_cols = [r[1] for r in conn.execute("PRAGMA table_info(payments)").fetchall()]
+            if "tx_hash" not in pay_cols:
+                conn.execute("ALTER TABLE payments ADD COLUMN tx_hash TEXT")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -139,6 +144,21 @@ class IntelStore:
             conn.commit()
         return evaluation_id
 
+    def has_payment(self, payment_id: str) -> bool:
+        with self._conn() as conn:
+            return conn.execute("SELECT 1 FROM payments WHERE payment_id = ?",
+                                (payment_id,)).fetchone() is not None
+
+    def record_payment(self, payment_id: str, product: str, amount_usdc: float,
+                       payer: str, network: str, tx_hash: str | None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO payments (payment_id, product, amount_usdc, payer, network, tx_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (payment_id, product, amount_usdc, payer, network, tx_hash),
+            )
+            conn.commit()
+
     def get_evaluation(self, evaluation_id: str) -> dict[str, Any] | None:
         with self._conn() as conn:
             row = conn.execute(
@@ -171,24 +191,9 @@ class RateLimiter:
         return True
 
 
-def x402_challenge_body(product: str) -> dict[str, Any]:
-    """Spec-shaped 402 payment-requirements body (demo seam until M3)."""
-    price = CATALOG.get(product, {}).get("price_usd", 0.01)
-    return {
-        "x402Version": 1,
-        "error": "payment required",
-        "accepts": [{
-            "scheme": "exact",
-            "network": "base",
-            "asset": "USDC",
-            "maxAmountRequired": str(price),
-            "resource": f"/v1/{product}",
-            "description": CATALOG.get(product, {}).get("summary", ""),
-            "payTo": os.getenv("INTEL_X402_PAY_TO", "<unset — demo mode>"),
-            "maxTimeoutSeconds": 60,
-        }],
-        "note": "demo challenge — settlement facilitator lands in M3; use an API key today",
-    }
+def x402_challenge_body(product: str, error: str = "payment required") -> dict[str, Any]:
+    """Spec-correct 402 payment-requirements body (see intel_x402)."""
+    return intel_x402.challenge_body(product, error=error)
 
 
 class Gateway:
@@ -197,15 +202,84 @@ class Gateway:
     def __init__(self, store: IntelStore | None = None):
         self.store = store or IntelStore()
         self.limiter = RateLimiter()
+        self.facilitator = intel_x402.FacilitatorClient()
 
     def authorize(self, raw_key: str, product: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
         """Returns (key, error_body, error_status). Exactly one of key/error set."""
         key = self.store.resolve_key(raw_key) if raw_key else None
         if not key:
-            if os.getenv("INTEL_X402_MODE", "off").strip().lower() == "demo":
+            if intel_x402.x402_mode() in {"demo", "sandbox", "live"}:
                 return None, x402_challenge_body(product), 402
             return None, {"detail": "API key required (Authorization: Bearer <key>). "
-                                    "See /v1/catalog; x402 pay-per-call arrives in M3."}, 401
+                                    "See /v1/catalog for products and the x402 payment lane."}, 401
         if not self.limiter.allow(key["name"], int(key.get("rate_per_min") or DEFAULT_RATE_PER_MIN)):
             return None, {"detail": "rate limit exceeded"}, 429
         return key, None, 0
+
+    # ── x402 payment lane (M3-sandbox) ────────────────────────────────────
+    # verify BEFORE the product runs; settle AFTER it succeeds — the caller
+    # is never charged for a 5xx, and we never serve on an unsettleable
+    # authorization for longer than one request.
+
+    def authorize_or_charge(self, raw_key: str, payment_header: str, product: str
+                            ) -> tuple[dict[str, Any] | None, dict[str, Any] | None,
+                                       dict[str, Any] | None, int]:
+        """Key lane first, then payment lane. Returns (key, payment_ctx, error, status)."""
+        if raw_key:
+            key, err, status = self.authorize(raw_key, product)
+            return key, None, err, status
+        if payment_header and intel_x402.payment_lane_ready():
+            payment, reason = self.verify_payment(payment_header, product)
+            if reason:
+                return None, None, x402_challenge_body(product, error=reason), 402
+            payer_name = f"x402:{payment['payer']}"
+            if not self.limiter.allow(payer_name, DEFAULT_RATE_PER_MIN):
+                return None, None, {"detail": "rate limit exceeded"}, 429
+            return {"name": payer_name, "tier": "x402",
+                    "rate_per_min": DEFAULT_RATE_PER_MIN}, payment, None, 0
+        key, err, status = self.authorize(raw_key, product)
+        return key, None, err, status
+
+    def verify_payment(self, payment_header: str, product: str
+                       ) -> tuple[dict[str, Any] | None, str | None]:
+        """Decode + local checks + facilitator verify. Returns (payment_ctx, reason)."""
+        payload = intel_x402.decode_payment_header(payment_header)
+        if payload is None:
+            return None, "malformed X-PAYMENT header (expected base64 JSON payload)"
+        requirements = intel_x402.payment_requirements(product)
+        reason = intel_x402.local_payment_checks(payload, requirements)
+        if reason:
+            return None, reason
+        nonce = str(((payload.get("payload") or {}).get("authorization") or {}).get("nonce"))
+        if self.store.has_payment(nonce):
+            return None, "payment authorization already used (replay)"
+        verdict = self.facilitator.verify(payload, requirements)
+        if verdict.get("_facilitator_error"):
+            return None, verdict["_facilitator_error"]
+        if not verdict.get("isValid"):
+            return None, str(verdict.get("invalidReason") or "payment verification failed")
+        payer = str(verdict.get("payer")
+                    or ((payload.get("payload") or {}).get("authorization") or {}).get("from")
+                    or "unknown")
+        return {"payload": payload, "requirements": requirements, "nonce": nonce,
+                "payer": payer, "product": product,
+                "amount_usd": CATALOG.get(product, {}).get("price_usd", 0.0)}, None
+
+    def settle_payment(self, payment: dict[str, Any]
+                       ) -> tuple[str | None, str | None, dict[str, Any] | None]:
+        """Settle a verified payment. Returns (payment_id, response_header_b64, error_body)."""
+        settlement = self.facilitator.settle(payment["payload"], payment["requirements"])
+        if settlement.get("_facilitator_error") or not settlement.get("success"):
+            reason = str(settlement.get("_facilitator_error")
+                         or settlement.get("errorReason") or "settlement failed")
+            return None, None, x402_challenge_body(payment["product"],
+                                                   error=f"settlement failed: {reason}")
+        try:
+            self.store.record_payment(
+                payment["nonce"], payment["product"], payment["amount_usd"],
+                payment["payer"], payment["requirements"]["network"],
+                settlement.get("transaction"))
+        except sqlite3.IntegrityError:      # raced replay — refuse the duplicate
+            return None, None, x402_challenge_body(
+                payment["product"], error="payment authorization already used (replay)")
+        return payment["nonce"], intel_x402.encode_settlement_header(settlement), None
