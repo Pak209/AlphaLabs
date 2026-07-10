@@ -11,6 +11,12 @@ authorize pipeline) into alpha_lab.intel_gateway so REST and MCP share one
 auth → x402 seam → rate-limit → metering path. POST /mcp is the streamable-
 HTTP MCP transport (alpha_lab.intel_mcp holds the JSON-RPC handler).
 
+M3-sandbox: keyless callers can PAY per call — INTEL_X402_MODE=sandbox
+verifies+settles real testnet USDC on Base Sepolia via the x402.org
+facilitator (X-PAYMENT in, X-PAYMENT-RESPONSE out; alpha_lab.intel_x402).
+Verify runs before the product, settle after it succeeds, so a 5xx never
+charges anyone. live mode stays gated on the business wallet + CDP KYB.
+
 Run (tailnet/local only until M4):
     .venv/bin/python -m alpha_lab.intel_api --port 8790
 Keys (seed): INTEL_API_KEYS="partnername:rawkey,other:rawkey2"
@@ -60,28 +66,45 @@ def create_intel_app(trading_db_path: str | None = None,
 
     def _authorize(request: Request, product: str):
         raw = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        key, err, status = gateway.authorize(raw, product)
+        payment_header = request.headers.get("X-PAYMENT", "").strip()
+        key, payment, err, status = gateway.authorize_or_charge(raw, payment_header, product)
         if err:
-            return None, JSONResponse(status_code=status, content=err)
-        return key, None
+            return None, None, JSONResponse(status_code=status, content=err)
+        return key, payment, None
+
+    def _finalize(result: Any, payment: dict[str, Any] | None):
+        """Settle the x402 payment (if any) AFTER the product succeeded.
+
+        Returns (response, payment_id, status). A failed settlement withholds
+        the product output — the caller retries with a fresh authorization.
+        """
+        if not payment:
+            return result, None, 200
+        payment_id, settlement_header, err = gateway.settle_payment(payment)
+        if err:
+            return JSONResponse(status_code=402, content=err), None, 402
+        return JSONResponse(content=result,
+                            headers={"X-PAYMENT-RESPONSE": settlement_header}), payment_id, 200
 
     def _serve(product: str, request: Request, **kwargs: Any) -> Any:
         started = time.monotonic()
-        key, denied = _authorize(request, product)
+        key, payment, denied = _authorize(request, product)
         if denied:
             return denied
+        payment_id = None
         try:
             result = PRODUCT_FUNCS[product](trading_db_path, **kwargs) if kwargs else \
                      PRODUCT_FUNCS[product](trading_db_path)
-            status = 200
-            return result
+            response, payment_id, status = _finalize(result, payment)
+            return response
         except Exception:
             status = 503
             return JSONResponse(status_code=503, content={
                 "detail": f"{product} temporarily unavailable"})
         finally:
             gateway.store.record_usage(key["name"], product, status,
-                                       (time.monotonic() - started) * 1000)
+                                       (time.monotonic() - started) * 1000,
+                                       payment_id=payment_id)
 
     @app.get("/v1/market-snapshot")
     def market_snapshot_route(request: Request) -> Any:
@@ -102,10 +125,11 @@ def create_intel_app(trading_db_path: str | None = None,
     @app.post("/v1/signal-evaluation")
     async def signal_evaluation_route(request: Request) -> Any:
         started = time.monotonic()
-        key, denied = _authorize(request, "signal-evaluation")
+        key, payment, denied = _authorize(request, "signal-evaluation")
         if denied:
             return denied
         status = 200
+        payment_id = None
         try:
             try:
                 body = await request.json()
@@ -122,36 +146,41 @@ def create_intel_app(trading_db_path: str | None = None,
                 return JSONResponse(status_code=422, content={"detail": str(exc)})
             evaluation_id = gateway.store.store_evaluation(key["name"], body, result)
             result["data"]["evaluation_id"] = evaluation_id
-            return result
+            response, payment_id, status = _finalize(result, payment)
+            return response
         except Exception:
             status = 503
             return JSONResponse(status_code=503, content={
                 "detail": "signal-evaluation temporarily unavailable"})
         finally:
             gateway.store.record_usage(key["name"], "signal-evaluation", status,
-                                       (time.monotonic() - started) * 1000)
+                                       (time.monotonic() - started) * 1000,
+                                       payment_id=payment_id)
 
     @app.get("/v1/decision-explanation/{evaluation_id}")
     def decision_explanation_route(evaluation_id: str, request: Request) -> Any:
         started = time.monotonic()
-        key, denied = _authorize(request, "decision-explanation")
+        key, payment, denied = _authorize(request, "decision-explanation")
         if denied:
             return denied
         status = 200
+        payment_id = None
         try:
             record = gateway.store.get_evaluation(evaluation_id)
             if not record or record.get("key_name") != key["name"]:
                 status = 404
                 return JSONResponse(status_code=404, content={
                     "detail": "evaluation_id not found for this key"})
-            return decision_explanation(record)
+            response, payment_id, status = _finalize(decision_explanation(record), payment)
+            return response
         except Exception:
             status = 503
             return JSONResponse(status_code=503, content={
                 "detail": "decision-explanation temporarily unavailable"})
         finally:
             gateway.store.record_usage(key["name"], "decision-explanation", status,
-                                       (time.monotonic() - started) * 1000)
+                                       (time.monotonic() - started) * 1000,
+                                       payment_id=payment_id)
 
     @app.post("/mcp")
     async def mcp_route(request: Request) -> Any:

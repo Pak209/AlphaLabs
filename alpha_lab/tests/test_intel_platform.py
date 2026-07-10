@@ -138,8 +138,12 @@ def test_gateway_402_demo_challenge(tmp_path: Path, monkeypatch):
     body = res.json()
     assert body["x402Version"] == 1
     accept = body["accepts"][0]
-    assert accept["network"] == "base" and accept["asset"] == "USDC"
-    assert accept["maxAmountRequired"] == str(CATALOG["catalysts"]["price_usd"])
+    # spec-correct requirements (M3): asset is the USDC contract address and
+    # the amount is atomic units (6 decimals), not a dollar string
+    from alpha_lab.intel_x402 import NETWORKS
+    assert accept["network"] == "base" and accept["asset"] == NETWORKS["base"]["usdc"]
+    assert accept["maxAmountRequired"] == str(int(CATALOG["catalysts"]["price_usd"] * 1_000_000))
+    assert "note" in body                                      # demo is labeled demo
     # keyed calls still work in demo mode
     assert client.get("/v1/catalysts",
                       headers={"Authorization": "Bearer sk-test-123"}).status_code == 200

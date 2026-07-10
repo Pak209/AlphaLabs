@@ -19,14 +19,23 @@ Every response uses one envelope: `product / version / generated_at / data /
 provenance / confidence / reasoning / disclaimer`. Nothing personal exists on
 this surface — no positions, P/L, orders, broker state, or account data.
 
-## Auth
+## Auth — two lanes
+
+**API key** (accounts, subscriptions):
 
 ```
 Authorization: Bearer <your-api-key>
 ```
 
-Keyless calls get `401`, or a spec-shaped x402 `402` challenge when the
-gateway runs `INTEL_X402_MODE=demo`. Real USDC settlement on Base is M3.
+**x402 pay-per-call** (keyless, agent-native): a keyless call returns `402`
+with machine-readable payment requirements; sign an EIP-3009 USDC
+authorization for the exact amount, retry with it base64-encoded in the
+`X-PAYMENT` header, and the settlement receipt comes back in
+`X-PAYMENT-RESPONSE`. Modes: `demo` (challenge only), `sandbox` (**real
+settlement on Base Sepolia testnet USDC** — see
+[`x402_sandbox.md`](x402_sandbox.md)), `live` (Base mainnet, gated on
+business-wallet/KYB completion). Verify runs before the product and settle
+after it succeeds, so a failed call never charges and a miss (404) is free.
 
 ## Quickstarts
 
