@@ -675,6 +675,7 @@ function renderTrendingTokens() {
 
 const PAGE_META = {
   overview: ["Overview", "Alpha command center: system IQ, market regime, top opportunities, and source effectiveness at a glance."],
+  controls: ["System Controls", "Read-only map of every runtime switch, risk limit, gate threshold, and data source — with where each lives and how it changes."],
   liquidity: ["Liquidity", "Sector, crypto, Bitcoin, and oil/energy liquidity proxies without full order-flow claims."],
   futures: ["Futures Pulse", "Overnight Futures Pulse — premarket macro regime read from overnight futures. Read-only research."],
   catalysts: ["Catalyst Radar", "FoxRunner-style news catalyst scanning: source, keywords, score, then risk-checked paper tests."],
@@ -795,6 +796,7 @@ const NAV_SECTIONS = [
     defaultCollapsed: true,
     items: [
       { route: "briefings", label: "Briefings" },
+      { route: "controls", label: "System Controls" },
       { route: "settings", label: "Settings" },
     ],
   },
@@ -1684,6 +1686,9 @@ function renderPage() {
   document.querySelector("#page-subtitle").textContent = subtitle;
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.dataset.page === activeRoute));
   renderNav();
+  if (activeRoute === "controls") {
+    loadSystemControls();
+  }
   if (activeRoute === "settings") {
     renderTokenStatus();
     renderNotificationSettings();
@@ -2629,3 +2634,41 @@ function showError(err) {
 renderNav();
 renderPage();
 load().catch(showError);
+
+// ── System Controls (read-only backend visibility) ──────────────────────────
+async function loadSystemControls() {
+  const target = document.querySelector("#system-controls-body");
+  if (!target) return;
+  try {
+    const res = await fetch("/api/system-controls");
+    const data = await res.json();
+    const esc2 = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const kv = (obj) => Object.entries(obj).map(([k, v]) =>
+      `<tr><td>${esc2(k)}</td><td>${esc2(Array.isArray(v) ? v.join(", ") : (typeof v === "object" && v !== null ? JSON.stringify(v) : v))}</td></tr>`).join("");
+    const armed = (v) => /paper|true|shadow|on/.test(String(v)) && !/default/.test(String(v));
+    target.innerHTML = `
+      <h3>Runtime switches</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Switch</th><th>Value</th><th>Meaning</th><th>How to change</th></tr></thead>
+        <tbody>${data.runtime_switches.map((s) =>
+          `<tr><td><code>${esc2(s.name)}</code></td><td>${armed(s.value) ? "<strong>" + esc2(s.value) + "</strong>" : esc2(s.value)}</td><td class="muted">${esc2(s.meaning)}</td><td class="muted">${esc2(s.change)}</td></tr>`).join("")}
+        </tbody></table></div>
+      <h3>Risk limits <span class="muted">(${esc2(data.risk_limits.source)})</span></h3>
+      <p class="muted">${esc2(data.risk_limits.change)}</p>
+      <div class="table-wrap"><table><thead><tr><th>Default profile</th><th></th></tr></thead><tbody>${kv(data.risk_limits.default_profile)}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Crypto profile</th><th></th></tr></thead><tbody>${kv(data.risk_limits.crypto_profile)}</tbody></table></div>
+      <h3>Gate thresholds</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Gate</th><th>Value</th><th>Lives in</th><th>Changes via</th></tr></thead>
+        <tbody>${data.gate_thresholds.map((g) =>
+          `<tr><td>${esc2(g.gate)}</td><td>${esc2(typeof g.value === "object" ? JSON.stringify(g.value) : g.value)}</td><td class="muted">${esc2(g.source)}</td><td class="muted">${esc2(g.change)}</td></tr>`).join("")}
+        </tbody></table></div>
+      <h3>Data sources</h3>
+      <div class="table-wrap"><table><tbody>${data.data_sources.map((d) =>
+        `<tr><td>${esc2(d.name)}</td><td>${d.configured ? "✅ configured" : "— not configured"}</td></tr>`).join("")}</tbody></table></div>
+      <h3>Invariants</h3>
+      ${data.invariants.map((i) => `<p class="muted">• ${esc2(i)}</p>`).join("")}`;
+  } catch (err) {
+    target.innerHTML = `<div class="row">Could not load system controls: ${String(err).slice(0, 120)}</div>`;
+  }
+}

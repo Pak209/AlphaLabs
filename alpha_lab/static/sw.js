@@ -6,13 +6,13 @@
  * Tailscale. Only same-origin GET requests are cached; POSTs and cross-origin
  * requests pass straight through untouched.
  */
-const CACHE = "alphalab-v16";
+const CACHE = "alphalab-v17";
 
 // App shell precached on install so the very first offline open works.
 const SHELL = [
   "/",
-  "/static/styles.css?v=48",
-  "/static/app.js?v=50",
+  "/static/styles.css?v=49",
+  "/static/app.js?v=51",
   "/static/manifest.webmanifest",
   "/static/icon-192.png",
   "/static/icon-512.png",

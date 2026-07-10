@@ -220,6 +220,10 @@ ALLOWED_PAPER_TRADER_BRIDGES = {
     # with its Alpaca quote fallback — the same bridge service always had,
     # relocated. Direction remains the allowed one (alpha_lab -> paper_trader).
     "alpha_lab.market_context",   # quote fallback: AlpacaClient last-trade read
+    # System Controls page (2026-07-09): displays the PARSED risk limits via
+    # load_config so what the page shows is exactly what the gates enforce
+    # (incl. crypto-profile merge) — read-only, same justification as portfolio.
+    "alpha_lab.routers.ops",      # reads RiskConfig for the controls display
 }
 
 

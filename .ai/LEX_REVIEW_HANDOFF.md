@@ -3759,6 +3759,37 @@ Implemented the human's three decisions from the Polygon-renewal discussion. (1)
 Human: merge feat/alpaca-pv-source then feat/exit-management-and-slots, run deploy_mini.sh, add ALPHALAB_EXIT_MANAGEMENT=shadow (or on) to .env and restart; run pv_source_compare.py a few sessions before the next Polygon renewal
 
 
+## 2026-07-09 15:53 PT — Claude
+
+Branch: feat/system-controls-page
+Commit: 81a2139
+Working Tree: clean
+
+### Summary
+Built the System Controls page on feat/system-controls-page per human request for backend visibility. Scope decision, stated to the human: full UI adjustability of gates/limits/switches would conflict with the approved safety contracts (never-loosen, evidence->shadow->approval, only-a-human-arms), so v1 is a complete READ-ONLY map with per-row provenance and legitimate change paths instead of write forms. GET /api/system-controls (ops router): 10 runtime switches with defaults and meanings (scheduler mode, both arm switches, both approval rules, options/exit automation modes, yahoo flag, real-notification-test flag, alert dry-run), risk limits for both profiles via load_config so displayed==enforced (incl. crypto merge), 10 gate thresholds each with source file + change path (calibration protocol vs structural vs env), data-source configured booleans (names only - test asserts no secret values leak into the payload), standing invariants. Frontend: System Controls nav item + page rendering grouped tables, armed values bolded; asset v49/v51, SW cache v17. Both executable contracts fired during the build and were updated deliberately: route manifest 73->74 (sorted position mattered), and ALLOWED_PAPER_TRADER_BRIDGES gained alpha_lab.routers.ops with in-file rationale. 593 tests pass. Follow-up proposed to human: tighten-only kill switch (dashboard disarm button) as the one legitimate UI control - needs its own small plan.
+
+### Files Modified
+- alpha_lab/routers/ops.py
+- alpha_lab/static/index.html
+- alpha_lab/static/app.js
+- alpha_lab/static/sw.js
+- alpha_lab/tests/test_api.py
+- alpha_lab/tests/test_api_route_manifest.py
+- alpha_lab/tests/test_import_boundaries.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests paper_trader/tests research/tests -q
+
+### Results
+- 593 tests passed; secret-leak assertion green; both boundary contracts updated deliberately
+
+### Risks / Blockers
+- None; endpoint is GET-only and value-free for secrets. UI adjustability intentionally excluded - documented per row instead
+
+### Next Recommended Task
+Human: merge + deploy_mini.sh; then hard-refresh and open System > System Controls. Optional follow-up: approve the tighten-only kill-switch plan
+
+
 ## 2026-07-09 16:05 PT — Claude
 
 Branch: feat/intel-platform-m1

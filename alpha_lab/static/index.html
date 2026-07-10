@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AlphaLab" />
 
-    <link rel="stylesheet" href="/static/styles.css?v=48" />
+    <link rel="stylesheet" href="/static/styles.css?v=49" />
   </head>
   <body>
     <div class="app-shell">
@@ -388,6 +388,18 @@
             </form>
           </section>
         </section>
+        <section class="page" data-page="controls">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>System Controls</h2>
+                <p class="muted">Every backend switch, limit, and gate — read-only by design. Gates and limits change through the calibration protocol; env switches through <code>.env</code> + agent restart. Each row says where it lives.</p>
+              </div>
+            </div>
+            <div id="system-controls-body"><div class="row">Loading system controls…</div></div>
+          </section>
+        </section>
+
         <section class="page" data-page="settings">
           <section class="panel settings-panel">
             <div class="panel-head">
@@ -456,7 +468,7 @@
       </main>
     </div>
     <div id="toast" class="toast"></div>
-    <script src="/static/app.js?v=50"></script>
+    <script src="/static/app.js?v=51"></script>
     <script>
       // Register the service worker (served from root so its scope is "/").
       if ("serviceWorker" in navigator) {
