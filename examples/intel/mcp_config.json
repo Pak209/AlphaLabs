@@ -1,0 +1,20 @@
+{
+  "_comment": "AlphaLabs Intelligence MCP — two transports, same gateway. Streamable HTTP for remote agents (tailnet-only until M4); stdio for a local client on the mini.",
+  "mcpServers": {
+    "alphalabs-intel": {
+      "type": "http",
+      "url": "http://127.0.0.1:8790/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_INTEL_API_KEY"
+      }
+    },
+    "alphalabs-intel-stdio": {
+      "command": "/Users/pak/Projects/AlphaLab/.venv/bin/python",
+      "args": ["-m", "alpha_lab.intel_mcp"],
+      "cwd": "/Users/pak/Projects/AlphaLab",
+      "env": {
+        "INTEL_MCP_KEY": "YOUR_INTEL_API_KEY"
+      }
+    }
+  }
+}
