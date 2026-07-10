@@ -3817,3 +3817,28 @@ Intelligence Platform kicked off on feat/intel-platform-m1: master plan (docs/IN
 
 ### Next Recommended Task
 Recommended next-highest-ROI: M2 (MCP server + signal-evaluation product + examples repo) - it makes the platform agent-callable end to end while the human works the licensing/wallet decisions in parallel
+
+
+## 2026-07-09 23:39 PT — Claude
+
+Branch: docs/commercial-launch-review
+Commit: none
+Working Tree: modified
+
+### Summary
+Commercial launch review (docs/COMMERCIAL_LAUNCH_REVIEW.md) - analysis only, no code. MATERIAL LICENSING FINDING that reshapes launch strategy: Polygon's individual-plan terms prohibit commercial use AND extend to Derived Works (analytics/research based on or derived from their data), and Alpaca similarly bars business redistribution of derived products - so paid products whose inputs trace to Polygon/Alpaca CANNOT launch on current plans; the personal trading system's use remains fully licensed and unaffected. CoinGecko is the opposite: ~35/mo Analyst tier includes an explicit commercial license with attribution. Risk matrix: HIGH = catalysts product (Polygon News rows), snapshot sector flows, daily-brief as built, CoinGecko free tier commercially; MEDIUM = calibration telemetry and replay/backtest over stored history (counsel questions - own-software telemetry is far downstream but the paranoid derived-works reading needs legal confirmation); LOW = signal-evaluation/decision-explanation (caller inputs + our engine, PV-neutral commercial mode), SEC EDGAR, FRED. Required rewrites: SEC-only catalysts at launch, snapshot recompose, brief deferred, license posture ENFORCED IN CODE via INTEL_COMMERCIAL_MODE gating product inputs (testable, forbidden-fragment pattern). Pricing recommended with reasoning (snapshot 0.01, catalysts 0.02, brief/calibration 0.05, evaluation/explanation 0.10, replay 0.25, backtest 0.50-2.00 tiered; 100 free calls per key faucet). Launch checklist split beta vs public (public gates: counsel sign-off incl. publisher's-exemption check, Coinbase business wallet + CDP KYB, entity/tax, ToS/privacy/AUP, CoinGecko upgrade, api tunnel + WAF, status page, load test, VPS hosting recommendation). Architecture validated with corrections (REST/MCP siblings behind one gateway; x402 is an auth lane; analytics cross-cutting) + M2a intel_gateway extraction. M2 gate: GO - revised order M2a MCP (calibration+evaluation first) -> M2b engine-native products -> M2c license rework -> M2d examples -> M3 x402 on Base Sepolia testnet while wallet/KYB parallel -> M4 public gated on checklist.
+
+### Files Modified
+- docs/COMMERCIAL_LAUNCH_REVIEW.md
+
+### Commands / Tests Run
+- web research: Polygon market-data ToS (derived works/commercial), Alpaca redistribution policy, CoinGecko commercial licensing tiers
+
+### Results
+- Review written; launch strategy re-sequenced around the licensing reality; no code changed
+
+### Risks / Blockers
+- Do not enable real payments or public serving before counsel sign-off; the M1 catalog as-built contains HIGH-risk products that must be recomposed (M2c) before beta pricing pages reference them
+
+### Next Recommended Task
+Human: read the risk matrix + pricing table, confirm M2 revised order; agent then starts M2a (gateway extraction + MCP for calibration/evaluation)
