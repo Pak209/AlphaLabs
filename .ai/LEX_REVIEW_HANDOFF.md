@@ -3970,3 +3970,63 @@ Notification delivery diagnosis (audit + live test; no code changed). User repor
 
 ### Next Recommended Task
 User: confirm whether the 9:03 PM PT test push appeared on the phone; if not, re-subscribe from the PWA and rerun the same test. Also: x402 sandbox probe still awaiting the one-click Circle faucet captcha
+## 2026-07-11 11:15 PT — Claude
+
+Branch: fix/notif-test-button
+Commit: none
+Working Tree: clean
+
+### Summary
+Notification follow-up: user's manual curl got 401 (ALPHALAB_API_TOKEN not exported in their shell — server-side token auth working as designed) and the 9:03 PM real test never displayed on the phone despite Apple accepting it, confirming the Jun-22 iPhone PWA subscription is stale client-side. Confirmed only ONE push subscription exists (iPhone); the Mac Settings checkbox saves the preference but that Mac never registered a subscription. Root-caused the UX: the Settings 'Send test notification' button NEVER passed force_dry_run:false, so it always dry-ran — same omission as Codex's curl test. Shipped fix/notif-test-button (PR #27): button now attempts a REAL send first (server gate unchanged — 403 without ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true), falls back to audited dry-run + local preview on refusal, and toasts the exact outcome including a stale-subscription hint. Assets app.js v52, SW cache alphalab-v18. Also opened PR #26 earlier this session (x402 facilitator UA fix, wire integration validated against real facilitator).
+
+### Files Modified
+- alpha_lab/static/app.js
+- alpha_lab/static/index.html
+- alpha_lab/static/sw.js
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests -q
+- node --check alpha_lab/static/app.js
+
+### Results
+- 572 passed (frontend-only change)
+- syntax OK
+
+### Risks / Blockers
+- Phone delivery still blocked on the stale Jun-22 iPhone subscription until the user re-subscribes from the PWA (toggle Enable PWA push off/on on the phone) — server side is proven good (sent=1 errors=0, Apple accepted)
+
+### Next Recommended Task
+Human: merge PRs #26/#27 + deploy, re-subscribe on the iPhone PWA, tap Send test notification; then the one-click Circle faucet captcha to finish the x402 on-chain probe
+
+
+## 2026-07-11 16:19 PT — Claude
+
+Branch: feat/performance-portfolio
+Commit: 77235fd
+Working Tree: modified
+
+### Summary
+Performance page rework shipped on feat/performance-portfolio (PR #28, stacked on #27 — merge #27 first). Diagnosis: the page's F grade was the SCANNER's signal-quality score (all 1000 signals, mostly unexecuted) presented as the headline while the actual paper account sat at +0.67%. New GET /api/portfolio (service.portfolio_report): live broker holdings with qty/entry/current/market-value/unrealized P&L, per-position exit plan computed from the SAME risk-config stop/target percentages manage_exits enforces (side-aware, crypto profile, options lifecycle-excluded), realized P&L + closed win rate, exit-management mode, and an account grade (total P&L as % of starting capital, A>=5/B>=2/C>=0/D>=-3/F). Broker-down degrades to status=unavailable, never 500. Frontend: Portfolio panel leads the page; old card retitled 'Scanner Report Card' with copy stating it moves independently of the account. Route manifest 75 routes. Live smoke vs real account: 10 positions, equity $100,411, grade C +0.67%, exit mode shadow. Assets app.js v53 / SW cache v19 stacked on #27's v52/v18.
+
+### Files Modified
+- alpha_lab/service.py
+- alpha_lab/api.py
+- alpha_lab/static/app.js
+- alpha_lab/static/index.html
+- alpha_lab/static/sw.js
+- alpha_lab/tests/test_api_route_manifest.py
+- alpha_lab/tests/test_portfolio_report.py
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests -q
+- live portfolio_report() smoke against paper account
+
+### Results
+- 574 passed (new: exit-plan math long/short, crypto profile, options exclusion, grade bands, broker-down degradation; manifest 75 routes)
+- 10 positions, equity 100411.27, grade C +0.67 pct, META stop 541.95 -> target 609.69, mode shadow
+
+### Risks / Blockers
+- PRs #27 and #28 both bump static asset versions — merge order matters (#27 then #28); a lone #28 merge still works but leaves v52 references unused
+
+### Next Recommended Task
+Human: merge #26, #27, #28 in order, then deploy; re-subscribe iPhone PWA and tap Send test notification; Circle faucet captcha still pending for the x402 on-chain probe; answer the two Hermes iMessage transport questions to green-light that channel
