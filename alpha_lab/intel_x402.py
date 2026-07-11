@@ -142,7 +142,10 @@ class FacilitatorClient:
         return (override or NETWORKS[x402_network()]["facilitator"]).rstrip("/")
 
     def _post(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        headers = {"Content-Type": "application/json"}
+        # A descriptive UA is required in practice: the x402.org facilitator's
+        # WAF returns 403 to Python-urllib's default (found by the M3 probe).
+        headers = {"Content-Type": "application/json",
+                   "User-Agent": "AlphaLabs-Intel/0.2 (+x402 seller)"}
         bearer = os.getenv("INTEL_X402_FACILITATOR_BEARER", "").strip()
         if bearer:
             headers["Authorization"] = f"Bearer {bearer}"
