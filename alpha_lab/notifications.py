@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -63,6 +64,7 @@ ALERT_STATUSES = {"unread", "read", "dismissed", "actioned"}
 # Channel identifiers used in channels_sent / notification_audit.
 CHANNEL_PUSH = "pwa_push"
 CHANNEL_SMS = "sms"
+CHANNEL_IMESSAGE = "imessage"
 
 
 def normalize_level(level: Any) -> str:
@@ -178,10 +180,24 @@ def route_alert(level: Any, prefs: dict[str, Any], now: Optional[datetime] = Non
     else:
         reasons["sms"] = "eligible"
 
+    imessage_enabled = bool(prefs.get("imessage_enabled"))
+    imessage_min = normalize_level(prefs.get("imessage_min_level") or "URGENT_IDEA")
+    imessage = imessage_enabled and level_at_least(norm_level, imessage_min)
+    if not imessage_enabled:
+        reasons["imessage"] = "imessage disabled (set ALERT_IMESSAGE_ENABLED + ALERT_IMESSAGE_TO)"
+    elif not level_at_least(norm_level, imessage_min):
+        reasons["imessage"] = f"level {norm_level} below imessage_min_level {imessage_min}"
+    elif quiet_blocks:
+        imessage = False
+        reasons["imessage"] = "suppressed by quiet hours"
+    else:
+        reasons["imessage"] = "eligible"
+
     return {
         "level": norm_level,
         "push": push,
         "sms": sms,
+        "imessage": imessage,
         "quiet_hours": quiet,
         "quiet_hours_bypassed": quiet and bypass,
         "reasons": reasons,
@@ -197,6 +213,20 @@ def delivery_is_dry_run() -> bool:
     if raw is None:
         return True
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def imessage_globally_enabled() -> bool:
+    """iMessage sending requires an explicit env opt-in AND a recipient handle.
+
+    Box-level master switch (same contract as SMS): the channel stays off until
+    the operator sets ALERT_IMESSAGE_ENABLED=true and ALERT_IMESSAGE_TO on the
+    server. macOS-only by design — delivery shells to the local Messages.app.
+    """
+    return os.getenv("ALERT_IMESSAGE_ENABLED", "").strip().lower() not in FALSE_ENV_VALUES
+
+
+def imessage_recipient() -> str:
+    return os.getenv("ALERT_IMESSAGE_TO", "").strip()
 
 
 def sms_globally_enabled() -> bool:
@@ -462,11 +492,13 @@ class NotificationCenter:
         db_path: str | None = None,
         sms_client: TwilioSMSClient | None = None,
         push_client: WebPushClient | None = None,
+        imessage_sender: IMessageSender | None = None,
     ):
         self.db_path = resolve_db_path(db_path)
         init_db(self.db_path)
         self._sms_client = sms_client
         self._push_client = push_client
+        self._imessage_sender = imessage_sender
 
     # -- channel clients (lazily built from env if not injected) --------------- #
     @property
@@ -476,6 +508,10 @@ class NotificationCenter:
     @property
     def push_client(self) -> WebPushClient:
         return self._push_client or WebPushClient.from_env()
+
+    @property
+    def imessage_sender(self) -> IMessageSender:
+        return self._imessage_sender or IMessageSender()
 
     # -- preferences ----------------------------------------------------------- #
     def get_preferences(self) -> dict[str, Any]:
@@ -699,6 +735,11 @@ class NotificationCenter:
         # delivery (_deliver_sms) agree on the same number. route_alert stays pure —
         # the fallback is injected here, in the dispatcher, not inside the rule.
         prefs = _apply_sms_fallback(prefs)
+        # iMessage is env-configured (box-level) in v1 — inject into prefs here so
+        # route_alert stays pure, mirroring the SMS fallback pattern above.
+        prefs = {**prefs,
+                 "imessage_enabled": imessage_globally_enabled() and bool(imessage_recipient()),
+                 "imessage_min_level": os.getenv("ALERT_IMESSAGE_MIN_LEVEL", "URGENT_IDEA")}
         decision = route_alert(alert["level"], prefs)
         channels_sent: list[str] = []
         results: dict[str, Any] = {}
@@ -717,6 +758,14 @@ class NotificationCenter:
             results[CHANNEL_SMS] = result
             if result.get("delivered"):
                 channels_sent.append(CHANNEL_SMS)
+            if result.get("error"):
+                last_error = result["error"]
+
+        if decision.get("imessage"):
+            result = self._deliver_imessage(alert, dry_run=dry_run)
+            results[CHANNEL_IMESSAGE] = result
+            if result.get("delivered"):
+                channels_sent.append(CHANNEL_IMESSAGE)
             if result.get("error"):
                 last_error = result["error"]
 
@@ -828,6 +877,27 @@ class NotificationCenter:
         self._audit(alert["id"], CHANNEL_SMS, "error", str(result.get("error")), dry_run=False)
         return {"delivered": False, "error": str(result.get("error"))}
 
+    def _deliver_imessage(self, alert: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+        # Routing already required the env switch + recipient (injected in
+        # dispatch); these re-checks keep the method safe if called directly.
+        handle = imessage_recipient()
+        text = f"[{alert['level']}] {alert['title']}\n{alert['body']}".strip()
+        if dry_run:
+            self._audit(alert["id"], CHANNEL_IMESSAGE, "dry_run", "would send 1 imessage", dry_run=True)
+            return {"delivered": False, "dry_run": True}
+        if not handle:
+            self._audit(alert["id"], CHANNEL_IMESSAGE, "skipped", "no ALERT_IMESSAGE_TO recipient", dry_run=False)
+            return {"delivered": False, "error": "no_imessage_recipient"}
+        if not imessage_globally_enabled():
+            self._audit(alert["id"], CHANNEL_IMESSAGE, "skipped", "ALERT_IMESSAGE_ENABLED not set", dry_run=False)
+            return {"delivered": False, "error": "imessage_globally_disabled"}
+        result = self.imessage_sender.send(handle, text)
+        if result.get("ok"):
+            self._audit(alert["id"], CHANNEL_IMESSAGE, "sent", "ok", dry_run=False)
+            return {"delivered": True}
+        self._audit(alert["id"], CHANNEL_IMESSAGE, "error", str(result.get("error")), dry_run=False)
+        return {"delivered": False, "error": str(result.get("error"))}
+
     def _audit(self, alert_id: int, channel: str, status: str, detail: str, *, dry_run: bool) -> None:
         with connect(self.db_path) as conn:
             conn.execute(
@@ -904,6 +974,40 @@ def _validate_clock(value: Any) -> Optional[str]:
     if parsed is None:
         raise ValueError("quiet hours bound must be HH:MM (24-hour)")
     return parsed.strftime("%H:%M")
+
+
+class IMessageSender:
+    """Sends through the LOCAL Messages.app via osascript (macOS-only by design —
+    the runner IS a Mac and stays signed into a dedicated sender Apple ID).
+
+    The handle and message text are passed as argv to an `on run` handler —
+    never interpolated into the AppleScript source — so alert content cannot
+    inject script. First real send requires a one-time Automation permission
+    grant (System Settings → Privacy & Security → Automation → Messages).
+    """
+
+    SCRIPT = """on run {targetHandle, messageText}
+    tell application "Messages"
+        set targetService to 1st account whose service type = iMessage
+        set targetBuddy to participant targetHandle of targetService
+        send messageText to targetBuddy
+    end tell
+end run"""
+
+    def send(self, handle: str, text: str) -> dict[str, Any]:
+        try:
+            proc = subprocess.run(
+                ["osascript", "-e", self.SCRIPT, handle, text],
+                capture_output=True, text=True, timeout=20)
+        except Exception as exc:
+            return {"ok": False, "error": f"osascript failed: {exc}"}
+        if proc.returncode != 0:
+            detail = (proc.stderr or "osascript error").strip()
+            if "-1743" in detail:
+                detail = ("Automation permission not granted: approve the sender process "
+                          "for Messages in System Settings → Privacy & Security → Automation")
+            return {"ok": False, "error": detail[:200]}
+        return {"ok": True}
 
 
 def _apply_sms_fallback(prefs: dict[str, Any]) -> dict[str, Any]:
