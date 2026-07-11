@@ -308,3 +308,23 @@ def test_mcp_paid_tools_gated_and_metered(tmp_path: Path, monkeypatch):
                     "arguments": {"ticker": "NVDA", "bias": "sideways"}},
                    key="sk-test-123")
     assert bad_args.json()["error"]["data"]["http_status"] == 422
+
+
+def test_commercial_catalysts_survive_vendor_noise(tmp_path: Path, monkeypatch):
+    """M2.x regression: the license filter must be in the SQL, not applied
+    after a recency LIMIT — 60 fresher vendor rows must not starve the feed
+    of the older license-clean SEC event."""
+    monkeypatch.delenv("INTEL_COMMERCIAL_MODE", raising=False)
+    db = seeded_trading_db(tmp_path)
+    with connect(db) as conn:
+        for i in range(60):
+            conn.execute(
+                "INSERT INTO catalyst_events (ticker, catalyst_type, strategy_label,"
+                " direction, headline, source, published_at, discovered_at, catalyst_score)"
+                f" VALUES ('T{i}', 'News Catalyst', 'News Catalyst', 'neutral',"
+                f" 'Vendor headline {i}', 'Polygon News / Newswire',"
+                " '2026-07-09T15:00:00Z', '2026-07-09T15:00:00Z', 40)")
+        conn.commit()
+    events = catalyst_feed(db, limit=10)["data"]["events"]
+    assert events, "SEC event must surface despite 60 fresher vendor rows"
+    assert all("sec edgar" in e["provenance"]["source"].lower() for e in events)

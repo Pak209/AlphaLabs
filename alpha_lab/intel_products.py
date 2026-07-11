@@ -171,29 +171,29 @@ def market_snapshot(db_path: str | None = None) -> dict[str, Any]:
 def catalyst_feed(db_path: str | None = None, limit: int = 25) -> dict[str, Any]:
     limit = max(1, min(int(limit), 100))
     path = resolve_db_path(db_path)
+    # M2c/M2.x: the license filter is part of the QUERY, not post-processing —
+    # license-clean rows are ~1% of the table, so filtering after a recency
+    # LIMIT starved the commercial feed even though clean events existed.
+    where, params = "", []
+    if commercial_mode():
+        clause = " OR ".join("lower(source) LIKE ?" for _ in _COMMERCIAL_CLEAN_SOURCES)
+        where = f"WHERE ({clause})"
+        params = [f"%{s}%" for s in _COMMERCIAL_CLEAN_SOURCES]
     with connect(path) as conn:
         rows = [dict(r) for r in conn.execute(
-            """
+            f"""
             SELECT ticker, catalyst_type, strategy_label, direction, headline,
                    source, source_url, published_at, discovered_at,
                    novelty_score, urgency_score, catalyst_score
-            FROM catalyst_events
+            FROM catalyst_events {where}
             ORDER BY datetime(discovered_at) DESC, id DESC LIMIT ?
             """,
-            (limit * 2,),   # over-fetch to survive the paid-source filter
+            (*params, limit * 2),   # over-fetch to survive the paid-source filter
         ).fetchall()]
     events = [
         r for r in rows
         if str(r.get("source") or "").strip().lower() not in _EXCLUDED_PAID_SOURCES
-    ]
-    if commercial_mode():
-        # M2c: SEC-EDGAR-only until vendor commercial agreements exist.
-        events = [
-            e for e in events
-            if any(clean in str(e.get("source") or "").lower()
-                   for clean in _COMMERCIAL_CLEAN_SOURCES)
-        ]
-    events = events[:limit]
+    ][:limit]
     for event in events:
         event["provenance"] = {"source": event.pop("source"),
                                "url": event.pop("source_url"),

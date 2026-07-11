@@ -272,3 +272,37 @@ def test_alpaca_intraday_handles_missing_bars(monkeypatch):
     snap = ls.fetch_alpaca_intraday("XYZ")
     assert snap["status"] == "ok"
     assert snap["gap_pct"] is None and snap["relative_volume"] is None   # neutral downstream
+
+
+def test_sec_8k_items_name_the_event(monkeypatch):
+    monkeypatch.setenv("SEC_USER_AGENT", "AlphaLab test test@example.com")
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    def fake_fetch(url, **kwargs):
+        if "company_tickers" in url:
+            return {"0": {"ticker": "NVDA", "cik_str": 1045810}}
+        return {"filings": {"recent": {
+            "form": ["8-K", "8-K", "8-K", "4"],
+            "filingDate": [today, today, today, today],
+            "accessionNumber": ["0001-24-000001", "0001-24-000002",
+                                "0001-24-000003", "0001-24-000004"],
+            "primaryDocument": ["a.htm", "b.htm", "c.htm", "d.htm"],
+            "items": ["2.02,9.01", "1.03,5.02", "", ""],
+            "acceptanceDateTime": ["2026-07-09T20:31:12.000Z", "", "", ""],
+        }}}
+
+    monkeypatch.setattr(ls, "_fetch_json", fake_fetch)
+    rows = ls._fetch_sec_filings(["NVDA"])["catalysts"]
+    assert len(rows) == 4
+
+    earnings, bankruptcy, bare_8k, form4 = rows
+    # most material item names the headline; 9.01 boilerplate never wins
+    assert earnings["headline"] == "NVDA 8-K: reported earnings results (Item 2.02) (+1 more items)"
+    assert earnings["published_at"] == "2026-07-09T20:31:12.000Z"   # real acceptance time
+    # 1.03 bankruptcy outranks 5.02 officer changes
+    assert "bankruptcy or receivership (Item 1.03)" in bankruptcy["headline"]
+    assert bankruptcy["published_at"].startswith(today)             # filingDate fallback
+    # no items -> the old generic wording survives (fixture-compat contract)
+    assert bare_8k["headline"] == "NVDA filed 8-K with the SEC"
+    # Form 4 gets a human label instead of "filed 4"
+    assert form4["headline"] == "NVDA filed insider transaction report (Form 4) with the SEC"

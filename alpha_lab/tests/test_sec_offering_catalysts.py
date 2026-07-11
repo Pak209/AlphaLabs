@@ -34,10 +34,12 @@ def test_sec_filing_text_enriches_offering_and_shelf_forms():
     assert hs == "AMZN filed S-3 shelf registration with the SEC"
     assert "shelf registration" in hs.lower()
 
-    # Routine forms keep the original neutral wording untouched.
+    # Routine forms stay neutral (M2.x gave them human labels, no direction).
     hk, sk = _sec_filing_text("NVDA", "10-K")
-    assert hk == "NVDA filed 10-K with the SEC"
-    assert sk == "SEC filing detected: 10-K. Review the filing before treating this as directional."
+    assert hk == "NVDA filed annual report (10-K) with the SEC"
+    assert "dilut" not in sk.lower()
+    assert sk == ("SEC filing detected: annual report (10-K). Review the filing "
+                  "before treating this as directional.")
 
 
 def test_424b5_is_bearish_direct_company_catalyst():
