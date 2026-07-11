@@ -108,7 +108,7 @@ function cleanErrorMessage(message) {
 async function load() {
   const refresh = document.querySelector("#refresh");
   if (refresh) refresh.textContent = "Refreshing...";
-  const [dashboard, ideas, trades, stats, bitcoin, afterHoursBtc, liquidity, trendingStocks, oil, futuresPulse, businessProfiles, catalysts, catalystIntelligence, dailyBrief, briefings, executionAudit, performanceReport, approvalResult, alertsResult] = await Promise.all([
+  const [dashboard, ideas, trades, stats, bitcoin, afterHoursBtc, liquidity, trendingStocks, oil, futuresPulse, businessProfiles, catalysts, catalystIntelligence, dailyBrief, briefings, executionAudit, performanceReport, portfolio, approvalResult, alertsResult] = await Promise.all([
     api("/api/dashboard"),
     api("/api/ideas"),
     api("/api/trades"),
@@ -126,6 +126,7 @@ async function load() {
     api("/api/briefings"),
     api("/api/execution-audit"),
     api("/api/performance/report"),
+    api("/api/portfolio"),
     loadApprovalQueueResult(),
     loadAlertsResult(),
   ]);
@@ -148,6 +149,7 @@ async function load() {
     briefings,
     executionAudit,
     performanceReport,
+    portfolio,
     approvalQueue: approvalResult.data,
     approvalsLoading: false,
     approvalsError: approvalResult.error,
@@ -1427,6 +1429,7 @@ function renderExecutionAudit() {
 
 function renderPerformance() {
   const report = state.performanceReport || {};
+  renderPortfolio(state.portfolio || {});
   renderAlphaReportCard(report.report_card || {});
   renderAlphaIQ(report.alpha_iq || {});
   renderLeaderboard(document.querySelector("#source-leaderboard"), report.source_leaderboard || [], "No graded sources yet.");
@@ -1440,6 +1443,67 @@ function gradeClass(grade) {
   if (grade === "D" || grade === "F") return "grade-bad";
   if (grade === "C") return "grade-mid";
   return "grade-none";
+}
+
+// The Portfolio panel is the ACCOUNT truth (live broker holdings + the exit
+// plan each position is governed by); the report card below it grades every
+// scanner signal whether or not it was traded. Keeping the two grades separate
+// is the point — a strong account can coexist with a weak signal batch and
+// vice versa.
+function renderPortfolio(report) {
+  const gradeTarget = document.querySelector("#portfolio-grade");
+  const summaryTarget = document.querySelector("#portfolio-summary");
+  const holdingsTarget = document.querySelector("#portfolio-holdings");
+  if (!gradeTarget || !summaryTarget || !holdingsTarget) return;
+  if (report.status !== "ok") {
+    gradeTarget.innerHTML = "";
+    summaryTarget.innerHTML = "";
+    holdingsTarget.innerHTML = `<div class="row">Portfolio unavailable — broker unreachable${report.detail ? ` (${report.detail})` : ""}.</div>`;
+    return;
+  }
+  const grade = (report.grade || {}).letter;
+  const plPct = (report.grade || {}).pl_pct;
+  gradeTarget.innerHTML = `
+    <div class="grade-badge ${gradeClass(grade)}">${grade || "—"}</div>
+    <span class="muted">${plPct === null || plPct === undefined ? "Accumulating" : `Total P&L ${signedPct(plPct)} of starting capital`}</span>
+  `;
+  const account = report.account || {};
+  const realized = report.realized || {};
+  const stats = [
+    ["Equity", money(account.equity)],
+    ["Cash", money(account.cash)],
+    ["Unrealized P&L", `${Number(report.unrealized_pl) >= 0 ? "+" : ""}${money(report.unrealized_pl)}`],
+    ["Realized P&L", `${Number(realized.realized_pl) >= 0 ? "+" : ""}${money(realized.realized_pl)} · ${realized.closed_trades ?? 0} closed`],
+    ["Closed win rate", realized.win_rate === null || realized.win_rate === undefined ? "n/a" : `${num(realized.win_rate)}%`],
+    ["Exit management", report.exit_management_mode || "off"],
+  ];
+  summaryTarget.innerHTML = stats.map(([k, v]) => `<div class="metric"><span>${k}</span><strong>${v}</strong></div>`).join("");
+  const positions = report.positions || [];
+  if (!positions.length) {
+    holdingsTarget.innerHTML = `<div class="row">No open positions.</div>`;
+    return;
+  }
+  holdingsTarget.innerHTML = positions.map((p) => {
+    const plan = p.exit_plan || {};
+    const exitText = plan.type === "stop_target"
+      ? `Stop ${num(plan.stop_price)} (−${num(plan.stop_pct)}%) · Target ${num(plan.target_price)} (+${num(plan.target_pct)}%)`
+      : "Options lifecycle";
+    const up = Number(p.unrealized_pl) >= 0;
+    return `
+    <div class="leaderboard-row">
+      <div class="grade-badge sm ${up ? "grade-good" : "grade-bad"}">${up ? "▲" : "▼"}</div>
+      <div class="leaderboard-main">
+        <strong>${p.symbol}${p.side === "short" ? " · short" : ""}</strong>
+        <div class="leaderboard-stats">
+          <span>${num(p.qty)} @ ${num(p.avg_entry_price)} → ${num(p.current_price)}</span>
+          <span>Value ${money(p.market_value)}</span>
+          <span>P&L ${up ? "+" : ""}${money(p.unrealized_pl)} (${signedPct(p.unrealized_plpc)})</span>
+          <span>${exitText}</span>
+          ${p.alpha_composite !== null && p.alpha_composite !== undefined ? `<span>Alpha ${num(p.alpha_composite)}</span>` : ""}
+        </div>
+      </div>
+    </div>`;
+  }).join("");
 }
 
 function renderAlphaReportCard(card) {

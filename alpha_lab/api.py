@@ -387,6 +387,10 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
     def performance_report(recent_limit: int = 12) -> dict[str, Any]:
         return lab.performance_report(recent_limit=recent_limit)
 
+    @app.get("/api/portfolio")
+    def portfolio() -> dict[str, Any]:
+        return lab.portfolio_report()
+
     @app.get("/api/signals/evaluations")
     def signal_evaluations(limit: int = 100) -> list[dict[str, Any]]:
         return lab.list_signal_evaluations(limit)
