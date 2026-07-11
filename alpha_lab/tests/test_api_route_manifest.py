@@ -96,6 +96,7 @@ MANIFEST: list[str] = [
     "GET /api/performance/ideas",
     "GET /api/performance/report",
     "GET /api/performance/scoreboard",
+    "GET /api/portfolio",
     "GET /api/review/briefing",
     "GET /api/review/opportunity/{idea_id}",
     "GET /api/safety-status",

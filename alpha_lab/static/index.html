@@ -234,8 +234,20 @@
           <section class="panel report-card-panel">
             <div class="panel-head">
               <div>
-                <h2>Alpha Report Card</h2>
-                <p class="muted">Grades signal quality, not just P/L. Paper-trading research only — scores accumulate as signals resolve.</p>
+                <h2>Portfolio</h2>
+                <p class="muted">What the paper account actually holds: live P&L per position and the exit plan (stop/target) each one is governed by.</p>
+              </div>
+              <div id="portfolio-grade" class="report-grade"></div>
+            </div>
+            <div id="portfolio-summary" class="report-card-stats"></div>
+            <div id="portfolio-holdings" class="leaderboard"></div>
+          </section>
+
+          <section class="panel report-card-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Scanner Report Card</h2>
+                <p class="muted">Grades the signal quality of EVERY scanner signal — executed or not — so this score moves independently of the account above. Paper-trading research only.</p>
               </div>
               <div id="report-grade" class="report-grade"></div>
             </div>
@@ -468,7 +480,7 @@
       </main>
     </div>
     <div id="toast" class="toast"></div>
-    <script src="/static/app.js?v=52"></script>
+    <script src="/static/app.js?v=53"></script>
     <script>
       // Register the service worker (served from root so its scope is "/").
       if ("serviceWorker" in navigator) {

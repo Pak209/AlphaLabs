@@ -1439,6 +1439,121 @@ class AlphaLabService:
         marked = [self._with_performance_marks(row) for row in rows]
         return build_performance_report(marked, recent_limit=recent_limit, context=context)
 
+    def portfolio_report(self) -> dict[str, Any]:
+        """Live paper-account portfolio for the dashboard: holdings with P&L,
+        the exit plan each position is actually governed by (the same risk-config
+        stop/target percentages manage_exits enforces — default profile for
+        equities, crypto profile for crypto; options follow their own lifecycle),
+        and an honest ACCOUNT grade. Deliberately separate from the report card,
+        which grades every scanner signal whether or not it was ever traded."""
+        generated_at = datetime.now(timezone.utc).isoformat()
+        try:
+            broker = self._broker(dry_run=True)
+            account = broker.get_account()
+            raw_positions = broker.get_positions()
+        except Exception as exc:
+            return {"status": "unavailable", "detail": str(exc)[:200],
+                    "positions": [], "generated_at": generated_at}
+        equity_config = load_config(self.risk_config_path)
+        try:
+            crypto_config = load_config(self.risk_config_path, profile="crypto")
+        except Exception:
+            crypto_config = equity_config
+
+        with connect(self.db_path) as conn:
+            open_trades = [dict(r) for r in conn.execute(
+                "SELECT ticker, contract_symbol, quantity, entry_price, opened_at,"
+                " alpha_composite, alpha_tier, asset_type"
+                " FROM trades WHERE status = 'paper_open'").fetchall()]
+            closed = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(realized_pl), 0), COALESCE(SUM(realized_pl > 0), 0)"
+                " FROM trades WHERE status = 'closed' AND realized_pl IS NOT NULL").fetchone()
+        trade_context = {}
+        for trade in open_trades:
+            key = str(trade.get("contract_symbol") or trade.get("ticker") or "").replace("/", "")
+            trade_context.setdefault(key, trade)
+
+        positions = []
+        total_unrealized = 0.0
+        for p in raw_positions:
+            symbol = str(p.get("symbol") or "")
+            entry = float(p.get("avg_entry_price") or 0)
+            side = str(p.get("side") or "long")
+            unrealized = float(p.get("unrealized_pl") or 0)
+            total_unrealized += unrealized
+            asset_class = str(p.get("asset_class") or "")
+            is_option = "option" in asset_class.lower() or bool(_OCC_SUFFIX_RE_SERVICE.search(symbol))
+            is_crypto = "/" in symbol or (
+                symbol.endswith("USD") and symbol[:-3].isalpha() and len(symbol) <= 8)
+            cfg = crypto_config if is_crypto else equity_config
+            if is_option:
+                exit_plan = {"type": "options_lifecycle",
+                             "note": "options follow their own lifecycle path (no stop/target pass)"}
+            elif side == "short":
+                exit_plan = {"type": "stop_target",
+                             "stop_price": round(entry * (1 + cfg.stop_loss_pct), 4),
+                             "target_price": round(entry * (1 - cfg.take_profit_pct), 4),
+                             "stop_pct": round(cfg.stop_loss_pct * 100, 2),
+                             "target_pct": round(cfg.take_profit_pct * 100, 2)}
+            else:
+                exit_plan = {"type": "stop_target",
+                             "stop_price": round(entry * (1 - cfg.stop_loss_pct), 4),
+                             "target_price": round(entry * (1 + cfg.take_profit_pct), 4),
+                             "stop_pct": round(cfg.stop_loss_pct * 100, 2),
+                             "target_pct": round(cfg.take_profit_pct * 100, 2)}
+            context = trade_context.get(symbol.replace("/", ""), {})
+            positions.append({
+                "symbol": symbol,
+                "asset_class": asset_class or ("crypto" if is_crypto else "us_equity"),
+                "side": side,
+                "qty": float(p.get("qty") or 0),
+                "avg_entry_price": entry,
+                "current_price": float(p.get("current_price") or 0),
+                "market_value": float(p.get("market_value") or 0),
+                "unrealized_pl": unrealized,
+                "unrealized_plpc": float(p.get("unrealized_plpc") or 0) * 100,
+                "exit_plan": exit_plan,
+                "opened_at": context.get("opened_at"),
+                "alpha_composite": context.get("alpha_composite"),
+                "alpha_tier": context.get("alpha_tier"),
+            })
+        positions.sort(key=lambda row: abs(row["market_value"]), reverse=True)
+
+        closed_count, realized_pl, realized_wins = int(closed[0]), float(closed[1]), int(closed[2])
+        equity = float(account.get("equity") or 0)
+        total_pl = realized_pl + total_unrealized
+        baseline = equity - total_pl
+        pl_pct = round(total_pl / baseline * 100, 2) if baseline > 0 else None
+        # Account grade: total P&L (realized + unrealized) as % of starting
+        # capital. Coarse on purpose — the number next to it is the real story.
+        if pl_pct is None:
+            letter = None
+        elif pl_pct >= 5:
+            letter = "A"
+        elif pl_pct >= 2:
+            letter = "B"
+        elif pl_pct >= 0:
+            letter = "C"
+        elif pl_pct >= -3:
+            letter = "D"
+        else:
+            letter = "F"
+        return {
+            "status": "ok",
+            "generated_at": generated_at,
+            "account": {"equity": equity,
+                        "cash": float(account.get("cash") or 0),
+                        "positions_count": len(positions)},
+            "grade": {"letter": letter, "pl_pct": pl_pct,
+                      "basis": "total P&L (realized + unrealized) as % of starting capital"},
+            "unrealized_pl": round(total_unrealized, 2),
+            "realized": {"closed_trades": closed_count,
+                         "realized_pl": round(realized_pl, 2),
+                         "win_rate": round(realized_wins / closed_count * 100, 1) if closed_count else None},
+            "exit_management_mode": os.getenv("ALPHALAB_EXIT_MANAGEMENT", "off").strip().lower(),
+            "positions": positions,
+        }
+
     def list_signal_evaluations(self, limit: int = 100) -> list[dict[str, Any]]:
         with connect(self.db_path) as conn:
             return AlphaLabRepository(conn).list_signal_evaluations(limit)
