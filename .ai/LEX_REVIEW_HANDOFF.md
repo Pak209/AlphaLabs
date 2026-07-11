@@ -3875,3 +3875,34 @@ Intel platform M2 shipped on feat/intel-platform-m2 (PR #23). M2a: extracted alp
 
 ### Next Recommended Task
 Human: review/merge PR #23. Then M2.x (SEC EDGAR ingestion source feeding catalyst_events) or M3-sandbox (x402 on Base Sepolia via CDP facilitator) — M3-sandbox is the higher-leverage path while wallet/KYB completes
+## 2026-07-10 13:33 PT — Claude
+
+Branch: feat/intel-x402-sandbox
+Commit: a2807d2
+Working Tree: clean
+
+### Summary
+Intel platform M3-sandbox shipped on feat/intel-x402-sandbox (PR #24). New alpha_lab/intel_x402.py (stdlib-only): spec-correct x402 PaymentRequirements (atomic USDC units, asset contract address, EIP-712 extra), Base Sepolia (x402.org facilitator) + Base mainnet (CDP facilitator, M3-live seam) params, X-PAYMENT decode / X-PAYMENT-RESPONSE encode, FacilitatorClient with env-overridable URL/bearer, local sanity checks before facilitator round-trips. Gateway authorize_or_charge adds the payment lane beside the key lane: verify BEFORE product, settle AFTER success — failed calls never charge, 404s are free, failed settlement withholds output; replay protection via payments.payment_id UNIQUE (EIP-3009 nonce) + tx_hash column (additive migration); payers get per-wallet identity x402:<address> for rate limiting and evaluation scoping. All paid REST endpoints accept X-PAYMENT and return settlement receipts. Demo-mode challenge corrected to spec shape (was dollar-string amount + 'USDC' ticker as asset). INTEL_X402_MODE: off|demo|sandbox|live; live GATED on business wallet + CDP KYB (never personal wallet). Also resolved journal append-only collision from PR #22/#23 concurrent merges via chronological union. Prior union-and-branch command was interrupted by an accidental permission denial and re-run cleanly at user request.
+
+### Files Modified
+- alpha_lab/intel_x402.py
+- alpha_lab/intel_gateway.py
+- alpha_lab/intel_api.py
+- alpha_lab/tests/test_intel_x402.py
+- alpha_lab/tests/test_intel_platform.py
+- examples/intel/ (README.md, x402_sandbox.md new)
+- docs/INTELLIGENCE_PLATFORM_PLAN.md
+- .ai/LEX_REVIEW_HANDOFF.md (chronological union)
+
+### Commands / Tests Run
+- .venv/bin/python -m pytest alpha_lab/tests -q
+
+### Results
+- 570 passed (8 new x402 tests: challenge spec-shape, verify->settle ordering, replay rejection, verify-fail never settles, settle-fail withholds product, local-check rejections, paid evaluation+explanation wallet-scoped, keys unaffected in sandbox)
+
+### Risks / Blockers
+- Real on-chain testnet settlement not yet exercised — needs a Circle-faucet-funded Base Sepolia test wallet; walkthrough in examples/intel/x402_sandbox.md is the verification step before trusting the facilitator integration
+- Mainnet EIP-712 domain params (extra name/version) must be verified against CDP docs at M3-live before enabling live mode
+
+### Next Recommended Task
+Human: review/merge PR #24, then run the on-chain sandbox probe (x402_sandbox.md — throwaway wallet + Circle faucet). Agent next: M2.x SEC EDGAR ingestion so the commercial catalysts product has license-clean events

@@ -28,6 +28,37 @@ DEFAULT_WATCHLIST = [
 ]
 MATERIAL_SEC_FORMS = {"8-K", "6-K", "10-Q", "10-K", "S-1", "S-3", "424B5", "424B3", "4"}
 
+# 8-K item codes -> plain-language events, phrased so the keyword classifier
+# can type them. Ordered by materiality; the first match names the headline.
+SEC_8K_ITEM_PRIORITY = [
+    ("1.03", "bankruptcy or receivership"),
+    ("4.02", "non-reliance on prior financials (restatement)"),
+    ("3.01", "delisting notice or listing-rule failure"),
+    ("2.02", "reported earnings results"),
+    ("2.01", "completed an acquisition or disposition"),
+    ("1.01", "entered a material definitive agreement"),
+    ("5.01", "change in control"),
+    ("2.05", "restructuring and exit costs"),
+    ("2.06", "material impairment"),
+    ("5.02", "officer or director changes"),
+    ("1.02", "terminated a material agreement"),
+    ("2.03", "new direct financial obligation"),
+    ("4.01", "changed certifying accountant"),
+    ("3.02", "unregistered equity sales"),
+    ("5.03", "charter/bylaws amendment"),
+    ("5.07", "shareholder vote results"),
+    ("7.01", "Regulation FD disclosure"),
+    ("8.01", "other material event"),
+]
+
+SEC_FORM_LABELS = {
+    "4": "insider transaction report (Form 4)",
+    "10-Q": "quarterly report (10-Q)",
+    "10-K": "annual report (10-K)",
+    "6-K": "foreign issuer report (6-K)",
+    "S-1": "registration statement (S-1)",
+}
+
 
 def fetch_live_catalysts(watchlist: list[str] | None = None, limit: int = 40) -> dict[str, Any]:
     symbols = _watchlist(watchlist)
@@ -73,11 +104,13 @@ def _fetch_sec_filings(symbols: list[str]) -> dict[str, Any]:
                 continue
             data = _fetch_json(SEC_SUBMISSIONS_URL.format(cik=cik), headers={"User-Agent": user_agent})
             recent = data.get("filings", {}).get("recent", {})
-            for form, filing_date, accession, primary_doc in zip(
+            for form, filing_date, accession, primary_doc, items, accepted in zip(
                 recent.get("form", []),
                 recent.get("filingDate", []),
                 recent.get("accessionNumber", []),
                 recent.get("primaryDocument", []),
+                _padded(recent, "items"),
+                _padded(recent, "acceptanceDateTime"),
             ):
                 if form not in MATERIAL_SEC_FORMS:
                     continue
@@ -86,14 +119,14 @@ def _fetch_sec_filings(symbols: list[str]) -> dict[str, Any]:
                         continue
                 except ValueError:
                     pass
-                headline, summary = _sec_filing_text(symbol, form)
+                headline, summary = _sec_filing_text(symbol, form, items)
                 catalysts.append({
                     "ticker": symbol,
                     "headline": headline,
                     "summary": summary,
                     "source": "SEC EDGAR submissions",
                     "source_url": _sec_filing_url(cik, accession, primary_doc),
-                    "published_at": f"{filing_date}T13:00:00Z",
+                    "published_at": accepted or f"{filing_date}T13:00:00Z",
                     "security_type": "stock",
                     "exchange": "",
                 })
@@ -102,13 +135,39 @@ def _fetch_sec_filings(symbols: list[str]) -> dict[str, Any]:
         return _error("SEC EDGAR", exc)
 
 
-def _sec_filing_text(symbol: str, form: str) -> tuple[str, str]:
+def _padded(recent: dict, key: str) -> list:
+    """Column padded to the form column's length (older payloads omit keys)."""
+    values = list(recent.get(key) or [])
+    return values + [""] * (len(recent.get("form") or []) - len(values))
+
+
+def _sec_filing_text(symbol: str, form: str, items: str = "") -> tuple[str, str]:
     """Build the headline/summary for a SEC filing.
 
     Offering/shelf forms get directional language so the catalyst scorer can read
-    them as dilution/bearish signals; all other forms keep the neutral wording.
+    them as dilution/bearish signals; 8-Ks with item codes get the plain-language
+    event (most material item names the headline) so both the internal classifier
+    and the commercial catalysts product see WHAT happened, not just "filed 8-K";
+    all other forms keep the neutral wording.
     """
     form_u = form.upper()
+    if form_u == "8-K" and items:
+        codes = {code.strip() for code in items.split(",") if code.strip()}
+        for code, event in SEC_8K_ITEM_PRIORITY:
+            if code in codes:
+                extra = f" (+{len(codes) - 1} more items)" if len(codes) > 1 else ""
+                return (
+                    f"{symbol} 8-K: {event} (Item {code}){extra}",
+                    f"SEC 8-K for {symbol} with items {', '.join(sorted(codes))}. "
+                    f"Most material: Item {code} — {event}. Review the filing before "
+                    "treating this as directional.",
+                )
+    if form_u in SEC_FORM_LABELS:
+        return (
+            f"{symbol} filed {SEC_FORM_LABELS[form_u]} with the SEC",
+            f"SEC filing detected: {SEC_FORM_LABELS[form_u]}. Review the filing before "
+            "treating this as directional.",
+        )
     if form_u in {"424B5", "424B3"}:
         return (
             f"{symbol} filed {form} offering prospectus with the SEC",
