@@ -1326,26 +1326,50 @@ async function unsubscribePush() {
 }
 
 async function sendTestAlert() {
+  // Ask the server for a REAL push first. The server refuses (403) unless the
+  // operator set ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true on the box, so the
+  // safety posture is unchanged — the gate just lives server-side where it
+  // belongs, and this button becomes the one-click end-to-end test. When real
+  // sends are disabled, fall back to the audited dry-run + local preview.
   let res;
+  let realSend = true;
   try {
-    // Create a dry-run synthetic alert at an eligible level (URGENT_IDEA, at/above
-    // the documented push floor). This is ALWAYS dry-run: the button never asks the
-    // server for a real send, so no real device push leaves the box and no delivery
-    // env flags are touched. A real on-device push requires the separate supervised,
-    // env-gated server test. The alert is created so the Alerts list updates and so
-    // the local preview below has a real id to deep-link to.
-    res = await api("/api/notifications/test", { method: "POST", body: JSON.stringify({ level: "URGENT_IDEA" }) });
+    res = await api("/api/notifications/test", {
+      method: "POST",
+      body: JSON.stringify({ level: "URGENT_IDEA", force_dry_run: false }),
+    });
   } catch (err) {
-    showToast(`Test alert failed: ${cleanErrorMessage(err.message || String(err))}`);
-    return;
+    const message = err && err.message ? err.message : String(err);
+    if (!/real test sends are disabled/i.test(message)) {
+      showToast(`Test alert failed: ${cleanErrorMessage(message)}`);
+      return;
+    }
+    realSend = false;
+    try {
+      res = await api("/api/notifications/test", { method: "POST", body: JSON.stringify({ level: "URGENT_IDEA" }) });
+    } catch (err2) {
+      showToast(`Test alert failed: ${cleanErrorMessage(err2.message || String(err2))}`);
+      return;
+    }
   }
   await refreshAlerts();
-  // Show a LOCAL notification (not a server push) so this device can actually
-  // verify the notification UI and tap-to-route behavior without enabling real
-  // delivery. This is what makes the button visibly "do something" on-device.
+  if (realSend) {
+    const push = (res.results || {}).pwa_push || {};
+    if (push.delivered) {
+      showToast(`Real push sent to ${push.sent} subscribed device(s). Not seeing it? That device's subscription may be stale — toggle "Enable PWA push" off/on there.`);
+    } else {
+      const reason = push.error
+        || (res.decision && res.decision.reasons && res.decision.reasons.push)
+        || "no eligible push subscription";
+      showToast(`Real send attempted but nothing delivered: ${reason}.`);
+    }
+    return;
+  }
+  // Dry-run fallback: show a LOCAL notification (not a server push) so this
+  // device can verify the notification UI and tap-to-route behavior.
   const shown = await showLocalTestNotification(res.alert);
   if (shown) {
-    showToast("Test notification shown on this device (dry-run — no server push sent).");
+    showToast("Test notification shown on this device (dry-run — real sends disabled on the server).");
   } else {
     showToast("Test alert created (dry-run). Enable notifications on this device to preview the on-device notification.");
   }
