@@ -185,3 +185,22 @@ def test_api_keys_still_work_in_sandbox_mode(tmp_path: Path, monkeypatch):
     res = client.get("/v1/catalysts", headers={"Authorization": "Bearer sk-test-123"})
     assert res.status_code == 200
     assert "X-PAYMENT-RESPONSE" not in res.headers
+
+
+def test_facilitator_requests_carry_descriptive_user_agent(monkeypatch):
+    """The x402.org WAF 403s python-urllib's default UA (live probe finding)."""
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"isValid": true}'
+
+    def fake_urlopen(request, timeout=None):
+        captured["ua"] = request.get_header("User-agent")
+        return FakeResponse()
+
+    monkeypatch.setattr(intel_x402.urllib.request, "urlopen", fake_urlopen)
+    intel_x402.FacilitatorClient().verify({"x402Version": 1}, {"network": "base"})
+    assert captured["ua"] and "urllib" not in captured["ua"].lower()
+    assert "AlphaLabs" in captured["ua"]

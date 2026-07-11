@@ -3906,3 +3906,67 @@ Intel platform M3-sandbox shipped on feat/intel-x402-sandbox (PR #24). New alpha
 
 ### Next Recommended Task
 Human: review/merge PR #24, then run the on-chain sandbox probe (x402_sandbox.md — throwaway wallet + Circle faucet). Agent next: M2.x SEC EDGAR ingestion so the commercial catalysts product has license-clean events
+
+
+## 2026-07-10 17:46 PT — Claude
+
+Branch: feat/intel-sec-edgar
+Commit: d0700f6
+Working Tree: clean
+
+### Summary
+Two tasks. (1) OPERATIONAL: post-PR-#24-merge deploy via scripts/deploy_mini.sh — already at origin/main e367895, scheduler+dashboard agents restarted (new PIDs 27628/27632), dashboard health 200, Alpaca reachable, paper mode armed as configured; intel API (:8790) is not a managed service, nothing to restart there. (2) M2.x SEC EDGAR shipped on feat/intel-sec-edgar (PR #25). Key finding: SEC ingestion ALREADY WORKED (SEC_USER_AGENT live, 13 rows/14 days) — the commercial catalysts product was empty because catalyst_feed applied the license filter AFTER a recency LIMIT, so ~150x more vendor rows starved the fetch window; the filter now lives in the SQL query. SEC fetcher enriched: 8-K item codes parsed with materiality priority naming the headline in classifier-readable language, published_at from acceptanceDateTime (real intraday timestamps), human labels for routine forms; fixture-compat preserved (itemless 8-Ks keep old wording). Journal collision from concurrent PR merges resolved again via chronological union before deploy.
+
+### Files Modified
+- alpha_lab/live_sources.py
+- alpha_lab/intel_products.py
+- alpha_lab/tests/test_live_sources.py
+- alpha_lab/tests/test_intel_platform.py
+- alpha_lab/tests/test_sec_offering_catalysts.py
+
+### Commands / Tests Run
+- ./scripts/deploy_mini.sh
+- .venv/bin/python -m pytest alpha_lab/tests -q
+- live probe: _fetch_sec_filings + commercial catalyst_feed against real DB
+
+### Results
+- agents restarted, dashboard 200, diagnose PASS (known WARNs: py3.9 EOL, paper armed intentionally)
+- 572 passed (new: 8-K item fixtures; regression: 60 fresher vendor rows cannot starve commercial feed of an SEC event; 2 routine-form wording pins updated, dilution-language guard kept)
+- commercial /v1/catalysts returns real SEC events (was 0); COIN 8-K reads 'officer or director changes (Item 5.02)'; acceptance timestamps live
+
+### Risks / Blockers
+- Enriched headlines may one-time re-insert a handful of filings within the 3-day lookback under new wording (bounded, per-run dedupe applies thereafter)
+- On-chain x402 sandbox probe still pending (needs Circle-faucet-funded test wallet — examples/intel/x402_sandbox.md)
+
+### Next Recommended Task
+Human: review/merge PR #25, then the x402 testnet probe. Agent next: M4 prep (public tunnel api.pak-labs.com + registry listings) is gated on human checklist items; nearest unblocked agent work is the outcome-report/feature-attribution products (M5 pull-forward, license risk LOW — engine-native telemetry)
+
+
+## 2026-07-10 22:10 PT — Claude
+
+Branch: fix/x402-facilitator-ua
+Commit: none
+Working Tree: modified
+
+### Summary
+Notification delivery diagnosis (audit + live test; no code changed). User reported push notifications still not working after testing with Codex. Root causes found in the audit trail: (1) tonight's test (alert 17, 8:08 PM PT) went through POST /api/notifications/test WITHOUT force_dry_run:false — that endpoint is safe-by-default and dry-runs unless the caller explicitly requests a real send (which the already-set ALPHALAB_ALLOW_REAL_NOTIFICATION_TESTS=true permits); the audit row correctly shows status=dry_run, nothing sent. (2) This morning's REAL alert (16, 'Approval needed: PLTR', 6:32 AM PT) also dry-ran because the pre-deploy scheduler process predated ALERT_DELIVERY_DRY_RUN=false being loaded; after today's ~4 PM deploy restart BOTH services carry the flag (verified via process env). Sent a properly-formed real test (alert 18, URGENT_IDEA): delivered=true sent=1 errors=0 — Apple's push service accepted (no 410), so the endpoint registration is alive server-side. If it did not appear on the phone, the remaining suspect is the stale client-side PWA subscription (created 6/22, last delivery attempt 6/23) — fix is re-subscribing from the dashboard PWA. Verified required env flags exist and loaded; no secrets recorded.
+
+### Files Modified
+- None (audit only).
+
+### Commands / Tests Run
+- sqlite notification_audit/push_subscriptions/alerts inspection
+- ps eww on scheduler+dashboard PIDs
+- POST /api/notifications/test with force_dry_run:false (authorized, level URGENT_IDEA)
+
+### Results
+- 14 audit rows all dry_run since 6/23; single iOS subscription from 6/22; alert 16 (PLTR approval) never delivered
+- ALERT_DELIVERY_DRY_RUN=false present in both post-deploy processes
+- audit id 15: status=sent detail='sent=1 errors=0' dry_run=0
+
+### Risks / Blockers
+- Alert 16 'Approval needed: PLTR' (7/10 6:32 AM PT) was never delivered to the phone — pending approval may be unnoticed in the queue
+- If the real test did not display on the phone, the 6/22 iOS PWA subscription is stale client-side; user must re-subscribe from the dashboard PWA (server cannot fix that end)
+
+### Next Recommended Task
+User: confirm whether the 9:03 PM PT test push appeared on the phone; if not, re-subscribe from the PWA and rerun the same test. Also: x402 sandbox probe still awaiting the one-click Circle faucet captcha
