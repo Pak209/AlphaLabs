@@ -23,7 +23,9 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from .attribution import feature_attribution_report as build_feature_attribution
 from .database import connect, resolve_db_path
+from .outcomes import outcome_report as build_outcome_report
 from .market_context import current_market_regime
 from .repository import AlphaLabRepository
 from .review_api import _lex_summary
@@ -68,6 +70,14 @@ CATALOG: dict[str, dict[str, Any]] = {
     "decision-explanation": {
         "price_usd": 0.10,
         "summary": "Glass-box breakdown of a prior evaluation: every sub-signal, weight, and floor with reasoning.",
+    },
+    "outcome-report": {
+        "price_usd": 0.05,
+        "summary": "Recorded pipeline outcomes: accepted-vs-rejected edge, score-band hit rates, gate near-miss regret.",
+    },
+    "feature-attribution": {
+        "price_usd": 0.10,
+        "summary": "Which engine inputs actually predict outcomes: Spearman rankings, median splits, dead inputs.",
     },
 }
 
@@ -279,8 +289,47 @@ def calibration_report(db_path: str | None = None) -> dict[str, Any]:
         reasoning="This is the platform's own live calibration: what a real, gated paper-trading "
                   "pipeline evaluated, rejected, and nearly accepted — telemetry no wrapper API "
                   "around public feeds can produce.",
-        historical_performance={"note": "outcome-linked performance products arrive in M2 "
+        historical_performance={"note": "outcome-linked performance lives at /v1/outcome-report "
                                         "(accepted-vs-rejected edge, score-band hit rates)"},
+    )
+
+
+def outcome_report(db_path: str | None = None) -> dict[str, Any]:
+    """Recorded outcomes of the live pipeline's own decisions (license-clean).
+
+    Engine telemetry end to end: hit rates, score-band tables, accepted-vs-
+    rejected edge, and gate near-miss regret — aggregates over the pipeline's
+    paper-research signals. Percent moves and counts only; no dollar amounts,
+    positions, orders, or account state exist in these rows.
+    """
+    report = build_outcome_report(resolve_db_path(db_path))
+    evaluated = report.get("fingerprint", {}).get("evaluated_count", 0)
+    return envelope(
+        "outcome-report", report,
+        provenance=[{"source": "AlphaLabs recorded signal outcomes (own pipeline telemetry)",
+                     "as_of": report.get("fingerprint", {}).get("last_generated_at") or _now()}],
+        confidence={"level": "measured" if evaluated >= 30 else "directional",
+                    "basis": f"{evaluated} evaluated signal outcomes"},
+        reasoning="What a live, gated pipeline actually selected and rejected, and how "
+                  "those calls resolved — the calibration ground truth behind the scores. "
+                  "Caveats ride in the data (emission bias, small-sample bands).",
+        historical_performance={"note": "this product IS the historical performance record"},
+    )
+
+
+def feature_attribution(db_path: str | None = None) -> dict[str, Any]:
+    """Which inputs predict outcomes — measured on the live pipeline (license-clean)."""
+    report = build_feature_attribution(resolve_db_path(db_path))
+    evaluated = report.get("fingerprint", {}).get("evaluated_count", 0)
+    return envelope(
+        "feature-attribution", report,
+        provenance=[{"source": "AlphaLabs feature attribution over recorded outcomes",
+                     "as_of": report.get("fingerprint", {}).get("last_generated_at") or _now()}],
+        confidence={"level": "measured" if evaluated >= 30 else "directional",
+                    "basis": f"{evaluated} evaluated signal outcomes"},
+        reasoning="Spearman rank correlations, median-split deltas, and dead-input detection "
+                  "over the engine's own decision features — measured on recorded live "
+                  "outcomes, not backtests. Dead inputs mark unwired sources, not bad ideas.",
     )
 
 
@@ -289,6 +338,8 @@ PRODUCT_FUNCS = {
     "catalysts": catalyst_feed,
     "daily-brief": daily_brief,
     "calibration": calibration_report,
+    "outcome-report": outcome_report,
+    "feature-attribution": feature_attribution,
 }
 
 

@@ -122,6 +122,14 @@ def create_intel_app(trading_db_path: str | None = None,
     def calibration_route(request: Request) -> Any:
         return _serve("calibration", request)
 
+    @app.get("/v1/outcome-report")
+    def outcome_report_route(request: Request) -> Any:
+        return _serve("outcome-report", request)
+
+    @app.get("/v1/feature-attribution")
+    def feature_attribution_route(request: Request) -> Any:
+        return _serve("feature-attribution", request)
+
     @app.post("/v1/signal-evaluation")
     async def signal_evaluation_route(request: Request) -> Any:
         started = time.monotonic()
