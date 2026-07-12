@@ -13,9 +13,9 @@ Decision of record: all x402 revenue lands in a **dedicated business
 wallet, never personal**.
 
 1. **[HUMAN] Entity decision first.** KYB verifies a *business*. Decide
-   sole-proprietor vs LLC before starting — an LLC needs formation docs +
-   EIN and is also what counsel will likely recommend for a data-services
-   business (Track 2 asks them; do these in the same week).
+   sole-proprietor vs LLC before starting — sole prop works and is the
+   fastest path; an LLC (formation docs + EIN, self-serve online services
+   exist) adds liability separation and can be done later.
 2. **[HUMAN] Gather KYB documents** (typical set — verify the current list
    on the CDP onboarding screen): legal business name + address, EIN (or
    SSN for sole prop), formation documents, beneficial-owner government ID,
@@ -77,6 +77,6 @@ Build-now items (no public exposure until DNS flips):
 
 ## Suggested order
 
-Entity decision → counsel session (same week) → KYB while counsel reviews →
-agent builds Track 3 items in parallel → beta (keys, tailnet/invite) →
-public flip when Tracks 1–2 both clear.
+Entity decision (sole prop is fine to start) → CDP KYB → agent builds
+Track 3 items in parallel → beta (keys, tailnet/invite) → public flip when
+Track 1 clears → Polygon renewal call ~Aug 9 with the PV evidence.
