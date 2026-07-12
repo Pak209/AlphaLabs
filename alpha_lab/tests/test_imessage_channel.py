@@ -74,15 +74,38 @@ def test_dry_run_audits_without_sending(tmp_path: Path, monkeypatch):
     assert sender.calls == []
 
 
-def test_real_send_delivers_and_audits(tmp_path: Path, monkeypatch):
+def test_real_send_delivers_with_approvals_deep_link(tmp_path: Path, monkeypatch):
     enable_imessage(monkeypatch, handle="alerts@example.com")
+    monkeypatch.setenv("ALPHALAB_PUBLIC_BASE_URL", "https://dash.test")
     sender = FakeSender()
     c = center(tmp_path, sender)
     result = c.create_and_dispatch(level="APPROVAL_REQUIRED", title="Approval needed: PLTR",
                                    body="sign-off required", force_dry_run=False)
     assert "imessage" in result["channels_sent"]
+    # sign-off alerts link straight to the approval queue (same mapping as push)
     assert sender.calls == [("alerts@example.com",
-                             "[APPROVAL_REQUIRED] Approval needed: PLTR\nsign-off required")]
+                             "[APPROVAL_REQUIRED] Approval needed: PLTR\nsign-off required"
+                             "\nhttps://dash.test/#approvals")]
+
+
+def test_non_approval_alert_links_to_its_detail(tmp_path: Path, monkeypatch):
+    enable_imessage(monkeypatch)
+    monkeypatch.setenv("ALPHALAB_PUBLIC_BASE_URL", "https://dash.test")
+    sender = FakeSender()
+    c = center(tmp_path, sender)
+    result = c.create_and_dispatch(level="URGENT_IDEA", title="t", body="b",
+                                   force_dry_run=False)
+    alert_id = result["alert"]["id"]
+    assert sender.calls[0][1].endswith(f"\nhttps://dash.test/#alerts/{alert_id}")
+
+
+def test_empty_base_url_disables_link_line(tmp_path: Path, monkeypatch):
+    enable_imessage(monkeypatch)
+    monkeypatch.setenv("ALPHALAB_PUBLIC_BASE_URL", "")
+    sender = FakeSender()
+    c = center(tmp_path, sender)
+    c.create_and_dispatch(level="URGENT_IDEA", title="t", body="b", force_dry_run=False)
+    assert sender.calls[0][1] == "[URGENT_IDEA] t\nb"
 
 
 def test_send_failure_surfaces_error(tmp_path: Path, monkeypatch):
