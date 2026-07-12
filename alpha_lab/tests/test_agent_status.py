@@ -49,7 +49,7 @@ def test_agent_status_builds_recent_scanner_run_rows(tmp_path: Path):
 
     assert report["read_only"] is True
     assert report["status"] == "needs_attention"
-    assert report["scheduler_job_count"] == 19
+    assert report["scheduler_job_count"] == 20
     assert len(report["scanner_runs"]) == 2
     latest = report["scanner_runs"][0]
     assert latest["agent"] == "daily_market_brief"

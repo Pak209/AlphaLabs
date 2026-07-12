@@ -585,6 +585,22 @@ class AlphaLabService:
         )
         return report
 
+    def run_pv_source_compare(self) -> dict[str, Any]:
+        """Scheduled Polygon-vs-Alpaca PV comparison for the renewal decision.
+
+        Read-only: pulls both intraday snapshots for the equity book, records
+        per-ticker gap%/rel-volume and whether the confirmation VERDICT would
+        differ, and appends one evidence JSON to alpha_lab/data/pv_compare/.
+        No idea, no order — pure measurement that accumulates the body of
+        evidence for whether the free Alpaca route can replace paid Polygon.
+        A no-op-ish empty result when neither source is configured."""
+        from scripts.pv_source_compare import compare_pv_sources
+        try:
+            result = compare_pv_sources(write=True)
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)[:200]}
+        return {"status": "ok", **result["summary"], "report_path": result["report_path"]}
+
     def run_options_flow_preview(
         self,
         watchlist: list[str] | None = None,

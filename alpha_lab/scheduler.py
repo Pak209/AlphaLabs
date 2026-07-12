@@ -129,6 +129,13 @@ def build_scheduler(service: AlphaLabService | None = None) -> BlockingScheduler
     scheduler.add_job(lambda: service.generate_and_save_market_briefing(live_catalysts=True), "cron", day_of_week="sat,sun", hour="6,12,18", minute=0)
     scheduler.add_job(lambda: service.evaluate_pending_signals(limit=500), "cron", day_of_week="sat,sun", hour=18, minute=10)
 
+    # --- Polygon-vs-Alpaca PV evidence (renewal decision) --- #
+    # Read-only source comparison once per trading day, mid-session (12:30 PT)
+    # when both feeds are liveliest. Appends one JSON to data/pv_compare/ so the
+    # renewal decision rests on ~20 sessions of agreement data, not one probe.
+    scheduler.add_job(lambda: service.run_pv_source_compare(), "cron",
+                      day_of_week="mon-fri", hour=12, minute=30, id="pv_source_compare")
+
     # --- Exit management (B6): stop/target pass over open paper positions --- #
     # Self-gating: ALPHALAB_EXIT_MANAGEMENT=off (default) makes this a no-op;
     # shadow records would-close decisions; on closes for real ONLY when the

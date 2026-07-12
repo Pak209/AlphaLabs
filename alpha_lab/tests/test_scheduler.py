@@ -81,7 +81,7 @@ def test_build_scheduler_registers_all_jobs(monkeypatch):
     # 1 heartbeat + 6 always-safe + 2 premarket context pulls
     # + 6 weekday idea/trade + 1 always-on crypto + 2 weekend read jobs
     # + 1 exit manager (B6, self-gating via ALPHALAB_EXIT_MANAGEMENT) = 19
-    assert len(jobs) == 19
+    assert len(jobs) == 20
     assert all(job.trigger is not None for job in jobs)
 
 
