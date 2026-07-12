@@ -266,7 +266,8 @@ def test_mcp_initialize_and_tool_discovery(tmp_path: Path, monkeypatch):
     tools = rpc(client, "tools/list").json()["result"]["tools"]
     assert {t["name"] for t in tools} == {
         "alphalabs_get_catalog", "alphalabs_calibration_report",
-        "alphalabs_evaluate_signal", "alphalabs_explain_decision"}
+        "alphalabs_evaluate_signal", "alphalabs_explain_decision",
+        "alphalabs_outcome_report", "alphalabs_feature_attribution"}
 
     # notifications are acknowledged without a body
     note = client.post("/mcp", json={"jsonrpc": "2.0",
@@ -328,3 +329,34 @@ def test_commercial_catalysts_survive_vendor_noise(tmp_path: Path, monkeypatch):
     events = catalyst_feed(db, limit=10)["data"]["events"]
     assert events, "SEC event must surface despite 60 fresher vendor rows"
     assert all("sec edgar" in e["provenance"]["source"].lower() for e in events)
+
+
+# ─── M5 pull-forward: outcome + attribution products (engine telemetry) ──────
+
+def test_outcome_and_attribution_products_are_safe_aggregates(tmp_path: Path, monkeypatch):
+    from alpha_lab.intel_products import feature_attribution, outcome_report
+    db = seeded_trading_db(tmp_path)
+
+    outcome = outcome_report(db)
+    assert_envelope(outcome, "outcome-report")          # forbidden-fragment sweep
+    assert "overall" in outcome["data"] and "accepted_vs_rejected" in outcome["data"]
+    assert "caveats" in outcome["data"]                 # honesty travels with the data
+
+    attribution = feature_attribution(db)
+    assert_envelope(attribution, "feature-attribution")
+    assert "importance_ranking" in attribution["data"]
+    assert "dead_inputs" in attribution["data"]
+
+    # small-sample honesty: an empty research DB must say "directional"
+    assert outcome["confidence"]["level"] == "directional"
+    assert attribution["confidence"]["level"] == "directional"
+
+
+def test_outcome_products_served_through_gateway(tmp_path: Path, monkeypatch):
+    client, _ = client_with_key(tmp_path, monkeypatch)
+    headers = {"Authorization": "Bearer sk-test-123"}
+    assert client.get("/v1/outcome-report").status_code == 401
+    ok = client.get("/v1/outcome-report", headers=headers)
+    assert ok.status_code == 200 and ok.json()["product"] == "outcome-report"
+    ok = client.get("/v1/feature-attribution", headers=headers)
+    assert ok.status_code == 200 and ok.json()["product"] == "feature-attribution"

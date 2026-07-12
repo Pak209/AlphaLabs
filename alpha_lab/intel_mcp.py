@@ -28,7 +28,8 @@ from typing import Any, Optional
 
 from .intel_gateway import Gateway
 from .intel_products import (
-    calibration_report, catalog, decision_explanation, signal_evaluation,
+    calibration_report, catalog, decision_explanation, feature_attribution,
+    outcome_report, signal_evaluation,
 )
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -40,6 +41,8 @@ TOOL_PRODUCTS: dict[str, Optional[str]] = {
     "alphalabs_calibration_report": "calibration",
     "alphalabs_evaluate_signal": "signal-evaluation",
     "alphalabs_explain_decision": "decision-explanation",
+    "alphalabs_outcome_report": "outcome-report",
+    "alphalabs_feature_attribution": "feature-attribution",
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -78,6 +81,19 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["ticker", "bias"],
             "additionalProperties": False,
         },
+    },
+    {
+        "name": "alphalabs_outcome_report",
+        "description": ("Recorded outcomes of the live pipeline's own decisions: hit rates, "
+                        "score-band tables, accepted-vs-rejected edge, gate near-miss regret. "
+                        "Aggregated engine telemetry — percent moves and counts only."),
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "alphalabs_feature_attribution",
+        "description": ("Which engine inputs actually predict outcomes, measured on recorded "
+                        "live results: Spearman rankings, median-split deltas, dead inputs."),
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "name": "alphalabs_explain_decision",
@@ -132,6 +148,10 @@ def _call_tool(name: str, arguments: dict[str, Any], *, gateway: Gateway,
     try:
         if name == "alphalabs_calibration_report":
             payload = calibration_report(trading_db_path)
+        elif name == "alphalabs_outcome_report":
+            payload = outcome_report(trading_db_path)
+        elif name == "alphalabs_feature_attribution":
+            payload = feature_attribution(trading_db_path)
         elif name == "alphalabs_evaluate_signal":
             payload = signal_evaluation(arguments)
             evaluation_id = gateway.store.store_evaluation(key["name"], arguments, payload)
