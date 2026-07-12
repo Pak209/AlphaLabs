@@ -31,7 +31,7 @@ import time
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .intel_gateway import (   # noqa: F401 — IntelStore/RateLimiter re-exported for compat
     DEFAULT_RATE_PER_MIN, INTEL_DB_DEFAULT, Gateway, IntelStore, RateLimiter,
@@ -47,6 +47,49 @@ def create_intel_app(trading_db_path: str | None = None,
     app = FastAPI(title="AlphaLabs Intelligence", version="0.2.0",
                   description="Derived market intelligence for AI agents — REST + MCP + x402.")
     gateway = Gateway(store)
+
+    @app.get("/", response_class=HTMLResponse)
+    def landing() -> str:
+        """Free landing/pricing page rendered from the catalog — the public
+        face of the API (and the 'business website' KYB asks for)."""
+        rows = []
+        for name, meta in CATALOG.items():
+            price = "Free (beta)" if not meta.get("price_usd") else f"${meta['price_usd']:.2f}/call"
+            method = meta.get("method", "GET")
+            rows.append(f"<tr><td><code>{method} /v1/{name}</code></td>"
+                        f"<td>{price}</td><td>{meta['summary']}</td></tr>")
+        table = "".join(rows)
+        return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlphaLabs Intelligence — derived market analytics for AI agents</title>
+<style>
+ body {{ font: 16px/1.55 -apple-system, system-ui, sans-serif; margin: 0 auto; max-width: 860px;
+        padding: 40px 20px; background: #0b0e14; color: #e6e9ef; }}
+ h1 {{ font-size: 30px; margin-bottom: 4px; }} .muted {{ color: #97a0b0; }}
+ table {{ border-collapse: collapse; width: 100%; margin: 22px 0; }}
+ td, th {{ border-bottom: 1px solid #232936; padding: 9px 8px; text-align: left; font-size: 14px; }}
+ code, pre {{ background: #141926; border-radius: 5px; padding: 2px 6px; font-size: 13px; }}
+ pre {{ padding: 12px; overflow-x: auto; }} a {{ color: #7fb4ff; }}
+ .foot {{ font-size: 12px; color: #97a0b0; margin-top: 34px; border-top: 1px solid #232936; padding-top: 14px; }}
+</style></head><body>
+<h1>AlphaLabs Intelligence</h1>
+<p class="muted">Derived market intelligence from a live, calibrated paper-trading pipeline —
+scores, regimes, calibration telemetry, and recorded outcomes. Built for AI agents:
+REST + MCP, API keys today, x402 pay-per-call (USDC on Base) in rollout.</p>
+<table><tr><th>Product</th><th>Price</th><th>What you get</th></tr>{table}</table>
+<h3>Auth</h3>
+<p><code>Authorization: Bearer &lt;api-key&gt;</code> — beta keys are invite-only for now.
+Keyless calls to paid products return an <a href="https://www.x402.org">x402</a> payment
+challenge where the payment lane is enabled.</p>
+<h3>Quickstart</h3>
+<pre>curl -H "Authorization: Bearer $KEY" {{base}}/v1/catalog</pre>
+<p>MCP: point your client at <code>POST {{base}}/mcp</code> with the same bearer key
+(tools: catalog, calibration, evaluate_signal, explain_decision, outcome_report,
+feature_attribution).</p>
+<p class="foot">Research signals and calibration telemetry. Informational derived analytics —
+not investment advice, not an offer or solicitation, and not a redistribution of any
+vendor's market data. Machine-readable catalog: <a href="/v1/catalog">/v1/catalog</a>.</p>
+</body></html>"""
 
     @app.get("/health")
     def health() -> dict[str, Any]:

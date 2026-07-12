@@ -47,6 +47,8 @@ say "Restarting agents..."
 uid=$(id -u)
 launchctl kickstart -k "gui/$uid/com.alphalab.scheduler"
 launchctl kickstart -k "gui/$uid/com.alphalab.dashboard"
+# intel-api is optional (only present once the Track-3 agent is installed)
+launchctl kickstart -k "gui/$uid/com.alphalab.intel-api" 2>/dev/null || true
 
 say "Waiting for the dashboard to come up..."
 for i in $(seq 1 15); do
