@@ -958,36 +958,46 @@ function approvalCard(item) {
         </div>
       </div>
 
-      <div class="approval-grid">
-        ${approvalField("Thesis", explanation.thesis_summary || item.thesis)}
-        ${approvalField("Catalyst", explanation.catalyst || item.catalyst)}
-        ${approvalField("Why It Matters", explanation.why_this_matters)}
-        ${approvalField("Market Context", explanation.market_context)}
-        ${approvalField("Entry Zone", explanation.suggested_entry_zone)}
-        ${approvalField("Stop Loss", explanation.suggested_stop_loss)}
-        ${approvalField("Take Profit", explanation.suggested_take_profit)}
-        ${approvalField("Invalidation", explanation.invalidation_level_or_condition)}
-      </div>
-
-      <div class="approval-section">
-        <strong>Risk Factors</strong>
-        <div class="driver-list">${risks.map((risk) => `<span>${risk}</span>`).join("") || "<span>No risk factors returned.</span>"}</div>
-      </div>
-
-      <div class="approval-section">
-        <strong>Source Refs</strong>
-        <div class="source-list">${sourceRefsHtml(refs)}</div>
+      <div class="approval-levels">
+        ${approvalLevel("Entry", explanation.suggested_entry_zone)}
+        ${approvalLevel("Stop", explanation.suggested_stop_loss)}
+        ${approvalLevel("Target", explanation.suggested_take_profit)}
       </div>
 
       <div class="approval-actions actions">
         <button class="paper" onclick="approveAndPaperTrade(${item.idea_id}, '${item.ticker}')">Approve + Paper Trade</button>
-        <button class="secondary" onclick="refreshTradeLevels(${item.idea_id}, '${item.ticker}')">Refresh Levels</button>
         <button onclick="approvalAction(${item.idea_id}, 'approve')">Approve only</button>
         <button class="danger" onclick="approvalAction(${item.idea_id}, 'reject')">Reject</button>
+        <button class="secondary" onclick="refreshTradeLevels(${item.idea_id}, '${item.ticker}')">Refresh Levels</button>
         <button class="secondary" onclick="approvalAction(${item.idea_id}, 'expire')">Expire</button>
       </div>
+
+      <details class="approval-details">
+        <summary>Full rationale, risks &amp; sources</summary>
+        <div class="approval-grid">
+          ${approvalField("Thesis", explanation.thesis_summary || item.thesis)}
+          ${approvalField("Catalyst", explanation.catalyst || item.catalyst)}
+          ${approvalField("Why It Matters", explanation.why_this_matters)}
+          ${approvalField("Market Context", explanation.market_context)}
+          ${approvalField("Invalidation", explanation.invalidation_level_or_condition)}
+        </div>
+        <div class="approval-section">
+          <strong>Risk Factors</strong>
+          <div class="driver-list">${risks.map((risk) => `<span>${risk}</span>`).join("") || "<span>No risk factors returned.</span>"}</div>
+        </div>
+        <div class="approval-section">
+          <strong>Source Refs</strong>
+          <div class="source-list">${sourceRefsHtml(refs)}</div>
+        </div>
+      </details>
     </article>
   `;
+}
+
+// Compact decision strip: the three numbers a sign-off actually needs, kept
+// above the buttons so a phone shows ticker -> levels -> actions in one screen.
+function approvalLevel(label, value) {
+  return `<div class="approval-level"><span>${label}</span><strong>${value || "n/a"}</strong></div>`;
 }
 
 function approvalField(label, value) {
