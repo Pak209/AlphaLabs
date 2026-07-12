@@ -4030,3 +4030,30 @@ Performance page rework shipped on feat/performance-portfolio (PR #28, stacked o
 
 ### Next Recommended Task
 Human: merge #26, #27, #28 in order, then deploy; re-subscribe iPhone PWA and tap Send test notification; Circle faucet captcha still pending for the x402 on-chain probe; answer the two Hermes iMessage transport questions to green-light that channel
+## 2026-07-11 16:57 PT — Claude
+
+Branch: feat/imessage-channel
+Commit: 1fd4467
+Working Tree: modified
+
+### Summary
+Deployed merged PRs #26/#27/#28 (x402 UA fix, real-send test button, Portfolio page) via deploy_mini.sh — dashboard 200, new scheduler/dashboard PIDs 53009/53013. Then built the iMessage alert channel (Option A: local Messages.app via osascript) on feat/imessage-channel (PR #29). Channel mirrors SMS exactly: ALERT_IMESSAGE_ENABLED + ALERT_IMESSAGE_TO master switch (env-pinned recipient, never API input), ALERT_IMESSAGE_MIN_LEVEL default URGENT_IDEA, env injected in dispatcher so route_alert stays pure, quiet hours with APPROVAL_REQUIRED/RISK_KILL bypass, full audit, dry-run respected. Injection safety: handle+text passed to osascript as argv into an on-run handler, never spliced into AppleScript source (pinned with hostile payload test). TCC -1743 maps to an actionable Automation-grant error. Answer of record for the user's question: NO system/iCloud sign-out needed on the mini — only Messages.app's iMessage sign-in changes, and a DEDICATED sender Apple ID is required because self-to-self iMessages do not banner. Also resolved another journal append-only collision (chronological union commit d4e30fe now riding PR #29 after direct-to-main push was denied by policy).
+
+### Files Modified
+- alpha_lab/notifications.py
+- alpha_lab/tests/test_imessage_channel.py
+
+### Commands / Tests Run
+- ./scripts/deploy_mini.sh
+- .venv/bin/python -m pytest alpha_lab/tests -q
+
+### Results
+- deployed 3f555c0, dashboard health 200, agents restarted
+- 583 passed (8 new iMessage tests: routing gates, min level, quiet hours+bypass, dry-run audit, real send, failure surfacing, argv injection isolation, TCC mapping)
+
+### Risks / Blockers
+- iMessage live send untested until operator completes setup: dedicated sender Apple ID in Messages.app, env vars, one-time Automation grant (first send will fail with the actionable -1743 message until granted)
+- Stale iPhone PWA subscription still undelivered fix — re-subscribe from the phone PWA remains open
+
+### Next Recommended Task
+Human: merge PR #29, complete iMessage operator setup, tap Send test notification; Circle faucet captcha still pending for x402 on-chain probe

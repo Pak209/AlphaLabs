@@ -22,7 +22,11 @@ branch=$(git rev-parse --abbrev-ref HEAD)
 [ "$branch" = "main" ] || fail "on branch '$branch' — deploys run from main (git switch main first)"
 
 git update-index -q --refresh
-git diff-index --quiet HEAD -- || fail "tracked files are modified — commit or stash before deploying"
+# The handoff journal is an append-only operational log that every agent
+# updates between commits; a dirty journal never affects the deployed code,
+# so it must not block a deploy. Everything else still must be clean.
+dirty=$(git diff-index --name-only HEAD -- | grep -v "^\.ai/LEX_REVIEW_HANDOFF\.md$" || true)
+[ -z "$dirty" ] || fail "tracked files are modified — commit or stash before deploying: $dirty"
 [ -z "$(git diff --cached --name-only)" ] || fail "staged changes present"
 
 say "Fetching origin..."
