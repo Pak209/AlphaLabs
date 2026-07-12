@@ -105,28 +105,45 @@ function cleanErrorMessage(message) {
   return text.split("\n")[0].slice(0, 240);
 }
 
+const READ_SOFT_TIMEOUT_MS = 12000;
+let stalePanels = 0;
+
+// Soft read for the boot/refresh batch: one slow or failing endpoint must
+// never pin "Refreshing..." or blank a panel. Times out, keeps the last
+// good value from state, and counts the panel as stale for the label.
+// (Diagnosed live: performance/report >30s, brief/daily ~24s, radar ~22s
+// were holding the sub-second approvals view hostage.)
+function soft(path, stateKey) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), READ_SOFT_TIMEOUT_MS);
+  return api(path, { signal: controller.signal })
+    .catch(() => { stalePanels += 1; return state[stateKey]; })
+    .finally(() => clearTimeout(timer));
+}
+
 async function load() {
   const refresh = document.querySelector("#refresh");
   if (refresh) refresh.textContent = "Refreshing...";
+  stalePanels = 0;
   const [dashboard, ideas, trades, stats, bitcoin, afterHoursBtc, liquidity, trendingStocks, oil, futuresPulse, businessProfiles, catalysts, catalystIntelligence, dailyBrief, briefings, executionAudit, performanceReport, portfolio, approvalResult, alertsResult] = await Promise.all([
-    api("/api/dashboard"),
-    api("/api/ideas"),
-    api("/api/trades"),
-    api("/api/stats/strategies"),
-    api("/api/market/bitcoin"),
-    api("/api/after-hours/btc"),
-    api("/api/market/liquidity"),
-    api("/api/market/trending-stocks"),
-    api("/api/market/oil"),
-    api("/api/futures/pulse"),
-    api("/api/business-profiles"),
-    api("/api/catalysts/radar"),
-    api("/api/catalysts/intelligence"),
-    api("/api/brief/daily"),
-    api("/api/briefings"),
-    api("/api/execution-audit"),
-    api("/api/performance/report"),
-    api("/api/portfolio"),
+    soft("/api/dashboard", "dashboard"),
+    soft("/api/ideas", "ideas"),
+    soft("/api/trades", "trades"),
+    soft("/api/stats/strategies", "stats"),
+    soft("/api/market/bitcoin", "bitcoin"),
+    soft("/api/after-hours/btc", "afterHoursBtc"),
+    soft("/api/market/liquidity", "liquidity"),
+    soft("/api/market/trending-stocks", "trendingStocks"),
+    soft("/api/market/oil", "oil"),
+    soft("/api/futures/pulse", "futuresPulse"),
+    soft("/api/business-profiles", "businessProfiles"),
+    soft("/api/catalysts/radar", "catalysts"),
+    soft("/api/catalysts/intelligence", "catalystIntelligence"),
+    soft("/api/brief/daily", "dailyBrief"),
+    soft("/api/briefings", "briefings"),
+    soft("/api/execution-audit", "executionAudit"),
+    soft("/api/performance/report", "performanceReport"),
+    soft("/api/portfolio", "portfolio"),
     loadApprovalQueueResult(),
     loadAlertsResult(),
   ]);
@@ -158,7 +175,10 @@ async function load() {
     alertsError: alertsResult.error,
   };
   render();
-  if (refresh) refresh.textContent = `Refreshed ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
+  if (refresh) {
+    const at = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    refresh.textContent = stalePanels ? `Refreshed ${at} · ${stalePanels} stale` : `Refreshed ${at}`;
+  }
 }
 
 async function loadApprovalQueueResult() {
