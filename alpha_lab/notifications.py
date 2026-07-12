@@ -882,6 +882,9 @@ class NotificationCenter:
         # dispatch); these re-checks keep the method safe if called directly.
         handle = imessage_recipient()
         text = f"[{alert['level']}] {alert['title']}\n{alert['body']}".strip()
+        link = _public_link(alert)
+        if link:
+            text = f"{text}\n{link}"
         if dry_run:
             self._audit(alert["id"], CHANNEL_IMESSAGE, "dry_run", "would send 1 imessage", dry_run=True)
             return {"delivered": False, "dry_run": True}
@@ -1087,6 +1090,20 @@ def _read_alert(conn, alert_id: int) -> dict[str, Any]:
     if row is None:
         raise KeyError(f"alert not found: {alert_id}")
     return _hydrate_alert(dict(row))
+
+
+def _public_link(alert: dict[str, Any]) -> str:
+    """Absolute click-through for channels that leave the PWA (iMessage today).
+
+    Reuses the SAME _click_url mapping the push notifications use, so every
+    channel lands in the same place: the approval queue for sign-off-class
+    alerts, the alert's own detail otherwise. Base is env-overridable;
+    setting ALPHALAB_PUBLIC_BASE_URL to empty disables the link line.
+    """
+    base = os.getenv("ALPHALAB_PUBLIC_BASE_URL", "https://alpha.pak-labs.com").strip().rstrip("/")
+    if not base:
+        return ""
+    return f"{base}/{_click_url(alert).lstrip('/')}"
 
 
 def _click_url(alert: dict[str, Any]) -> str:
