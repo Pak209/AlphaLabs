@@ -204,3 +204,25 @@ def test_facilitator_requests_carry_descriptive_user_agent(monkeypatch):
     intel_x402.FacilitatorClient().verify({"x402Version": 1}, {"network": "base"})
     assert captured["ua"] and "urllib" not in captured["ua"].lower()
     assert "AlphaLabs" in captured["ua"]
+
+
+def test_free_beta_products_never_enter_payment_lane(tmp_path, monkeypatch):
+    """Self-serve posture: telemetry is free in beta — keyless callers get a
+    key hint (401), never a zero-dollar 402, even with the lane active."""
+    client, store = sandbox_client(tmp_path, monkeypatch)
+    fake_facilitator(monkeypatch)
+
+    res = client.get("/v1/calibration")                         # keyless, free product
+    assert res.status_code == 401
+    assert "key" in res.json()["detail"].lower()
+
+    # even a valid payment header is ignored for a free product
+    res = client.get("/v1/outcome-report", headers={"X-PAYMENT": payment_header()})
+    assert res.status_code == 401
+    assert payments_rows(store) == []
+
+    # keys still work and nothing is charged
+    ok = client.get("/v1/feature-attribution",
+                    headers={"Authorization": "Bearer sk-test-123"})
+    assert ok.status_code == 200
+    assert ok.json()["usage"]["product_price_usd"] == 0.0

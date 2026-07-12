@@ -30,29 +30,31 @@ wallet, never personal**.
    domain params (`extra`) against CDP docs (noted in intel_x402.py).
    One paid mainnet probe (a few real cents) is the acceptance test.
 
-## Track 2 — Licensing counsel sign-off (gates public launch)
+## Track 2 — Licensing posture: SELF-SERVE (decision of record 2026-07-12)
 
-An agent cannot provide sign-off; it CAN make the engagement cheap. The
-brief below turns an open-ended review into ~one billable hour.
+Counsel skipped deliberately. The posture manages the gray edges by
+construction instead of by opinion, and it is ENFORCED IN CODE
+(INTEL_COMMERCIAL_MODE + catalog pricing), not by policy memo:
 
-1. **[HUMAN] Engage counsel** (data-licensing / fintech familiarity).
-2. **[AGENT — prepared] The briefing package** is docs/COMMERCIAL_LAUNCH_REVIEW.md
-   (risk matrix + terms analysis). The specific questions needing answers:
-   - Does Polygon's individual-plan "Derived Works" clause reach products
-     built from OUR pipeline's decisions *about* vendor-sourced events
-     (calibration, outcome-report, feature-attribution) — telemetry that
-     contains no vendor data, only our engine's scores and results?
-   - Same question for Alpaca's redistribution terms re: paper-trading
-     outcome aggregates.
-   - Does the compiled daily brief qualify for a publisher's exemption
-     once vendor quotes are removed (or is it dead until licensed)?
-   - Is SEC-EDGAR-only catalysts + attribution posture clean as built?
-   - Entity/liability: right structure for selling research signals with
-     "not investment advice" disclaimers (ties into Track 1's entity
-     decision)?
-3. **[HUMAN] Outcome recorded** as go/no-go per product in the launch
-   review doc; **[AGENT]** then adjusts `INTEL_COMMERCIAL_MODE` filters to
-   match counsel's actual lines.
+- **Paid products** are engine-native or public-domain-sourced only:
+  signal-evaluation, decision-explanation (caller inputs + our engine),
+  SEC EDGAR catalysts, recomposed market-snapshot (engine regime only).
+- **Pipeline telemetry is FREE during beta** (calibration, outcome-report,
+  feature-attribution): a free research product minimizes any commercial
+  derived-works reading while the funnel builds. Keys still required —
+  metered and rate-limited, never anonymous.
+- **Daily brief stays deferred** — the publisher's-exemption question is
+  not worth self-navigating.
+- **Buy licenses, not opinions**: CoinGecko Analyst (~$35/mo, explicit
+  commercial license + attribution) when crypto context should return;
+  Polygon commercial tier IF Polygon-derived paid products are ever
+  wanted.
+- **[HUMAN] The Polygon renewal (~Aug 9) is the real licensing decision**:
+  cancel unless the daily PV-comparison evidence says Alpaca can't carry
+  confirmation — going forward, no Polygon agreement means no Polygon
+  derived-works exposure accruing.
+- Revisit counsel only if: revenue becomes material, a vendor objects, or
+  an enterprise customer requires representations.
 
 ## Track 3 — M4 public exposure (gated on Tracks 1–2 for paid; beta can precede)
 

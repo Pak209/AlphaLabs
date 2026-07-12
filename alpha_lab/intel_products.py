@@ -59,8 +59,9 @@ CATALOG: dict[str, dict[str, Any]] = {
         "summary": "The compiled AI market brief: tone, themes, macro risks, watch list, top catalysts.",
     },
     "calibration": {
-        "price_usd": 0.05,
-        "summary": "Live pipeline calibration telemetry: stage funnel, gate failures, near-misses.",
+        "price_usd": 0.0,
+        "summary": "Live pipeline calibration telemetry: stage funnel, gate failures, near-misses. "
+                   "Free during beta (API key required).",
     },
     "signal-evaluation": {
         "price_usd": 0.10,
@@ -72,12 +73,14 @@ CATALOG: dict[str, dict[str, Any]] = {
         "summary": "Glass-box breakdown of a prior evaluation: every sub-signal, weight, and floor with reasoning.",
     },
     "outcome-report": {
-        "price_usd": 0.05,
-        "summary": "Recorded pipeline outcomes: accepted-vs-rejected edge, score-band hit rates, gate near-miss regret.",
+        "price_usd": 0.0,
+        "summary": "Recorded pipeline outcomes: accepted-vs-rejected edge, score-band hit rates, gate "
+                   "near-miss regret. Free during beta (API key required).",
     },
     "feature-attribution": {
-        "price_usd": 0.10,
-        "summary": "Which engine inputs actually predict outcomes: Spearman rankings, median splits, dead inputs.",
+        "price_usd": 0.0,
+        "summary": "Which engine inputs actually predict outcomes: Spearman rankings, median splits, "
+                   "dead inputs. Free during beta (API key required).",
     },
 }
 
@@ -86,6 +89,13 @@ _EXCLUDED_PAID_SOURCES = ("yahoo finance news",)   # license posture: plan §0.2
 # License-clean sources for commercial mode (docs/COMMERCIAL_LAUNCH_REVIEW.md):
 # SEC EDGAR is public-domain; everything vendor-derived is excluded until the
 # corresponding commercial agreement exists.
+#
+# Self-serve licensing posture (decision of record 2026-07-12, no counsel):
+# paid products are engine-native or public-domain-sourced ONLY; pipeline
+# telemetry (calibration/outcome/attribution) is FREE during beta so no
+# vendor derived-works reading can attach to a sale; the daily brief stays
+# deferred; the Polygon question is settled at renewal by the PV evidence
+# (cancel unless the data demands keeping — commercial tier if ever re-added).
 _COMMERCIAL_CLEAN_SOURCES = ("sec edgar",)
 
 
