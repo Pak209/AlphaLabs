@@ -302,3 +302,14 @@ def test_static_bearer_wins_over_cdp_jwt(monkeypatch):
     monkeypatch.setattr(intel_x402.urllib.request, "urlopen", fake_urlopen)
     intel_x402.FacilitatorClient().verify({}, {"network": "base"})
     assert captured["auth"] == "Bearer static-token"
+
+
+def test_mainnet_eip712_domain_is_usd_coin():
+    """Value pin: Base mainnet USDC's EIP-712 domain is name='USD Coin',
+    version='2' — verified against the contract's on-chain DOMAIN_SEPARATOR
+    (0x02fa7265...) on 2026-07-12. Sepolia genuinely differs ('USDC'). A payer
+    signing with the wrong domain fails facilitator verification, so this pin
+    guards real mainnet revenue."""
+    assert intel_x402.NETWORKS["base"]["eip712_name"] == "USD Coin"
+    assert intel_x402.NETWORKS["base"]["eip712_version"] == "2"
+    assert intel_x402.NETWORKS["base-sepolia"]["eip712_name"] == "USDC"
