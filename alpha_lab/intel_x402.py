@@ -77,6 +77,12 @@ def pay_to_address() -> str:
     return os.getenv("INTEL_X402_PAY_TO", "").strip()
 
 
+def public_base_url() -> str:
+    """Canonical public origin for absolute resource URLs (Bazaar catalogs by
+    the full URL an agent actually calls — a relative path is uncatalogable)."""
+    return os.getenv("INTEL_PUBLIC_BASE_URL", "https://api.pak-labs.com").strip().rstrip("/")
+
+
 def payment_lane_ready() -> bool:
     """True when a real (sandbox/live) payment lane is configured."""
     return x402_mode() in {"sandbox", "live"} and bool(pay_to_address())
@@ -96,9 +102,15 @@ def payment_requirements(product: str) -> dict[str, Any]:
         "scheme": "exact",
         "network": network,
         "maxAmountRequired": atomic_amount(price),
-        "resource": f"/v1/{product}",
-        "description": CATALOG.get(product, {}).get("summary", ""),
+        "resource": f"{public_base_url()}/v1/{product}",
+        "description": CATALOG.get(product, {}).get("summary", "")[:500],
         "mimeType": "application/json",
+        "outputSchema": {
+            "type": "object",
+            "description": "AlphaLabs standard envelope: product, version, generated_at, "
+                           "data, provenance, confidence, reasoning, disclaimer. "
+                           "Full schema at " + public_base_url() + "/openapi.json",
+        },
         "payTo": pay_to_address() or "<unset — demo mode>",
         "maxTimeoutSeconds": 60,
         "asset": params["usdc"],
