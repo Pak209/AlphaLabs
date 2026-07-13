@@ -226,3 +226,79 @@ def test_free_beta_products_never_enter_payment_lane(tmp_path, monkeypatch):
                     headers={"Authorization": "Bearer sk-test-123"})
     assert ok.status_code == 200
     assert ok.json()["usage"]["product_price_usd"] == 0.0
+
+
+# ─── M3-live prep: CDP facilitator JWT auth ──────────────────────────────────
+
+def _fake_cdp_env(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    private = Ed25519PrivateKey.generate()
+    seed = private.private_bytes(serialization.Encoding.Raw,
+                                 serialization.PrivateFormat.Raw,
+                                 serialization.NoEncryption())
+    public = private.public_key().public_bytes(serialization.Encoding.Raw,
+                                               serialization.PublicFormat.Raw)
+    monkeypatch.setenv("CDP_API_KEY_ID", "11111111-2222-3333-4444-555555555555")
+    monkeypatch.setenv("CDP_API_KEY_SECRET",
+                       base64.b64encode(seed + public).decode())
+    return private.public_key()
+
+
+def test_cdp_jwt_structure_and_signature(monkeypatch):
+    public_key = _fake_cdp_env(monkeypatch)
+    token = intel_x402._cdp_jwt("POST", "https://api.cdp.coinbase.com/platform/v2/x402/settle")
+    head_b64, claims_b64, sig_b64 = token.split(".")
+
+    def unb64(part):
+        return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+
+    header, claims = unb64(head_b64), unb64(claims_b64)
+    assert header["alg"] == "EdDSA" and header["typ"] == "JWT"
+    assert header["kid"] == claims["sub"] == "11111111-2222-3333-4444-555555555555"
+    assert len(header["nonce"]) == 16
+    assert claims["iss"] == "cdp" and claims["aud"] == ["cdp_service"]
+    assert claims["uri"] == "POST api.cdp.coinbase.com/platform/v2/x402/settle"
+    assert claims["exp"] - claims["nbf"] == 120
+    # the signature must verify against the derived public key
+    signature = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+    public_key.verify(signature, f"{head_b64}.{claims_b64}".encode())
+
+
+def test_facilitator_uses_cdp_jwt_when_configured(monkeypatch):
+    _fake_cdp_env(monkeypatch)
+    monkeypatch.delenv("INTEL_X402_FACILITATOR_BEARER", raising=False)
+    captured = {}
+
+    def fake_urlopen(request, timeout=None):
+        captured["auth"] = request.get_header("Authorization")
+
+        class R:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b'{"isValid": true}'
+        return R()
+
+    monkeypatch.setattr(intel_x402.urllib.request, "urlopen", fake_urlopen)
+    intel_x402.FacilitatorClient().verify({"x402Version": 1}, {"network": "base"})
+    assert captured["auth"].startswith("Bearer ")
+    assert captured["auth"].count(".") == 2          # three JWT segments
+
+
+def test_static_bearer_wins_over_cdp_jwt(monkeypatch):
+    _fake_cdp_env(monkeypatch)
+    monkeypatch.setenv("INTEL_X402_FACILITATOR_BEARER", "static-token")
+    captured = {}
+
+    def fake_urlopen(request, timeout=None):
+        captured["auth"] = request.get_header("Authorization")
+
+        class R:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b'{}'
+        return R()
+
+    monkeypatch.setattr(intel_x402.urllib.request, "urlopen", fake_urlopen)
+    intel_x402.FacilitatorClient().verify({}, {"network": "base"})
+    assert captured["auth"] == "Bearer static-token"
