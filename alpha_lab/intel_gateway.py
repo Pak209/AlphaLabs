@@ -208,7 +208,10 @@ class Gateway:
         """Returns (key, error_body, error_status). Exactly one of key/error set."""
         key = self.store.resolve_key(raw_key) if raw_key else None
         if not key:
-            if intel_x402.x402_mode() in {"demo", "sandbox", "live"}:
+            # Free-in-beta products are never payable — keyless callers get the
+            # key hint, not a 402 for zero dollars.
+            paid = CATALOG.get(product, {}).get("price_usd", 0) > 0
+            if paid and intel_x402.x402_mode() in {"demo", "sandbox", "live"}:
                 return None, x402_challenge_body(product), 402
             return None, {"detail": "API key required (Authorization: Bearer <key>). "
                                     "See /v1/catalog for products and the x402 payment lane."}, 401
@@ -228,7 +231,8 @@ class Gateway:
         if raw_key:
             key, err, status = self.authorize(raw_key, product)
             return key, None, err, status
-        if payment_header and intel_x402.payment_lane_ready():
+        if (payment_header and intel_x402.payment_lane_ready()
+                and CATALOG.get(product, {}).get("price_usd", 0) > 0):
             payment, reason = self.verify_payment(payment_header, product)
             if reason:
                 return None, None, x402_challenge_body(product, error=reason), 402

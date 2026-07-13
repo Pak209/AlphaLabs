@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  AlphaLabs Intelligence API (commercial surface) — always-on KeepAlive agent.
+
+  Runs alpha_lab.intel_api via scripts/run_intel_api.sh: its OWN FastAPI app,
+  its OWN SQLite (intel_platform.sqlite3), loopback 127.0.0.1:8790 only. The
+  personal dashboard surface does not exist on this port. Public exposure is
+  the api.pak-labs.com tunnel hostname (deploy/api-hostname.md), not a bind.
+
+  Render /Users/pak and install:
+    sed "s|/Users/pak|$HOME|g" deploy/com.alphalab.intel-api.plist.template \
+      > ~/Library/LaunchAgents/com.alphalab.intel-api.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.alphalab.intel-api.plist
+
+  After editing .env:
+    launchctl kickstart -k gui/$(id -u)/com.alphalab.intel-api
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.alphalab.intel-api</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/pak/Projects/AlphaLab/scripts/run_intel_api.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/pak/Projects/AlphaLab</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/pak/Projects/AlphaLab/logs/intel-api.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/pak/Projects/AlphaLab/logs/intel-api.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Standard</string>
+</dict>
+</plist>

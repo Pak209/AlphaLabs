@@ -360,3 +360,39 @@ def test_outcome_products_served_through_gateway(tmp_path: Path, monkeypatch):
     assert ok.status_code == 200 and ok.json()["product"] == "outcome-report"
     ok = client.get("/v1/feature-attribution", headers=headers)
     assert ok.status_code == 200 and ok.json()["product"] == "feature-attribution"
+
+
+# ─── Track 3: public face ────────────────────────────────────────────────────
+
+def test_landing_page_is_free_safe_and_current(tmp_path: Path, monkeypatch):
+    client, _ = client_with_key(tmp_path, monkeypatch)
+    res = client.get("/")                                   # no auth required
+    assert res.status_code == 200
+    html = res.text
+    for name in CATALOG:                                    # every product listed
+        assert f"/v1/{name}" in html
+    assert "Free (beta)" in html                            # posture rendered
+    assert "not investment advice" in html
+    lower = html.lower()
+    for fragment in FORBIDDEN_FRAGMENTS:
+        assert fragment not in lower
+
+
+def test_issue_key_cli_roundtrip(tmp_path: Path, monkeypatch):
+    import subprocess as sp
+    import sys
+    db = str(tmp_path / "intel_keys.sqlite3")
+    monkeypatch.setenv("INTEL_DB_PATH", db)
+    out = sp.run([sys.executable, "scripts/intel_issue_key.py", "issue",
+                  "--name", "betatester", "--rate", "30"],
+                 capture_output=True, text=True, env={**__import__("os").environ})
+    assert out.returncode == 0, out.stderr
+    raw = [l for l in out.stdout.splitlines() if "KEY" in l][0].split(": ")[1].strip()
+
+    from alpha_lab.intel_gateway import IntelStore
+    resolved = IntelStore(db).resolve_key(raw)
+    assert resolved == {"name": "betatester", "tier": "beta", "rate_per_min": 30}
+
+    sp.run([sys.executable, "scripts/intel_issue_key.py", "revoke", "--name", "betatester"],
+           capture_output=True, text=True, env={**__import__("os").environ})
+    assert IntelStore(db).resolve_key(raw) is None          # revoked keys die
