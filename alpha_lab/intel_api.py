@@ -91,6 +91,50 @@ not investment advice, not an offer or solicitation, and not a redistribution of
 vendor's market data. Machine-readable catalog: <a href="/v1/catalog">/v1/catalog</a>.</p>
 </body></html>"""
 
+    @app.get("/llms.txt", response_class=Response)
+    def llms_txt() -> Response:
+        """Machine-readable service description (llms.txt convention) — the
+        agent-facing storefront. Crawled by LLM toolchains and readable by any
+        agent that lands on the root domain."""
+        products = "\n".join(
+            f"- {meta.get('method', 'GET')} /v1/{name} — "
+            f"{'FREE during beta (API key required)' if not meta.get('price_usd') else '$' + format(meta['price_usd'], '.2f') + ' per call'}: "
+            f"{meta['summary']}"
+            for name, meta in CATALOG.items())
+        text = f"""# AlphaLabs Intelligence
+
+> Live trading-pipeline intelligence for AI agents: signal evaluation by a real
+> calibrated engine (glass-box sub-signal explanations), pipeline calibration
+> telemetry, recorded outcome reports, and SEC-filing catalysts. Derived
+> analytics only — never redistributed vendor market data. Not investment advice.
+
+Base URL: https://api.pak-labs.com
+
+## Products
+{products}
+
+## Auth (two lanes)
+- API key: `Authorization: Bearer <key>` — free beta keys, invite via the landing page.
+- x402 pay-per-call: keyless requests to paid products return an HTTP 402 with
+  machine-readable payment requirements (USDC on Base mainnet, EIP-3009,
+  settled via the Coinbase facilitator). No account needed — an agent with a
+  funded wallet can buy a single call.
+
+## Interfaces
+- REST: endpoints above; machine-readable catalog at /v1/catalog; full schema at /openapi.json
+- MCP (streamable HTTP): POST /mcp — tools: alphalabs_get_catalog,
+  alphalabs_evaluate_signal, alphalabs_explain_decision,
+  alphalabs_calibration_report, alphalabs_outcome_report,
+  alphalabs_feature_attribution
+
+## Why this data is different
+The scores and telemetry come from a live, gated paper-trading pipeline with
+recorded outcomes — accepted-vs-rejected edge, score-band hit rates, and
+feature attribution measured on real decisions, not backtests or wrapped
+public feeds.
+"""
+        return Response(content=text, media_type="text/plain; charset=utf-8")
+
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"status": "ok", "platform": "alphalabs-intel", "products": len(CATALOG)}
