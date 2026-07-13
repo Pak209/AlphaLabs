@@ -396,3 +396,17 @@ def test_issue_key_cli_roundtrip(tmp_path: Path, monkeypatch):
     sp.run([sys.executable, "scripts/intel_issue_key.py", "revoke", "--name", "betatester"],
            capture_output=True, text=True, env={**__import__("os").environ})
     assert IntelStore(db).resolve_key(raw) is None          # revoked keys die
+
+
+def test_llms_txt_serves_agent_storefront(tmp_path: Path, monkeypatch):
+    client, _ = client_with_key(tmp_path, monkeypatch)
+    res = client.get("/llms.txt")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/plain")
+    text = res.text
+    for name in CATALOG:
+        assert f"/v1/{name}" in text
+    assert "x402" in text and "/mcp" in text
+    lower = text.lower()
+    for fragment in FORBIDDEN_FRAGMENTS:
+        assert fragment not in lower
