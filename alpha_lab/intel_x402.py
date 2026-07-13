@@ -29,7 +29,10 @@ import base64
 import binascii
 import json
 import os
+import secrets
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
@@ -125,6 +128,40 @@ def encode_settlement_header(settlement: dict[str, Any]) -> str:
     return base64.b64encode(json.dumps(settlement, default=str).encode()).decode()
 
 
+def _cdp_jwt(method: str, url: str) -> Optional[str]:
+    """Per-request CDP Bearer JWT (EdDSA) from CDP_API_KEY_ID/SECRET.
+
+    CDP secret API keys are Ed25519 (base64 seed+public, 64 bytes); the JWT
+    binds to one request via the uri claim and expires in 120s — per
+    docs.cdp.coinbase.com/api-reference/v2/authentication. Hand-rolled on
+    `cryptography` (already a dependency) so no CDP SDK is needed.
+    Returns None when the envs aren't set (static-bearer or free
+    facilitators need no auth).
+    """
+    key_id = os.getenv("CDP_API_KEY_ID", "").strip()
+    secret = os.getenv("CDP_API_KEY_SECRET", "").strip()
+    if not key_id or not secret:
+        return None
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    parsed = urllib.parse.urlparse(url)
+    private = Ed25519PrivateKey.from_private_bytes(base64.b64decode(secret)[:32])
+    now = int(time.time())
+    header = {"alg": "EdDSA", "kid": key_id, "typ": "JWT",
+              "nonce": secrets.token_hex(8)}
+    claims = {"sub": key_id, "iss": "cdp", "aud": ["cdp_service"],
+              "nbf": now, "exp": now + 120,
+              "uri": f"{method} {parsed.netloc}{parsed.path}"}
+
+    def b64url(obj: dict) -> str:
+        return base64.urlsafe_b64encode(
+            json.dumps(obj, separators=(",", ":")).encode()).rstrip(b"=").decode()
+
+    signing_input = f"{b64url(header)}.{b64url(claims)}"
+    signature = base64.urlsafe_b64encode(
+        private.sign(signing_input.encode())).rstrip(b"=").decode()
+    return f"{signing_input}.{signature}"
+
+
 class FacilitatorClient:
     """verify/settle against an x402 facilitator over HTTPS (stdlib only).
 
@@ -146,11 +183,15 @@ class FacilitatorClient:
         # WAF returns 403 to Python-urllib's default (found by the M3 probe).
         headers = {"Content-Type": "application/json",
                    "User-Agent": "AlphaLabs-Intel/0.2 (+x402 seller)"}
-        bearer = os.getenv("INTEL_X402_FACILITATOR_BEARER", "").strip()
+        url = f"{self.base_url}/{endpoint}"
+        # Auth precedence: explicit static bearer wins; else a per-request CDP
+        # JWT when CDP_API_KEY_ID/SECRET are configured; else unauthenticated
+        # (the free x402.org facilitator).
+        bearer = os.getenv("INTEL_X402_FACILITATOR_BEARER", "").strip() or _cdp_jwt("POST", url)
         if bearer:
             headers["Authorization"] = f"Bearer {bearer}"
         request = urllib.request.Request(
-            f"{self.base_url}/{endpoint}", method="POST",
+            url, method="POST",
             data=json.dumps(body).encode(), headers=headers)
         with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
             return json.load(response)
