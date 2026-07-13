@@ -75,6 +75,8 @@ def test_sandbox_challenge_is_spec_correct(tmp_path: Path, monkeypatch):
     assert body["x402Version"] == 1
     accept = body["accepts"][0]
     assert accept["network"] == "base-sepolia"
+    assert accept["resource"].startswith("http")            # absolute URL for the Bazaar
+    assert accept["resource"].endswith("/v1/catalysts")
     assert accept["maxAmountRequired"] == "20000"           # $0.02 in atomic USDC
     assert accept["asset"] == SEPOLIA_USDC                  # contract, not a ticker
     assert accept["payTo"] == PAY_TO
@@ -313,3 +315,16 @@ def test_mainnet_eip712_domain_is_usd_coin():
     assert intel_x402.NETWORKS["base"]["eip712_name"] == "USD Coin"
     assert intel_x402.NETWORKS["base"]["eip712_version"] == "2"
     assert intel_x402.NETWORKS["base-sepolia"]["eip712_name"] == "USDC"
+
+
+def test_bazaar_discovery_metadata(monkeypatch):
+    """The 402 challenge carries what the CDP Bazaar indexes: an absolute
+    resource URL, a <=500-char description, and an output schema pointer."""
+    monkeypatch.setenv("INTEL_X402_MODE", "live")
+    monkeypatch.setenv("INTEL_X402_PAY_TO", PAY_TO)
+    monkeypatch.setenv("INTEL_PUBLIC_BASE_URL", "https://api.pak-labs.com")
+    req = intel_x402.payment_requirements("market-snapshot")
+    assert req["resource"] == "https://api.pak-labs.com/v1/market-snapshot"
+    assert 0 < len(req["description"]) <= 500
+    assert "openapi.json" in req["outputSchema"]["description"]
+    assert req["extra"] == {"name": "USD Coin", "version": "2"}   # signing intact
