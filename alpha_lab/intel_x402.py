@@ -53,9 +53,12 @@ NETWORKS: dict[str, dict[str, str]] = {
     },
     "base": {
         "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        # CDP facilitator (auth required; wired at M3-live after KYB).
+        # CDP facilitator (per-request EdDSA JWT auth via CDP_API_KEY_ID/SECRET).
         "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
-        "eip712_name": "USDC",          # verify against CDP docs at M3-live
+        # Verified 2026-07-12 against the on-chain DOMAIN_SEPARATOR (0x02fa7265...):
+        # mainnet USDC signs as "USD Coin"/"2" — NOT "USDC" like Base Sepolia.
+        # A payer signing with the wrong domain fails verification silently.
+        "eip712_name": "USD Coin",
         "eip712_version": "2",
     },
 }
