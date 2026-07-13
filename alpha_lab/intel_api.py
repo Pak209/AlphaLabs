@@ -82,8 +82,8 @@ REST + MCP, API keys today, x402 pay-per-call (USDC on Base) in rollout.</p>
 Keyless calls to paid products return an <a href="https://www.x402.org">x402</a> payment
 challenge where the payment lane is enabled.</p>
 <h3>Quickstart</h3>
-<pre>curl -H "Authorization: Bearer $KEY" {{base}}/v1/catalog</pre>
-<p>MCP: point your client at <code>POST {{base}}/mcp</code> with the same bearer key
+<pre>curl -H "Authorization: Bearer $KEY" https://api.pak-labs.com/v1/catalog</pre>
+<p>MCP: point your client at <code>POST https://api.pak-labs.com/mcp</code> with the same bearer key
 (tools: catalog, calibration, evaluate_signal, explain_decision, outcome_report,
 feature_attribution).</p>
 <p class="foot">Research signals and calibration telemetry. Informational derived analytics —
