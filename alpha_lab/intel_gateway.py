@@ -131,6 +131,35 @@ class IntelStore:
                 (f"-{int(limit_days)} days",),
             ).fetchall()]
 
+    def issue_key(self, name: str, tier: str = "beta-faucet",
+                  rate_per_min: int = 30) -> str:
+        """Create a key, store only its hash, return the raw key ONCE."""
+        import secrets
+        raw = f"sk-intel-{secrets.token_urlsafe(24)}"
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO api_keys (key_hash, name, tier, rate_per_min) VALUES (?, ?, ?, ?)",
+                (_hash_key(raw), name, tier, rate_per_min))
+            conn.commit()
+        return raw
+
+    def key_name_exists(self, name: str) -> bool:
+        with self._conn() as conn:
+            return conn.execute("SELECT 1 FROM api_keys WHERE name = ? AND revoked_at IS NULL",
+                                (name,)).fetchone() is not None
+
+    def count_keys(self, tier: str) -> int:
+        with self._conn() as conn:
+            return conn.execute("SELECT COUNT(*) FROM api_keys WHERE tier = ?",
+                                (tier,)).fetchone()[0]
+
+    def count_ok_calls(self, key_name: str) -> int:
+        """Lifetime successful calls — the beta allowance meter (errors are free)."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM usage WHERE key_name = ? AND status = 200",
+                (key_name,)).fetchone()[0]
+
     def store_evaluation(self, key_name: str, request: dict[str, Any],
                          result: dict[str, Any]) -> str:
         evaluation_id = uuid.uuid4().hex[:16]
@@ -217,6 +246,12 @@ class Gateway:
                                     "See /v1/catalog for products and the x402 payment lane."}, 401
         if not self.limiter.allow(key["name"], int(key.get("rate_per_min") or DEFAULT_RATE_PER_MIN)):
             return None, {"detail": "rate limit exceeded"}, 429
+        if key.get("tier") == "beta-faucet":
+            allowance = int(os.getenv("INTEL_BETA_CALL_ALLOWANCE", "100"))
+            if self.store.count_ok_calls(key["name"]) >= allowance:
+                return None, {"detail": f"beta allowance exhausted ({allowance} calls). "
+                                        "Pay per call keyless via x402 (drop the key, retry, "
+                                        "follow the 402), or contact us for a partner key."}, 402
         return key, None, 0
 
     # ── x402 payment lane (M3-sandbox) ────────────────────────────────────

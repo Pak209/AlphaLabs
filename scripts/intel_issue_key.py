@@ -12,7 +12,6 @@ its sha256 lands in the intel DB.
 from __future__ import annotations
 
 import argparse
-import secrets
 import sys
 from pathlib import Path
 
@@ -20,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from alpha_lab.intel_gateway import IntelStore, _hash_key
+from alpha_lab.intel_gateway import IntelStore
 
 
 def main() -> None:
@@ -37,12 +36,7 @@ def main() -> None:
 
     store = IntelStore()
     if args.cmd == "issue":
-        raw = f"sk-intel-{secrets.token_urlsafe(24)}"
-        with store._conn() as conn:
-            conn.execute(
-                "INSERT INTO api_keys (key_hash, name, tier, rate_per_min) VALUES (?, ?, ?, ?)",
-                (_hash_key(raw), args.name, args.tier, args.rate))
-            conn.commit()
+        raw = store.issue_key(args.name, tier=args.tier, rate_per_min=args.rate)
         print(f"issued for '{args.name}' (tier={args.tier}, {args.rate}/min)")
         print(f"KEY (shown once, only the hash is stored): {raw}")
     elif args.cmd == "revoke":

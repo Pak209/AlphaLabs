@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 import time
 from typing import Any
 
@@ -78,9 +79,32 @@ scores, regimes, calibration telemetry, and recorded outcomes. Built for AI agen
 REST + MCP, API keys today, x402 pay-per-call (USDC on Base) in rollout.</p>
 <table><tr><th>Product</th><th>Price</th><th>What you get</th></tr>{table}</table>
 <h3>Auth</h3>
-<p><code>Authorization: Bearer &lt;api-key&gt;</code> — beta keys are invite-only for now.
-Keyless calls to paid products return an <a href="https://www.x402.org">x402</a> payment
-challenge where the payment lane is enabled.</p>
+<p><code>Authorization: Bearer &lt;api-key&gt;</code> — grab a free beta key below
+(first 100 calls free), or pay keyless per call via
+<a href="https://www.x402.org">x402</a> (USDC on Base).</p>
+<form id="faucet" onsubmit="return getKey(event)" style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0">
+  <input id="faucet-email" type="email" required placeholder="you@example.com"
+         style="flex:1;min-width:220px;padding:10px;border-radius:6px;border:1px solid #232936;background:#141926;color:#e6e9ef">
+  <button type="submit" style="padding:10px 18px;border-radius:6px;border:none;background:#7fb4ff;color:#0b0e14;font-weight:700;cursor:pointer">Get a free beta key</button>
+</form>
+<pre id="faucet-out" style="display:none"></pre>
+<script>
+async function getKey(e) {{
+  e.preventDefault();
+  const out = document.getElementById("faucet-out");
+  out.style.display = "block"; out.textContent = "requesting…";
+  try {{
+    const res = await fetch("/v1/keys/beta", {{ method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify({{ email: document.getElementById("faucet-email").value }}) }});
+    const data = await res.json();
+    out.textContent = res.ok
+      ? "YOUR KEY (shown once — save it now):\n" + data.key + "\n\n" + data.note
+      : (data.detail || "request failed");
+  }} catch (_) {{ out.textContent = "network error — try again"; }}
+  return false;
+}}
+</script>
 <h3>Quickstart</h3>
 <pre>curl -H "Authorization: Bearer $KEY" https://api.pak-labs.com/v1/catalog</pre>
 <p>MCP: point your client at <code>POST https://api.pak-labs.com/mcp</code> with the same bearer key
@@ -114,7 +138,9 @@ Base URL: https://api.pak-labs.com
 {products}
 
 ## Auth (two lanes)
-- API key: `Authorization: Bearer <key>` — free beta keys, invite via the landing page.
+- API key: `Authorization: Bearer <key>` — self-provision a free beta key
+  (first 100 calls free, 30 req/min): POST /v1/keys/beta with
+  {{"email": "you@example.com"}} — the key is returned once in the response.
 - x402 pay-per-call: keyless requests to paid products return an HTTP 402 with
   machine-readable payment requirements (USDC on Base mainnet, EIP-3009,
   settled via the Coinbase facilitator). No account needed — an agent with a
@@ -168,6 +194,49 @@ public feeds.
     def pricing_redirect() -> Any:
         # Humans keep guessing this URL (5 hits) — the landing page IS the pricing page.
         return Response(status_code=307, headers={"Location": "/"})
+
+    _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,24}$")
+
+    @app.post("/v1/keys/beta")
+    async def beta_key_faucet(request: Request) -> Any:
+        """Self-serve beta keys — the first-100-calls-free funnel.
+
+        Abuse posture for a public, unauthenticated endpoint: per-IP throttle
+        (3/min), one key per normalized email, global cap on faucet keys
+        (INTEL_BETA_KEY_CAP, default 500, fail-closed), and the keys
+        themselves are bounded (30/min rate + lifetime call allowance
+        enforced in the gateway) — worst-case cost of abuse is small.
+        """
+        client_ip = (request.headers.get("cf-connecting-ip")
+                     or (request.client.host if request.client else "unknown"))
+        if not gateway.limiter.allow(f"faucet:{client_ip}", 5):
+            return JSONResponse(status_code=429, content={"detail": "slow down — try again in a minute"})
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        email = str((body or {}).get("email") or "").strip().lower()
+        if not _EMAIL_RE.match(email):
+            return JSONResponse(status_code=422, content={"detail": "valid email required: {\"email\": \"you@example.com\"}"})
+        name = f"beta:{email}"
+        if gateway.store.key_name_exists(name):
+            return JSONResponse(status_code=409, content={
+                "detail": "a beta key was already issued to this email — contact us if it was lost"})
+        cap = int(os.getenv("INTEL_BETA_KEY_CAP", "500"))
+        if gateway.store.count_keys("beta-faucet") >= cap:
+            return JSONResponse(status_code=503, content={
+                "detail": "beta is full — contact us for a partner key"})
+        raw = gateway.store.issue_key(name)
+        allowance = int(os.getenv("INTEL_BETA_CALL_ALLOWANCE", "100"))
+        return {
+            "key": raw,
+            "note": "shown once — store it now. Send as 'Authorization: Bearer <key>'.",
+            "tier": "beta-faucet",
+            "rate_per_min": 30,
+            "call_allowance": allowance,
+            "after_allowance": "pay per call keyless via x402 (USDC on Base) or ask for a partner key",
+            "catalog": "/v1/catalog",
+        }
 
     @app.get("/health")
     def health() -> dict[str, Any]:
