@@ -135,6 +135,40 @@ public feeds.
 """
         return Response(content=text, media_type="text/plain; charset=utf-8")
 
+    @app.get("/.well-known/mcp/server-card.json")
+    def mcp_server_card() -> dict[str, Any]:
+        """MCP discovery card — clients probe this path (6 hits before it existed)."""
+        return {
+            "name": "alphalabs-intel",
+            "description": "Live trading-pipeline intelligence: signal evaluation, "
+                           "calibration telemetry, recorded outcomes, SEC catalysts. "
+                           "Not investment advice.",
+            "endpoint": "https://api.pak-labs.com/mcp",
+            "transport": "streamable-http",
+            "authentication": {"type": "bearer",
+                               "hint": "Authorization: Bearer <api-key>; keys via the landing page. "
+                                       "Paid REST products also accept x402 payments (USDC on Base)."},
+            "docs": "https://api.pak-labs.com/llms.txt",
+        }
+
+    @app.get("/robots.txt", response_class=Response)
+    def robots() -> Response:
+        return Response("User-agent: *\nAllow: /\nSitemap: https://api.pak-labs.com/sitemap.xml\n",
+                        media_type="text/plain")
+
+    @app.get("/sitemap.xml", response_class=Response)
+    def sitemap() -> Response:
+        urls = "".join(f"<url><loc>https://api.pak-labs.com{p}</loc></url>"
+                       for p in ("/", "/llms.txt", "/v1/catalog"))
+        return Response(f'<?xml version="1.0" encoding="UTF-8"?>'
+                        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
+                        media_type="application/xml")
+
+    @app.get("/pricing")
+    def pricing_redirect() -> Any:
+        # Humans keep guessing this URL (5 hits) — the landing page IS the pricing page.
+        return Response(status_code=307, headers={"Location": "/"})
+
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"status": "ok", "platform": "alphalabs-intel", "products": len(CATALOG)}
@@ -287,6 +321,12 @@ public feeds.
                 "jsonrpc": "2.0", "id": None,
                 "error": {"code": -32700, "message": "parse error"}})
         raw = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not raw:
+            # Smithery's gateway (and several MCP clients) forward configured
+            # keys as query parameters, not headers — found live: 194 failed
+            # auth attempts as POST /mcp?api_key=... before this existed.
+            raw = (request.query_params.get("api_key")
+                   or request.query_params.get("apiKey") or "").strip()
         rpc_response = handle_message(msg, gateway=gateway,
                                       trading_db_path=trading_db_path, raw_key=raw)
         if rpc_response is None:                 # notification — acknowledged, no body
