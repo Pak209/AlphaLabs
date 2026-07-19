@@ -34,6 +34,7 @@ from typing import Any
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from . import intel_x402
 from .intel_gateway import (   # noqa: F401 — IntelStore/RateLimiter re-exported for compat
     DEFAULT_RATE_PER_MIN, INTEL_DB_DEFAULT, Gateway, IntelStore, RateLimiter,
 )
@@ -257,9 +258,18 @@ public feeds.
     def _authorize(request: Request, product: str):
         raw = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         payment_header = request.headers.get("X-PAYMENT", "").strip()
-        key, payment, err, status = gateway.authorize_or_charge(raw, payment_header, product)
+        payment_signature = request.headers.get("PAYMENT-SIGNATURE", "").strip()
+        key, payment, err, status = gateway.authorize_or_charge(
+            raw, payment_header, product, payment_signature=payment_signature)
         if err:
-            return None, None, JSONResponse(status_code=status, content=err)
+            headers = {}
+            if status == 402 and CATALOG.get(product, {}).get("price_usd", 0) > 0:
+                # dual-stack 402: v1 JSON body (unchanged, proven) + the v2
+                # PAYMENT-REQUIRED header carrying the Bazaar discovery
+                # extension — this envelope is what the facilitator indexes.
+                headers["PAYMENT-REQUIRED"] = intel_x402.challenge_v2_header(
+                    product, error=str(err.get("error") or "payment required"))
+            return None, None, JSONResponse(status_code=status, content=err, headers=headers)
         return key, payment, None
 
     def _finalize(result: Any, payment: dict[str, Any] | None):
@@ -273,8 +283,10 @@ public feeds.
         payment_id, settlement_header, err = gateway.settle_payment(payment)
         if err:
             return JSONResponse(status_code=402, content=err), None, 402
+        header_name = ("PAYMENT-RESPONSE" if payment.get("protocol") == 2
+                       else "X-PAYMENT-RESPONSE")
         return JSONResponse(content=result,
-                            headers={"X-PAYMENT-RESPONSE": settlement_header}), payment_id, 200
+                            headers={header_name: settlement_header}), payment_id, 200
 
     def _serve(product: str, request: Request, **kwargs: Any) -> Any:
         started = time.monotonic()

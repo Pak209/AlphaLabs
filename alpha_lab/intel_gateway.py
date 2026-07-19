@@ -259,16 +259,22 @@ class Gateway:
     # is never charged for a 5xx, and we never serve on an unsettleable
     # authorization for longer than one request.
 
-    def authorize_or_charge(self, raw_key: str, payment_header: str, product: str
+    def authorize_or_charge(self, raw_key: str, payment_header: str, product: str,
+                            payment_signature: str = ""
                             ) -> tuple[dict[str, Any] | None, dict[str, Any] | None,
                                        dict[str, Any] | None, int]:
-        """Key lane first, then payment lane. Returns (key, payment_ctx, error, status)."""
+        """Key lane first, then the payment lane (v1 X-PAYMENT or v2
+        PAYMENT-SIGNATURE — dual-stack). Returns (key, payment_ctx, error, status)."""
         if raw_key:
             key, err, status = self.authorize(raw_key, product)
             return key, None, err, status
-        if (payment_header and intel_x402.payment_lane_ready()
-                and CATALOG.get(product, {}).get("price_usd", 0) > 0):
-            payment, reason = self.verify_payment(payment_header, product)
+        paid = CATALOG.get(product, {}).get("price_usd", 0) > 0
+        if ((payment_header or payment_signature)
+                and intel_x402.payment_lane_ready() and paid):
+            if payment_signature:
+                payment, reason = self.verify_payment_v2(payment_signature, product)
+            else:
+                payment, reason = self.verify_payment(payment_header, product)
             if reason:
                 return None, None, x402_challenge_body(product, error=reason), 402
             payer_name = f"x402:{payment['payer']}"
@@ -304,6 +310,30 @@ class Gateway:
                 "payer": payer, "product": product,
                 "amount_usd": CATALOG.get(product, {}).get("price_usd", 0.0)}, None
 
+    def verify_payment_v2(self, signature_header: str, product: str
+                          ) -> tuple[dict[str, Any] | None, str | None]:
+        """v2 lane: decode PAYMENT-SIGNATURE, local checks, facilitator verify."""
+        payload = intel_x402.decode_payment_header(signature_header)
+        if payload is None:
+            return None, "malformed PAYMENT-SIGNATURE header (expected base64 JSON)"
+        reason = intel_x402.local_payment_checks_v2(payload, product)
+        if reason:
+            return None, reason
+        authorization = (payload.get("payload") or {}).get("authorization") or {}
+        nonce = str(authorization.get("nonce"))
+        if self.store.has_payment(nonce):
+            return None, "payment authorization already used (replay)"
+        accepted = payload.get("accepted") or {}
+        verdict = self.facilitator.verify(payload, accepted)
+        if verdict.get("_facilitator_error"):
+            return None, verdict["_facilitator_error"]
+        if not verdict.get("isValid"):
+            return None, str(verdict.get("invalidReason") or "payment verification failed")
+        payer = str(verdict.get("payer") or authorization.get("from") or "unknown")
+        return {"payload": payload, "requirements": accepted, "nonce": nonce,
+                "payer": payer, "product": product, "protocol": 2,
+                "amount_usd": CATALOG.get(product, {}).get("price_usd", 0.0)}, None
+
     def settle_payment(self, payment: dict[str, Any]
                        ) -> tuple[str | None, str | None, dict[str, Any] | None]:
         """Settle a verified payment. Returns (payment_id, response_header_b64, error_body)."""
@@ -316,7 +346,8 @@ class Gateway:
         try:
             self.store.record_payment(
                 payment["nonce"], payment["product"], payment["amount_usd"],
-                payment["payer"], payment["requirements"]["network"],
+                payment["payer"],
+                str(payment["requirements"].get("network", "")),
                 settlement.get("transaction"))
         except sqlite3.IntegrityError:      # raced replay — refuse the duplicate
             return None, None, x402_challenge_body(
