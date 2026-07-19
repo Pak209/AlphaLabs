@@ -107,6 +107,32 @@ function cleanErrorMessage(message) {
 
 const READ_SOFT_TIMEOUT_MS = 12000;
 let stalePanels = 0;
+let lastLoadAt = 0;
+
+// ── self-healing updates ─────────────────────────────────────────────────────
+// An open tab used to stay frozen on pre-deploy code until someone manually
+// refreshed (found live: an iMessage tap re-foregrounded a tab loaded minutes
+// BEFORE a deploy, showing the old UI with fresh data). The app now compares
+// the served asset version against its own on every data refresh and whenever
+// the tab becomes visible, and reloads itself once when a deploy has landed.
+const ASSET_VERSION = 57;   // keep in sync with index.html app.js?v=
+async function checkForAppUpdate() {
+  try {
+    const res = await fetch("/", { cache: "no-store" });
+    const match = (await res.text()).match(/app\.js\?v=(\d+)/);
+    if (match && Number(match[1]) > ASSET_VERSION) {
+      showToast("Dashboard updated — reloading…");
+      setTimeout(() => location.reload(), 700);
+    }
+  } catch (_) { /* offline — the next check will catch it */ }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  checkForAppUpdate();
+  // Returning to a tab that has sat idle also refreshes the DATA, so the
+  // "Refreshed" chip never silently lies about being minutes old.
+  if (Date.now() - lastLoadAt > 60000) load();
+});
 
 // Soft read for the boot/refresh batch: one slow or failing endpoint must
 // never pin "Refreshing..." or blank a panel. Times out, keeps the last
@@ -125,6 +151,8 @@ async function load() {
   const refresh = document.querySelector("#refresh");
   if (refresh) refresh.textContent = "Refreshing...";
   stalePanels = 0;
+  lastLoadAt = Date.now();
+  checkForAppUpdate();
   const [dashboard, ideas, trades, stats, bitcoin, afterHoursBtc, liquidity, trendingStocks, oil, futuresPulse, businessProfiles, catalysts, catalystIntelligence, dailyBrief, briefings, executionAudit, performanceReport, portfolio, approvalResult, alertsResult] = await Promise.all([
     soft("/api/dashboard", "dashboard"),
     soft("/api/ideas", "ideas"),
