@@ -253,3 +253,135 @@ def local_payment_checks(payload: dict[str, Any],
     if not authorization.get("nonce"):
         return "missing authorization nonce"
     return None
+
+
+# ─── x402 v2 (dual-stack): headers-based transport + Bazaar discovery ────────
+# v2 rides ALONGSIDE v1 on the same responses: the 402 keeps the v1 JSON body
+# (proven, earning) and adds the v2 PAYMENT-REQUIRED header; payments are
+# accepted from either X-PAYMENT (v1) or PAYMENT-SIGNATURE (v2). The Bazaar
+# indexes from the v2 envelope's top-level extensions — the earlier v1-shaped
+# attempt could never index (docs/X402_BAZAAR_FINDINGS.md).
+
+CAIP2 = {"base": "eip155:8453", "base-sepolia": "eip155:84532"}
+CAIP2_REVERSE = {v: k for k, v in CAIP2.items()}
+
+
+def resource_object(product: str) -> dict[str, Any]:
+    return {
+        "url": f"{public_base_url()}/v1/{product}",
+        "description": CATALOG.get(product, {}).get("summary", "")[:500],
+        "mimeType": "application/json",
+    }
+
+
+def payment_requirements_v2(product: str) -> dict[str, Any]:
+    network = x402_network()
+    params = NETWORKS[network]
+    price = CATALOG.get(product, {}).get("price_usd", 0.01)
+    return {
+        "scheme": "exact",
+        "network": CAIP2[network],
+        "amount": atomic_amount(price),
+        "asset": params["usdc"],
+        "payTo": pay_to_address() or "<unset>",
+        "maxTimeoutSeconds": 60,
+        "extra": {"name": params["eip712_name"], "version": params["eip712_version"]},
+    }
+
+
+def bazaar_extension(product: str) -> dict[str, Any]:
+    """Discovery declaration per specs/extensions/bazaar.md (info + schema)."""
+    method = CATALOG.get(product, {}).get("method", "GET")
+    envelope_example = {"product": product, "version": "v1", "data": {},
+                        "disclaimer": "not investment advice"}
+    if method == "POST":
+        info_input: dict[str, Any] = {
+            "type": "http", "method": "POST", "bodyType": "json",
+            "body": {"ticker": "NVDA", "bias": "bullish",
+                     "catalyst": "example catalyst headline"},
+        }
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "const": "http"},
+                "method": {"type": "string", "enum": ["POST", "PUT", "PATCH"]},
+                "bodyType": {"type": "string", "enum": ["json", "form-data", "text"]},
+                "body": {"type": "object"},
+            },
+            "required": ["type", "method", "bodyType", "body"],
+            "additionalProperties": False,
+        }
+    else:
+        info_input = {"type": "http", "method": "GET"}
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "const": "http"},
+                "method": {"type": "string", "enum": ["GET", "HEAD", "DELETE"]},
+                "queryParams": {"type": "object", "additionalProperties": {"type": "string"}},
+            },
+            "required": ["type", "method"],
+            "additionalProperties": False,
+        }
+    return {
+        "info": {"input": info_input,
+                 "output": {"type": "json", "example": envelope_example}},
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "input": input_schema,
+                "output": {
+                    "type": "object",
+                    "properties": {"type": {"type": "string", "const": "json"},
+                                   "example": {"type": "object"}},
+                    "required": ["type", "example"],
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["input", "output"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def challenge_v2(product: str, error: str = "payment required") -> dict[str, Any]:
+    return {
+        "x402Version": 2,
+        "error": error,
+        "resource": resource_object(product),
+        "accepts": [payment_requirements_v2(product)],
+        "extensions": {"bazaar": bazaar_extension(product)},
+    }
+
+
+def _b64_json(obj: dict[str, Any]) -> str:
+    return base64.b64encode(json.dumps(obj, default=str).encode()).decode()
+
+
+def challenge_v2_header(product: str, error: str = "payment required") -> str:
+    return _b64_json(challenge_v2(product, error))
+
+
+def local_payment_checks_v2(payload: dict[str, Any], product: str) -> Optional[str]:
+    """Sanity checks on a decoded PAYMENT-SIGNATURE payload before the
+    facilitator round-trip — mirrors the v1 checks."""
+    if payload.get("x402Version") != 2:
+        return "unsupported x402 version in PAYMENT-SIGNATURE"
+    accepted = payload.get("accepted") or {}
+    ours = payment_requirements_v2(product)
+    if accepted.get("scheme") != ours["scheme"]:
+        return "scheme mismatch (expected exact)"
+    if accepted.get("network") != ours["network"]:
+        return f"network mismatch (expected {ours['network']})"
+    authorization = (payload.get("payload") or {}).get("authorization") or {}
+    if str(authorization.get("to", "")).lower() != ours["payTo"].lower():
+        return "payment recipient mismatch"
+    try:
+        if int(str(authorization.get("value", "0"))) < int(ours["amount"]):
+            return "payment amount below required"
+    except ValueError:
+        return "malformed payment amount"
+    if not authorization.get("nonce"):
+        return "missing authorization nonce"
+    return None

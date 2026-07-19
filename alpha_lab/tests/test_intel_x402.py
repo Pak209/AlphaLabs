@@ -328,3 +328,83 @@ def test_bazaar_discovery_metadata(monkeypatch):
     assert 0 < len(req["description"]) <= 500
     assert "openapi.json" in req["outputSchema"]["description"]
     assert req["extra"] == {"name": "USD Coin", "version": "2"}   # signing intact
+
+
+# ─── x402 v2 dual-stack: same 402 speaks both protocols ──────────────────────
+
+def payment_signature_v2(product="catalysts", nonce="0xv2nonce-1", to=PAY_TO,
+                         value="20000", network="eip155:84532"):
+    payload = {
+        "x402Version": 2,
+        "resource": {"url": f"https://api.pak-labs.com/v1/{product}",
+                     "description": "", "mimeType": "application/json"},
+        "accepted": {"scheme": "exact", "network": network, "amount": value,
+                     "asset": SEPOLIA_USDC, "payTo": to, "maxTimeoutSeconds": 60,
+                     "extra": {"name": "USDC", "version": "2"}},
+        "payload": {"signature": "0xsig",
+                    "authorization": {"from": PAYER, "to": to, "value": value,
+                                      "validAfter": "0", "validBefore": "99999999999",
+                                      "nonce": nonce}},
+    }
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
+def test_402_is_dual_stack(tmp_path, monkeypatch):
+    """One 402: v1 JSON body (unchanged) + v2 PAYMENT-REQUIRED header with the
+    Bazaar extension at the spec's top level."""
+    client, _ = sandbox_client(tmp_path, monkeypatch)
+    res = client.get("/v1/catalysts")
+    assert res.status_code == 402
+    assert res.json()["x402Version"] == 1                       # v1 body untouched
+    envelope = json.loads(base64.b64decode(res.headers["PAYMENT-REQUIRED"]))
+    assert envelope["x402Version"] == 2
+    assert envelope["resource"]["url"].endswith("/v1/catalysts")
+    accept = envelope["accepts"][0]
+    assert accept["network"] == "eip155:84532"                  # CAIP-2
+    assert accept["amount"] == "20000"                          # renamed field
+    bazaar = envelope["extensions"]["bazaar"]                   # top-level extensions
+    assert bazaar["info"]["input"] == {"type": "http", "method": "GET"}
+    assert bazaar["info"]["output"]["type"] == "json"
+    assert "schema" in bazaar
+
+
+def test_v2_payment_settles_with_v2_response_header(tmp_path, monkeypatch):
+    client, store = sandbox_client(tmp_path, monkeypatch)
+    calls = fake_facilitator(monkeypatch)
+    res = client.get("/v1/catalysts",
+                     headers={"PAYMENT-SIGNATURE": payment_signature_v2()})
+    assert res.status_code == 200
+    assert "PAYMENT-RESPONSE" in res.headers                    # v2 response header
+    assert "X-PAYMENT-RESPONSE" not in res.headers
+    settlement = json.loads(base64.b64decode(res.headers["PAYMENT-RESPONSE"]))
+    assert settlement["success"]
+    assert calls == ["verify", "settle"]
+    rows = payments_rows(store)
+    assert rows[0]["payment_id"] == "0xv2nonce-1"
+    assert rows[0]["network"] == "eip155:84532"                 # CAIP-2 recorded
+
+
+def test_v2_replay_and_mismatch_rejected(tmp_path, monkeypatch):
+    client, store = sandbox_client(tmp_path, monkeypatch)
+    fake_facilitator(monkeypatch)
+    header = payment_signature_v2(nonce="0xv2-once")
+    assert client.get("/v1/catalysts",
+                      headers={"PAYMENT-SIGNATURE": header}).status_code == 200
+    replay = client.get("/v1/catalysts", headers={"PAYMENT-SIGNATURE": header})
+    assert replay.status_code == 402 and "replay" in replay.json()["error"]
+
+    wrong_net = client.get("/v1/catalysts", headers={
+        "PAYMENT-SIGNATURE": payment_signature_v2(nonce="0xv2-2", network="eip155:8453")})
+    assert wrong_net.status_code == 402
+    assert "network mismatch" in wrong_net.json()["error"]
+    assert len(payments_rows(store)) == 1
+
+
+def test_v1_lane_completely_unchanged_beside_v2(tmp_path, monkeypatch):
+    """The regression that matters: v1 payments still work identically."""
+    client, store = sandbox_client(tmp_path, monkeypatch)
+    fake_facilitator(monkeypatch)
+    res = client.get("/v1/catalysts", headers={"X-PAYMENT": payment_header(nonce="0xv1-still")})
+    assert res.status_code == 200
+    assert "X-PAYMENT-RESPONSE" in res.headers                  # v1 response header
+    assert "PAYMENT-RESPONSE" not in res.headers
