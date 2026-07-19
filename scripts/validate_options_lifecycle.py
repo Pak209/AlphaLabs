@@ -37,9 +37,29 @@ from alpha_lab.options_selector import OptionSelectionError, select_atm_contract
 from alpha_lab.service import AlphaLabService
 from paper_trader.config import load_config
 
-# Liquid, typically-cheap, optionable names tried in priority order. The first one
-# whose ATM contract passes the liquidity guards AND fits the per-trade budget is used.
+# Liquid, typically-cheap, optionable names. The first one whose ATM contract
+# passes the liquidity guards AND fits the per-trade budget is used — but the
+# priority order ROTATES daily (see candidates_for_today): a fixed order meant
+# the first liquid name (PLTR) won every single run and the other nine never
+# got a turn, so the approval queue looked like a PLTR monoculture.
 DEFAULT_CANDIDATES = ["PLTR", "IWM", "XLE", "USO", "OXY", "SLB", "AMD", "QQQ", "SPY", "AAPL"]
+
+
+def candidates_for_today(today=None):
+    """Deterministic daily rotation of the candidate list.
+
+    Env override: OPTIONS_VALIDATION_CANDIDATES="TSLA,AMD,..." replaces the
+    default list (rotation still applies). Deterministic-by-date rather than
+    random so a rerun on the same day picks the same underlying and the
+    journal stays reproducible.
+    """
+    import datetime
+    import os
+    raw = os.getenv("OPTIONS_VALIDATION_CANDIDATES", "").strip()
+    candidates = [t.strip().upper() for t in raw.split(",") if t.strip()] or list(DEFAULT_CANDIDATES)
+    day = (today or datetime.date.today()).timetuple().tm_yday
+    start = day % len(candidates)
+    return candidates[start:] + candidates[:start]
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -77,7 +97,8 @@ def _pick_underlying(candidates, bias, budget):
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate the paper options lifecycle end-to-end.")
     parser.add_argument("--bias", choices=["bullish", "bearish"], default="bullish")
-    parser.add_argument("--candidates", nargs="*", default=DEFAULT_CANDIDATES)
+    parser.add_argument("--candidates", nargs="*", default=None,
+                        help="override underlyings; default rotates daily (env OPTIONS_VALIDATION_CANDIDATES)")
     parser.add_argument("--db", default=None, help="SQLite DB path; defaults to ALPHA_LAB_DB_PATH or app default.")
     parser.add_argument("--risk-config", default="alpha_lab/config.example.json")
     parser.add_argument("--allow-closed", action="store_true", help="select+inspect without requiring an open market")
@@ -113,7 +134,9 @@ def main() -> int:
     budget = _budget(args.risk_config, equity)
 
     # Stage 1+2: signal generation + option selection.
-    underlying, selection = _pick_underlying(args.candidates, args.bias, budget)
+    candidates = args.candidates or candidates_for_today()
+    print(f"     candidate order today: {', '.join(candidates)}")
+    underlying, selection = _pick_underlying(candidates, args.bias, budget)
     if not selection:
         _print_stage("1. Signal+Select", FAIL, "no candidate produced an in-budget qualifying contract")
         return 1
