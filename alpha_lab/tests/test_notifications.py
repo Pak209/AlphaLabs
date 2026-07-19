@@ -519,13 +519,15 @@ def test_app_js_test_button_uses_eligible_level_and_local_notification():
 # ---- mobile approval UI polish ----------------------------------------------
 def test_app_js_approval_card_shows_freshness():
     app_js = Path("alpha_lab/static/app.js").read_text(encoding="utf-8")
-    # The card renders a freshness line from created_at, and an old idea is
-    # flagged stale so it is obvious on the phone before approval.
-    assert "approvalFreshness(item.created_at)" in app_js
-    assert "function approvalFreshness(" in app_js
+    # The card renders a compact age chip from created_at, and an old idea is
+    # flagged STALE so it is obvious on the phone before approval (review-feed
+    # design: "STALE · 26d" right-aligned in the card header).
+    assert "approvalAgeChip(item.created_at)" in app_js
+    assert "function approvalAgeChip(" in app_js
     assert "function timeAgo(" in app_js
     assert "min ago" in app_js
-    assert "approval-fresh stale" in app_js
+    assert "feed-age stale" in app_js
+    assert "STALE" in app_js
 
 
 def test_app_js_reject_and_expire_require_confirm():

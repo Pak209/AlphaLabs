@@ -632,7 +632,7 @@ class AlphaLabRepository:
             FROM approval_queue q
             JOIN alpha_ideas i ON i.id = q.idea_id
             WHERE q.status = 'needs_review' AND i.status = 'needs_review'
-            ORDER BY datetime(q.created_at) ASC
+            ORDER BY datetime(q.created_at) DESC
             LIMIT ?
             """,
             (limit,),

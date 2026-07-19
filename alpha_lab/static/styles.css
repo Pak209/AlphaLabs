@@ -85,6 +85,7 @@ th { color: var(--muted); font-size: 12px; position: sticky; top: 0; background:
   .grid, .overview-grid, .paper-grid { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(3, 1fr); }
   .topbar { align-items: flex-start; flex-direction: column; }
+
 }
 
 
@@ -270,6 +271,56 @@ td .business-brief .driver-list span { font-size: 11px; }
 .approval-details { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 10px; }
 .approval-details summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 700; padding: 4px 0; }
 .approval-details summary:hover { color: var(--text, #fff); }
+
+/* ── Approval review feed (reference design): summary block, expandable
+      rationale/risk/source rows, quiet secondary actions, decision dock. ── */
+.swipe-hint { display: none; font-size: 12px; text-align: center; margin: 2px 0 10px; }
+.feed-card { display: grid; gap: 10px; }
+.feed-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.feed-age { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.feed-age.stale { color: var(--amber); }
+.feed-card h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.next-chip { display: none; }
+.feed-card.is-next .next-chip { display: inline-block; justify-self: start; font-size: 10px;
+  font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #7fb4ff;
+  border: 1px solid #33507a; border-radius: 999px; padding: 2px 9px; }
+.conf-row { display: flex; gap: 8px; align-items: baseline; }
+.conf-row strong { font-size: 22px; color: var(--green, #4cd58c); }
+.conf-row span { color: var(--muted); font-size: 13px; }
+.conf-bar { height: 8px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.conf-bar i { display: block; height: 100%; border-radius: 999px; background: var(--green, #4cd58c); }
+.feed-levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
+.feed-level { display: grid; gap: 3px; padding: 0 10px; border-left: 1px solid var(--line); min-width: 0; }
+.feed-level:first-child { border-left: none; padding-left: 0; }
+.feed-level span { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.feed-level strong { font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
+.rr-chip { font-style: normal; justify-self: start; font-size: 11px; font-weight: 800; color: var(--green, #4cd58c); border: 1px solid #2a5c41; border-radius: 999px; padding: 1px 8px; }
+.feed-row { border-bottom: 1px solid var(--line); }
+.feed-row summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 11px 0; }
+.feed-row summary::-webkit-details-marker { display: none; }
+.feed-row summary::after { content: "›"; color: var(--muted); font-size: 20px; transition: transform .15s ease; }
+.feed-row[open] summary::after { transform: rotate(90deg); }
+.feed-row summary strong { display: block; font-size: 14px; }
+.feed-row summary span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.feed-row-body { padding: 2px 0 12px; display: grid; gap: 10px; }
+.feed-quiet { display: flex; justify-content: space-between; padding-top: 2px; }
+.linklike { background: none; border: none; padding: 8px 4px; width: auto; color: var(--muted); font-size: 13px; font-weight: 700; cursor: pointer; }
+.linklike:first-child { color: #7fb4ff; }
+.approval-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+  background: rgba(11, 14, 20, .96); backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line); padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+  display: grid; gap: 8px; }
+.dock-context { text-align: center; color: var(--muted); font-size: 12px; }
+.dock-context strong { color: var(--text, #fff); }
+.approval-dock .paper { width: 100%; min-height: 46px; font-weight: 800; }
+.dock-row { display: grid; grid-template-columns: 1fr 1fr 52px; gap: 8px; }
+.dock-row button { min-height: 42px; background: transparent; font-weight: 700; }
+.dock-approve { border: 1px solid #2a5c41; color: var(--green, #4cd58c); }
+.dock-reject { border: 1px solid #6b2f3a; color: #ff6b81; }
+.dock-more { border: 1px solid var(--line); color: var(--muted); font-size: 18px; }
+.dock-menu { display: grid; gap: 8px; }
+.dock-menu[hidden] { display: none; }   /* author display beats the hidden attr otherwise */
+.dock-menu button { min-height: 40px; background: var(--panel-2); border: 1px solid var(--line); }
 /* Phone-friendly tap targets for the approval decision buttons: at least 44px
    tall with breathing room so Reject is not crammed against Approve. */
 .approval-actions button { min-height: 44px; padding: 10px 14px; font-size: 14px; flex: 1 1 auto; }
@@ -400,8 +451,15 @@ td .business-brief .driver-list span { font-size: 11px; }
 
 @media (max-width: 980px) {
   .oil-insight, .business-grid, .catalyst-grid, .provider-grid, .form-row, .approval-grid { grid-template-columns: 1fr; }
-  .approval-head { display: grid; }
-  .approval-score { text-align: left; }
+
+  /* Phone review-feed mode: the pinned dock is the decision surface, the
+     in-card desktop buttons hide, the next card peeks under the dock, and
+     content gets bottom clearance so the last card scrolls above the dock.
+     Must stay AFTER the base .approval-* styles — cascade order wins. */
+  .swipe-hint { display: block; }
+  .desktop-actions { display: none; }
+  .approval-queue { padding-bottom: 190px; }
+  .feed-level strong { font-size: 13px; }
   .audit-row { grid-template-columns: 1fr; }
   .business-filter { max-width: none; }
 }
@@ -722,3 +780,7 @@ td .business-brief .driver-list span { font-size: 11px; }
 .notif-field { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
 .notif-field input, .notif-field select { padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
 .notif-field-group { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+@media (min-width: 981px) {
+  .approval-dock { display: none; }
+}
