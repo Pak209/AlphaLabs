@@ -410,3 +410,30 @@ def test_llms_txt_serves_agent_storefront(tmp_path: Path, monkeypatch):
     lower = text.lower()
     for fragment in FORBIDDEN_FRAGMENTS:
         assert fragment not in lower
+
+
+# ─── funnel-leak regressions (found in live public traffic) ──────────────────
+
+def test_mcp_accepts_query_param_key(tmp_path: Path, monkeypatch):
+    """Smithery's gateway forwards keys as ?api_key= — 194 real failed
+    attempts before this was accepted. Header still wins when both exist."""
+    client, _ = client_with_key(tmp_path, monkeypatch)
+    msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+           "params": {"name": "alphalabs_calibration_report", "arguments": {}}}
+    denied = client.post("/mcp", json=msg)
+    assert denied.json()["error"]["data"]["http_status"] == 401
+    ok = client.post("/mcp?api_key=sk-test-123", json=msg)
+    assert "result" in ok.json()
+    ok2 = client.post("/mcp?apiKey=sk-test-123", json=msg)
+    assert "result" in ok2.json()
+
+
+def test_discovery_and_crawler_surfaces(tmp_path: Path, monkeypatch):
+    client, _ = client_with_key(tmp_path, monkeypatch)
+    card = client.get("/.well-known/mcp/server-card.json")
+    assert card.status_code == 200
+    assert card.json()["endpoint"].endswith("/mcp")
+    assert "robots" not in client.get("/robots.txt").text  # serves rules, not 404
+    assert client.get("/robots.txt").status_code == 200
+    assert client.get("/sitemap.xml").status_code == 200
+    assert client.get("/pricing", follow_redirects=False).status_code == 307
