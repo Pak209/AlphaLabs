@@ -1123,15 +1123,6 @@ function approvalField(label, value) {
 // long the idea has been waiting (relative) plus the absolute timestamp. Items
 // older than the stale threshold get a .stale flag so an old idea is obvious on
 // the phone before it is approved.
-function approvalFreshness(createdAt) {
-  if (!createdAt) return "";
-  const ageMin = minutesSince(createdAt);
-  const stale = ageMin !== null && ageMin >= 120;
-  const cls = stale ? "approval-fresh stale" : "approval-fresh";
-  const flag = stale ? " · stale" : "";
-  return `<div class="${cls}">Created ${timeAgo(createdAt)} · ${formatTime(createdAt)}${flag}</div>`;
-}
-
 function minutesSince(value) {
   if (!value) return null;
   const date = new Date(value);
