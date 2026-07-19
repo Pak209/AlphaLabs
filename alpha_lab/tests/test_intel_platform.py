@@ -437,3 +437,53 @@ def test_discovery_and_crawler_surfaces(tmp_path: Path, monkeypatch):
     assert client.get("/robots.txt").status_code == 200
     assert client.get("/sitemap.xml").status_code == 200
     assert client.get("/pricing", follow_redirects=False).status_code == 307
+
+
+# ─── beta key faucet: the self-serve funnel ──────────────────────────────────
+
+def test_faucet_issues_working_bounded_keys(tmp_path: Path, monkeypatch):
+    client, store = client_with_key(tmp_path, monkeypatch)
+
+    res = client.post("/v1/keys/beta", json={"email": "Agent@Example.com"})
+    assert res.status_code == 200
+    body = res.json()
+    key = body["key"]
+    assert key.startswith("sk-intel-") and body["call_allowance"] == 100
+
+    # the key works immediately
+    ok = client.get("/v1/calibration", headers={"Authorization": f"Bearer {key}"})
+    assert ok.status_code == 200
+
+    # one key per normalized email (case-insensitive)
+    dup = client.post("/v1/keys/beta", json={"email": "agent@example.com"})
+    assert dup.status_code == 409
+
+    # garbage email rejected
+    assert client.post("/v1/keys/beta", json={"email": "not-an-email"}).status_code == 422
+    assert client.post("/v1/keys/beta", json={}).status_code == 422
+
+
+def test_faucet_global_cap_fails_closed(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("INTEL_BETA_KEY_CAP", "1")
+    client, _ = client_with_key(tmp_path, monkeypatch)
+    assert client.post("/v1/keys/beta", json={"email": "a@example.com"}).status_code == 200
+    full = client.post("/v1/keys/beta", json={"email": "b@example.com"})
+    assert full.status_code == 503
+    assert "full" in full.json()["detail"]
+
+
+def test_beta_allowance_exhaustion_points_to_x402(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("INTEL_BETA_CALL_ALLOWANCE", "2")
+    client, store = client_with_key(tmp_path, monkeypatch)
+    key = client.post("/v1/keys/beta", json={"email": "cap@example.com"}).json()["key"]
+    headers = {"Authorization": f"Bearer {key}"}
+
+    assert client.get("/v1/calibration", headers=headers).status_code == 200
+    assert client.get("/v1/calibration", headers=headers).status_code == 200
+    spent = client.get("/v1/calibration", headers=headers)
+    assert spent.status_code == 402
+    assert "x402" in spent.json()["detail"]
+
+    # seed (non-faucet) keys are never allowance-limited
+    assert client.get("/v1/calibration",
+                      headers={"Authorization": "Bearer sk-test-123"}).status_code == 200
