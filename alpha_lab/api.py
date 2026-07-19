@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .catalysts import get_catalyst_radar, import_catalysts_payload
 from .market_data import get_bitcoin_market, get_business_profiles, get_liquidity_flows, get_oil_market, get_trending_stocks
 from .notifications import ALERT_LEVELS, NotificationCenter, clamp_limit, public_vapid_key
+from .access_auth import identity_from_headers
 from .service import AlphaLabService
 from .routers.ops import build_ops_router
 
@@ -55,7 +56,20 @@ def create_app(service: AlphaLabService | None = None) -> FastAPI:
         if token and request.method not in ("GET", "HEAD", "OPTIONS"):
             provided = request.headers.get("Authorization", "")
             expected = f"Bearer {token}"
-            if not (provided and hmac.compare_digest(provided, expected)):
+            authorized = bool(provided and hmac.compare_digest(provided, expected))
+            if not authorized:
+                # Second accepted credential: a CRYPTOGRAPHICALLY VERIFIED
+                # Cloudflare Access identity (see alpha_lab.access_auth). This
+                # is what lets the operator approve from a phone that has never
+                # been given the shared token — Access already proved who they
+                # are at the edge. Header presence alone is never enough: the
+                # JWT signature, audience, issuer, and expiry are all checked,
+                # so a forged header from the tailnet does not pass.
+                identity = identity_from_headers(request.headers)
+                if identity:
+                    request.state.operator_identity = identity
+                    authorized = True
+            if not authorized:
                 return JSONResponse(status_code=401, content={"detail": "Unauthorized: missing or invalid API token."})
         return await call_next(request)
 
