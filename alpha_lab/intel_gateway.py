@@ -324,6 +324,7 @@ class Gateway:
         if self.store.has_payment(nonce):
             return None, "payment authorization already used (replay)"
         accepted = payload.get("accepted") or {}
+        payload = intel_x402.inject_bazaar_extension(payload, product)
         verdict = self.facilitator.verify(payload, accepted)
         if verdict.get("_facilitator_error"):
             return None, verdict["_facilitator_error"]
