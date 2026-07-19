@@ -85,6 +85,7 @@ th { color: var(--muted); font-size: 12px; position: sticky; top: 0; background:
   .grid, .overview-grid, .paper-grid { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(3, 1fr); }
   .topbar { align-items: flex-start; flex-direction: column; }
+
 }
 
 
@@ -400,8 +401,26 @@ td .business-brief .driver-list span { font-size: 11px; }
 
 @media (max-width: 980px) {
   .oil-insight, .business-grid, .catalyst-grid, .provider-grid, .form-row, .approval-grid { grid-template-columns: 1fr; }
-  .approval-head { display: grid; }
-  .approval-score { text-align: left; }
+
+  /* Approval cards, phone layout: decision + buttons inside ONE screen.
+     Confidence becomes a slim right-aligned stack so the title keeps its
+     width; the three levels become compact label-value LINES (stacked
+     boxes ate ~270px); actions form a thumb-reachable 2-column grid with
+     the primary action full-width on top. This block must stay AFTER the
+     base .approval-* styles — equal specificity, cascade order wins. */
+  .approval-head { display: grid; grid-template-columns: 1fr 64px; align-items: start; gap: 8px; }
+  .approval-head h3 { font-size: 15px; }
+  .approval-score { text-align: right; display: grid; gap: 0; }
+  .approval-score span { font-size: 9px; }
+  .approval-score strong { font-size: 18px; }
+  .approval-levels { gap: 4px; }
+  .approval-level { flex: 1 1 100%; min-width: 0; display: flex; gap: 8px;
+                    align-items: baseline; padding: 5px 10px; }
+  .approval-level span { flex-shrink: 0; font-size: 10px; }
+  .approval-level strong { font-size: 12px; font-weight: 500; line-height: 1.25; }
+  .approval-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .approval-actions .paper { grid-column: 1 / -1; }
+  .approval-actions button { width: 100%; }
   .audit-row { grid-template-columns: 1fr; }
   .business-filter { max-width: none; }
 }
