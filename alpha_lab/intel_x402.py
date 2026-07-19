@@ -213,7 +213,10 @@ class FacilitatorClient:
 
     def _rpc(self, endpoint: str, payload: dict[str, Any],
              requirements: dict[str, Any]) -> dict[str, Any]:
-        body = {"x402Version": X402_VERSION, "paymentPayload": payload,
+        # The RPC envelope's version follows the payload's protocol (a v2
+        # payload in a v1 envelope settles, but indexing reads the envelope).
+        body = {"x402Version": payload.get("x402Version", X402_VERSION),
+                "paymentPayload": payload,
                 "paymentRequirements": requirements}
         try:
             return self._post(endpoint, body)
@@ -385,3 +388,15 @@ def local_payment_checks_v2(payload: dict[str, Any], product: str) -> Optional[s
     if not authorization.get("nonce"):
         return "missing authorization nonce"
     return None
+
+
+def inject_bazaar_extension(payload: dict[str, Any], product: str) -> dict[str, Any]:
+    """Ensure the PaymentPayload forwarded to the facilitator carries OUR
+    bazaar declaration. Per specs/extensions/bazaar.md ('when a facilitator
+    receives a PaymentPayload containing the bazaar extension...'), indexing
+    reads the PAYLOAD — clients are supposed to echo the challenge's
+    extensions, but the server is the source of truth for its own catalog
+    entry, so we inject rather than depend on client behavior."""
+    extensions = dict(payload.get("extensions") or {})
+    extensions["bazaar"] = bazaar_extension(product)
+    return {**payload, "extensions": extensions}

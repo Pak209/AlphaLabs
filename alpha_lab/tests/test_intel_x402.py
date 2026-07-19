@@ -408,3 +408,24 @@ def test_v1_lane_completely_unchanged_beside_v2(tmp_path, monkeypatch):
     assert res.status_code == 200
     assert "X-PAYMENT-RESPONSE" in res.headers                  # v1 response header
     assert "PAYMENT-RESPONSE" not in res.headers
+
+
+def test_facilitator_receives_bazaar_extension_in_v2_payload(tmp_path, monkeypatch):
+    """Indexing reads the PaymentPayload the facilitator receives — the server
+    injects its own declaration so discovery never depends on the client."""
+    client, _ = sandbox_client(tmp_path, monkeypatch)
+    seen = {}
+
+    def _post(self, endpoint, body):
+        seen[endpoint] = body
+        if endpoint == "verify":
+            return {"isValid": True, "payer": PAYER}
+        return {"success": True, "transaction": "0xtx", "network": "eip155:84532", "payer": PAYER}
+
+    monkeypatch.setattr(intel_x402.FacilitatorClient, "_post", _post)
+    res = client.get("/v1/catalysts", headers={"PAYMENT-SIGNATURE": payment_signature_v2(nonce="0xbz")})
+    assert res.status_code == 200
+    for endpoint in ("verify", "settle"):
+        payload = seen[endpoint]["paymentPayload"]
+        assert "bazaar" in payload.get("extensions", {}), endpoint
+        assert payload["extensions"]["bazaar"]["info"]["input"]["method"] == "GET"
