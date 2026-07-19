@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AlphaLab" />
 
-    <link rel="stylesheet" href="/static/styles.css?v=51" />
+    <link rel="stylesheet" href="/static/styles.css?v=52" />
   </head>
   <body>
     <div class="app-shell">
@@ -318,12 +318,29 @@
           <section class="panel approval-panel">
             <div class="panel-head">
               <div>
-                <h2>Approval Dashboard</h2>
+                <h2>Approval Dashboard <span id="approval-position" class="badge" hidden></span></h2>
                 <p class="muted">Review LLM-assisted trade ideas before they can reach Alpaca paper execution. Approval does not place an order.</p>
               </div>
               <button id="refresh-approvals" class="secondary">Refresh Queue</button>
             </div>
+            <div class="swipe-hint muted">Scroll for next approval</div>
             <div id="approval-queue" class="approval-queue"></div>
+            <!-- Decision dock: pinned on phones, acts on the card currently in
+                 view (tracked by IntersectionObserver). Desktop keeps in-card
+                 buttons and never shows this. -->
+            <div id="approval-dock" class="approval-dock" hidden>
+              <div class="dock-context"><strong id="dock-ticker"></strong> · Paper only</div>
+              <button id="dock-paper" class="paper">Approve + Paper Trade</button>
+              <div class="dock-row">
+                <button id="dock-approve" class="dock-approve">Approve Only</button>
+                <button id="dock-reject" class="dock-reject">Reject</button>
+                <button id="dock-more" class="dock-more" aria-label="More actions">···</button>
+              </div>
+              <div id="dock-menu" class="dock-menu" hidden>
+                <button id="dock-refresh">Refresh Levels</button>
+                <button id="dock-expire">Expire</button>
+              </div>
+            </div>
           </section>
         </section>
 
@@ -480,7 +497,7 @@
       </main>
     </div>
     <div id="toast" class="toast"></div>
-    <script src="/static/app.js?v=55"></script>
+    <script src="/static/app.js?v=56"></script>
     <script>
       // Register the service worker (served from root so its scope is "/").
       if ("serviceWorker" in navigator) {

@@ -921,6 +921,7 @@ function renderApprovalQueue() {
     return;
   }
   target.innerHTML = state.approvalQueue.map(approvalCard).join("");
+  initApprovalFeed();
 }
 
 function approvalSummaryHtml() {
@@ -939,66 +940,180 @@ function approvalCard(item) {
   const explanation = item.trade_explanation?.explanation || {};
   const refs = explanation.source_refs || item.trade_explanation?.source_refs || [];
   const risks = Array.isArray(explanation.risk_factors) ? explanation.risk_factors : [explanation.risk_factors].filter(Boolean);
+  const confidence = Number(explanation.confidence_score ?? item.confidence ?? 0);
+  const pct = Math.round(Math.max(0, Math.min(1, confidence)) * 100);
+  const rr = String(explanation.suggested_take_profit || "").match(/(\d+(?:\.\d+)?):1/);
+  const rationale = [
+    approvalField("Thesis", explanation.thesis_summary || item.thesis),
+    approvalField("Catalyst", explanation.catalyst || item.catalyst),
+    approvalField("Why It Matters", explanation.why_this_matters),
+    approvalField("Market Context", explanation.market_context),
+  ].join("");
   return `
-    <article class="approval-card" data-idea-id="${item.idea_id}">
-      <div class="approval-head">
-        <div>
-          <div class="stock-head">
-            <strong>${item.ticker}</strong>
-            <span class="${item.bias}">${item.bias}</span>
-            <span class="badge">${item.status || item.idea_status || "needs_review"}</span>
-            <span class="badge">${explanation.time_horizon || item.timeframe || "timeframe n/a"}</span>
-          </div>
-          <h3>${explanation.setup_type || "LLM-assisted setup"}</h3>
-          ${approvalFreshness(item.created_at)}
+    <article class="approval-card feed-card" data-idea-id="${item.idea_id}" data-ticker="${item.ticker}">
+      <span class="next-chip">Next approval</span>
+      <div class="feed-head">
+        <div class="stock-head">
+          <strong>${item.ticker}</strong>
+          <span class="${item.bias}">${item.bias}</span>
+          <span class="badge">${explanation.time_horizon || item.timeframe || "n/a"}</span>
         </div>
-        <div class="approval-score">
-          <span>Confidence</span>
-          <strong>${Number(explanation.confidence_score ?? item.confidence ?? 0).toFixed(2)}</strong>
-        </div>
+        ${approvalAgeChip(item.created_at)}
+      </div>
+      <h3>${explanation.setup_type || "LLM-assisted setup"}</h3>
+
+      <div class="conf-row"><strong>${pct}%</strong><span>Confidence</span></div>
+      <div class="conf-bar"><i style="width:${pct}%"></i></div>
+
+      <div class="feed-levels">
+        ${feedLevel("Entry", explanation.suggested_entry_zone)}
+        ${feedLevel("Stop", explanation.suggested_stop_loss)}
+        ${feedLevel("Target", explanation.suggested_take_profit, rr ? `${rr[1]} R:R` : "")}
       </div>
 
-      <div class="approval-levels">
-        ${approvalLevel("Entry", explanation.suggested_entry_zone)}
-        ${approvalLevel("Stop", explanation.suggested_stop_loss)}
-        ${approvalLevel("Target", explanation.suggested_take_profit)}
+      <details class="feed-row">
+        <summary><div><strong>Trade rationale</strong>
+          <span>${firstWords(explanation.thesis_summary || item.thesis, 10)}</span></div></summary>
+        <div class="feed-row-body approval-grid">${rationale}</div>
+      </details>
+      <details class="feed-row">
+        <summary><div><strong>Risks &amp; invalidation</strong>
+          <span>${firstWords(explanation.invalidation_level_or_condition, 10)}</span></div></summary>
+        <div class="feed-row-body">
+          ${approvalField("Invalidation", explanation.invalidation_level_or_condition)}
+          <div class="driver-list">${risks.map((risk) => `<span>${risk}</span>`).join("") || "<span>No risk factors returned.</span>"}</div>
+        </div>
+      </details>
+      <details class="feed-row">
+        <summary><div><strong>Sources &amp; evidence</strong>
+          <span>${refs.length} signal${refs.length === 1 ? "" : "s"} · created ${timeAgo(item.created_at)}</span></div></summary>
+        <div class="feed-row-body"><div class="source-list">${sourceRefsHtml(refs)}</div></div>
+      </details>
+
+      <div class="feed-quiet">
+        <button class="linklike" onclick="refreshTradeLevels(${item.idea_id}, '${item.ticker}')">⟳ Refresh Levels</button>
+        <button class="linklike" onclick="approvalAction(${item.idea_id}, 'expire')">Expire</button>
       </div>
 
-      <div class="approval-actions actions">
+      <div class="approval-actions actions desktop-actions">
         <button class="paper" onclick="approveAndPaperTrade(${item.idea_id}, '${item.ticker}')">Approve + Paper Trade</button>
         <button onclick="approvalAction(${item.idea_id}, 'approve')">Approve only</button>
         <button class="danger" onclick="approvalAction(${item.idea_id}, 'reject')">Reject</button>
-        <button class="secondary" onclick="refreshTradeLevels(${item.idea_id}, '${item.ticker}')">Refresh Levels</button>
-        <button class="secondary" onclick="approvalAction(${item.idea_id}, 'expire')">Expire</button>
       </div>
-
-      <details class="approval-details">
-        <summary>Full rationale, risks &amp; sources</summary>
-        <div class="approval-grid">
-          ${approvalField("Thesis", explanation.thesis_summary || item.thesis)}
-          ${approvalField("Catalyst", explanation.catalyst || item.catalyst)}
-          ${approvalField("Why It Matters", explanation.why_this_matters)}
-          ${approvalField("Market Context", explanation.market_context)}
-          ${approvalField("Invalidation", explanation.invalidation_level_or_condition)}
-        </div>
-        <div class="approval-section">
-          <strong>Risk Factors</strong>
-          <div class="driver-list">${risks.map((risk) => `<span>${risk}</span>`).join("") || "<span>No risk factors returned.</span>"}</div>
-        </div>
-        <div class="approval-section">
-          <strong>Source Refs</strong>
-          <div class="source-list">${sourceRefsHtml(refs)}</div>
-        </div>
-      </details>
     </article>
   `;
 }
 
-// Compact decision strip: the three numbers a sign-off actually needs, kept
-// above the buttons so a phone shows ticker -> levels -> actions in one screen.
-function approvalLevel(label, value) {
-  return `<div class="approval-level"><span>${label}</span><strong>${value || "n/a"}</strong></div>`;
+// Compact right-aligned freshness chip ("STALE · 26d" / "2 hr ago").
+function approvalAgeChip(createdAt) {
+  const ageMin = minutesSince(createdAt);
+  if (ageMin === null) return "";
+  if (ageMin >= 120) {
+    const days = Math.round(ageMin / 1440);
+    const label = days >= 1 ? `STALE · ${days}d` : "STALE";
+    return `<span class="feed-age stale">${label}</span>`;
+  }
+  return `<span class="feed-age">${timeAgo(createdAt)}</span>`;
 }
+
+// Level cell showing just the number(s) — the parenthetical context lives in
+// the rationale row, per the review-feed design.
+function feedLevel(label, value, chip) {
+  const compact = String(value || "n/a").split(" (")[0];
+  return `<div class="feed-level"><span>${label}</span><strong>${compact}</strong>${chip ? `<em class="rr-chip">${chip}</em>` : ""}</div>`;
+}
+
+function firstWords(text, n) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "—";
+  return words.slice(0, n).join(" ") + (words.length > n ? "…" : "");
+}
+
+// ─── decision dock: acts on the card currently in view ──────────────────────
+// Current-card tracking uses getBoundingClientRect on a passive scroll
+// listener, NOT IntersectionObserver: viewport-rooted observers proved
+// unreliable in embedded/iframe contexts during verification, and a rect
+// check is deterministic in every browser the dashboard runs in.
+let currentApproval = { id: null, ticker: "" };
+let feedCards = [];
+let feedScrollScheduled = false;
+
+function initApprovalFeed() {
+  const dock = document.querySelector("#approval-dock");
+  if (!dock) return;
+  feedCards = Array.from(document.querySelectorAll("#approval-queue .approval-card"));
+  const isPhone = window.matchMedia("(max-width: 980px)").matches;
+  dock.hidden = !feedCards.length || !isPhone;
+  const position = document.querySelector("#approval-position");
+  if (position) {
+    position.hidden = !feedCards.length;
+    position.textContent = feedCards.length ? `1 of ${feedCards.length}` : "";
+  }
+  if (feedCards.length) updateCurrentApprovalFromScroll();
+}
+
+function updateCurrentApprovalFromScroll() {
+  if (!feedCards.length) return;
+  // The card whose top has crossed the upper-third marker (and is nearest
+  // to it) is the one the operator is reading.
+  const marker = window.innerHeight * 0.35;
+  let current = feedCards[0];
+  for (const card of feedCards) {
+    if (card.getBoundingClientRect().top <= marker) current = card;
+    else break;
+  }
+  if (Number(current.dataset.ideaId) !== currentApproval.id) {
+    setCurrentApproval(current, feedCards);
+  }
+}
+
+function scheduleFeedUpdate() {
+  if (feedScrollScheduled) return;
+  feedScrollScheduled = true;
+  requestAnimationFrame(() => {
+    feedScrollScheduled = false;
+    updateCurrentApprovalFromScroll();
+  });
+}
+// Scroll events on window AND capture-phase on document (covers inner
+// scrollers). Verification found environments where programmatic scrolling
+// fires NO scroll event at all, so a low-cost interval guarantees the dock
+// tracks the viewport regardless of event plumbing — one rect comparison
+// per tick, only while approval cards exist.
+window.addEventListener("scroll", scheduleFeedUpdate, { passive: true });
+document.addEventListener("scroll", scheduleFeedUpdate, { capture: true, passive: true });
+setInterval(() => { if (feedCards.length) updateCurrentApprovalFromScroll(); }, 400);
+
+function setCurrentApproval(card, cards) {
+  currentApproval = { id: Number(card.dataset.ideaId), ticker: card.dataset.ticker || "" };
+  const dockTicker = document.querySelector("#dock-ticker");
+  if (dockTicker) dockTicker.textContent = currentApproval.ticker;
+  const index = cards.indexOf(card);
+  const position = document.querySelector("#approval-position");
+  if (position && index >= 0) position.textContent = `${index + 1} of ${cards.length}`;
+  cards.forEach((c, i) => c.classList.toggle("is-next", i === index + 1));
+  const menu = document.querySelector("#dock-menu");
+  if (menu) menu.hidden = true;
+}
+
+function wireApprovalDock() {
+  const act = (fn) => () => { if (currentApproval.id) fn(); };
+  document.querySelector("#dock-paper")?.addEventListener("click",
+    act(() => approveAndPaperTrade(currentApproval.id, currentApproval.ticker)));
+  document.querySelector("#dock-approve")?.addEventListener("click",
+    act(() => approvalAction(currentApproval.id, "approve")));
+  document.querySelector("#dock-reject")?.addEventListener("click",
+    act(() => approvalAction(currentApproval.id, "reject")));
+  document.querySelector("#dock-refresh")?.addEventListener("click",
+    act(() => refreshTradeLevels(currentApproval.id, currentApproval.ticker)));
+  document.querySelector("#dock-expire")?.addEventListener("click",
+    act(() => approvalAction(currentApproval.id, "expire")));
+  document.querySelector("#dock-more")?.addEventListener("click", () => {
+    const menu = document.querySelector("#dock-menu");
+    if (menu) menu.hidden = !menu.hidden;
+  });
+}
+wireApprovalDock();
 
 function approvalField(label, value) {
   return `<div class="approval-field"><span>${label}</span><p>${value || "n/a"}</p></div>`;
